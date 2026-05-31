@@ -153,7 +153,19 @@
   --shadow: rgba(26,18,8,0.18);
 }
 * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-body { font-family:'Cairo',sans-serif; background:var(--ink); color:var(--cream); min-height:100vh; overflow-x:hidden; }
+/* ★ استجابة فورية للنقر على كل العناصر القابلة للضغط — يشيل الـ 300ms tap delay على الموبايل */
+button, a, [onclick], .stat-card, .level-card, .user-logout, .lb-dot,
+input[type="button"], input[type="submit"], label, select {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+button, [onclick] { cursor: pointer; }
+/* ★ feedback بصري فوري عند الضغط */
+button:active, [onclick]:active, .level-card:active, .stat-card:active {
+  transform: scale(0.97);
+  transition: transform 0.05s ease;
+}
+body { font-family:'Cairo',sans-serif; background:var(--ink); color:var(--cream); min-height:100vh; overflow-x:hidden; touch-action: manipulation; }
 
 /* ===== STARS ===== */
 .stars-bg { position:fixed; inset:0; pointer-events:none; z-index:0;
@@ -1450,9 +1462,16 @@ window._loginInProgress = false;
     _passUnsub = onValue(ref(db, 'users/' + _key + '/bypassAuth'), (snap) => {
       if (!snap.exists()) return;
       const bpa = snap.val();
-      // ★ لو changedAt بعد وقت دخولنا بأكتر من ثانية → الباسورد اتغيّر
       if (bpa && bpa.changedAt && bpa.changedAt > _startTime + 1000) {
         console.warn('🔐 الباسورد اتغيّر — جاري الخروج');
+        // ★ امسح الباسورد من localStorage عشان fast path ما يدخّلش بالقديمة
+        try {
+          const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
+          if (_lu[username]) {
+            delete _lu[username].password;
+            localStorage.setItem('nour_users', JSON.stringify(_lu));
+          }
+        } catch(e) {}
         if (typeof doLogout === 'function') doLogout();
         else { try { localStorage.removeItem('nour_last_user'); } catch(e) {} location.reload(); }
       }
@@ -1595,36 +1614,45 @@ window._loginInProgress = false;
     if (_userDataUnsub) { try { _userDataUnsub(); } catch(e) {} _userDataUnsub = null; }
     if (!username) return;
     const key = dataKey(username);
-    // ★ نسمع users/key/data عشان نعرف أول ما النقاط تتحدّث
+    // ★ نسمع users/key/data — أي تغيير في النقاط من أي جهاز يظهر هنا
     _userDataUnsub = onValue(ref(db, 'users/' + key + '/data'), (snap) => {
       if (!snap.exists()) return;
       const d = snap.val();
       if (!window.currentUser || window.currentUser.username !== username) return;
+      // ★ لو في تصفير حديث (آخر 10 ثواني) → ما نرجّعش النقاط
+      if (window._recentReset && Date.now() - window._recentReset < 10000) return;
       let changed = false;
-      if ((d.totalScore||0) > (window.currentUser.totalScore||0)) {
-        window.currentUser.totalScore = d.totalScore; changed = true;
-      }
-      if ((d.totalHasanat||0) > (window.currentUser.totalHasanat||0)) {
-        window.currentUser.totalHasanat = d.totalHasanat; changed = true;
-      }
-      if ((d.totalGames||0) > (window.currentUser.totalGames||0)) {
-        window.currentUser.totalGames = d.totalGames; changed = true;
+      const cu = window.currentUser;
+      // خذ أحدث قيمة من Firebase (updatedAt هو المرجع)
+      const fbTs = d.updatedAt || 0;
+      const localTs = cu.updatedAt || 0;
+      if (fbTs > localTs) {
+        // Firebase أحدث → خذ قيمه
+        if (d.totalScore   !== cu.totalScore)   { cu.totalScore   = d.totalScore   || 0; changed = true; }
+        if (d.totalHasanat !== cu.totalHasanat) { cu.totalHasanat = d.totalHasanat || 0; changed = true; }
+        if (d.totalGames   !== cu.totalGames)   { cu.totalGames   = d.totalGames   || 0; changed = true; }
+        if (changed) cu.updatedAt = fbTs;
+      } else {
+        // Firebase أقدم → خذ الأعلى فقط (بيانات Firebase ناقصة)
+        if ((d.totalScore||0)   > (cu.totalScore||0))   { cu.totalScore   = d.totalScore;   changed = true; }
+        if ((d.totalHasanat||0) > (cu.totalHasanat||0)) { cu.totalHasanat = d.totalHasanat; changed = true; }
+        if ((d.totalGames||0)   > (cu.totalGames||0))   { cu.totalGames   = d.totalGames;   changed = true; }
       }
       if (changed) {
-        currentUser = window.currentUser;
+        currentUser = cu; window.currentUser = cu;
         try {
           const _lu = JSON.parse(localStorage.getItem('nour_users')||'{}');
           if (_lu[username]) {
-            _lu[username].totalScore   = window.currentUser.totalScore;
-            _lu[username].totalHasanat = window.currentUser.totalHasanat;
-            _lu[username].totalGames   = window.currentUser.totalGames;
+            _lu[username].totalScore   = cu.totalScore;
+            _lu[username].totalHasanat = cu.totalHasanat;
+            _lu[username].totalGames   = cu.totalGames;
             localStorage.setItem('nour_users', JSON.stringify(_lu));
           }
         } catch(e) {}
         if (typeof updateHomeStats === 'function') updateHomeStats();
       }
     }, () => {});
-    // ★ كمان نسمع الاسم من leaderboard
+    // ★ نسمع الاسم من leaderboard
     onValue(ref(db, 'leaderboard/' + key + '/name'), (snap) => {
       if (!snap.exists()) return;
       const fbName = snap.val();
@@ -2188,11 +2216,16 @@ window._loginInProgress = false;
       const newScore   = Math.max((cur && cur.totalScore)   || 0, data.totalScore   || 0);
       const newHasanat = Math.max((cur && cur.totalHasanat) || 0, data.totalHasanat || 0);
       const newGames   = Math.max((cur && cur.totalGames)   || 0, data.totalGames   || 0);
+      // ★ الاسم: لو موجود في Firebase خذه (يمنع التضارب بين الأجهزة)
+      //   بس لو data.name أطول أو أحسن (مش إيميل) خذه
+      const curName  = (cur && cur.name && !cur.name.includes('@')) ? cur.name : null;
+      const dataName = (data.name && !data.name.includes('@')) ? data.name : null;
+      const newName  = curName || dataName || username;
       // لو مفيش تغيير → ارجع cur بدون كتابة
-      if (cur && cur.totalScore === newScore && cur.totalHasanat === newHasanat && cur.totalGames === newGames
-          && cur.name === (data.name || cur.name)) return cur;
+      if (cur && cur.totalScore === newScore && cur.totalHasanat === newHasanat
+          && cur.totalGames === newGames && cur.name === newName) return cur;
       return {
-        name:             data.name || (cur && cur.name) || username,
+        name:             newName,
         totalHasanat:     newHasanat,
         totalScore:       newScore,
         totalGames:       newGames,
@@ -2240,8 +2273,13 @@ window._loginInProgress = false;
   window.fbResetLeaderboard = function(username, isGuest) {
     if (!username) return;
     const key = isGuest ? makeKey(username, true) : dataKey(username);
+    // ★ حافظ على الاسم الحقيقي — ما نرجّعهوش للإيميل بعد التصفير
+    const _realName = (window.currentUser && window.currentUser.name && !window.currentUser.name.includes('@'))
+      ? window.currentUser.name
+      : (() => { try { return localStorage.getItem('nour_name_' + username); } catch(e) { return null; } })()
+      || username;
     set(ref(db, LB_PATH + key), {
-      name: username,
+      name: _realName,
       totalScore: 0, totalGames: 0, totalHasanat: 0,
       isGuest: isGuest || false,
       updatedAt: Date.now(),
@@ -3332,6 +3370,12 @@ let currentUser = null;
     const data  = users[lastUser];
     if (!data) { localStorage.removeItem('nour_last_user'); return; }
 
+    // ★ لو الحساب المحفوظ ضيف → امسحه وأظهر شاشة الدخول
+    if (data.isGuest || lastUser.startsWith('ضيف_') || !lastUser.includes('@')) {
+      localStorage.removeItem('nour_last_user');
+      return;
+    }
+
     window._pendingAutoLogin = { username: lastUser, data };
 
     // أخفي شاشة الدخول فوراً وأظهر الرئيسية
@@ -3470,52 +3514,57 @@ function doLogin() {
     loginSuccess(user, merged);
   };
 
-  // ── Firebase هو المصدر الحقيقي للباسورد دايماً ────────────────
-  // الـ localStorage بيستخدم بس عشان يسرّع الدخول لو الباسورد ماتغيرش
+  // ── دخول فوري لو الباسورد صح محلياً، Firebase يتحقق في الخلفية ──
   if (typeof window.fbLogin === 'function') {
-    // لو الباسورد صح محلياً → ادخّل بعد 400ms لو Firebase ما ردّش
     const _localOk = localData && localData.password === btoa(pass);
-    let _done = false;
-    const _localFallback = _localOk ? setTimeout(() => {
-      if (_done) return;
-      _done = true;
-      _enter(localData);
-    }, 400) : null;
 
-    window.fbLogin(user, pass,
-      () => {
-        clearTimeout(_localFallback);
-        if (_done) {
-          // دخل محلياً بالفعل — حدّث البيانات في الخلفية
+    if (_localOk) {
+      // ★ ادخّل محلياً فوراً
+      _enter(localData);
+      // ★ Firebase في الخلفية: لو bypassAuth موجود وغير متطابق → طرد فوري
+      window.fbLogin(user, pass,
+        () => {
           if (typeof window.fbGetAccount === 'function') {
             window.fbGetAccount(user, (_, fb) => {
               if (!fb || !window.currentUser || window.currentUser.username !== user) return;
-              let ch = false;
               const cu = window.currentUser;
-              if ((fb.totalScore||0) > (cu.totalScore||0))   { cu.totalScore   = fb.totalScore;   ch = true; }
-              if ((fb.totalHasanat||0) > (cu.totalHasanat||0)) { cu.totalHasanat = fb.totalHasanat; ch = true; }
-              if ((fb.totalGames||0) > (cu.totalGames||0))   { cu.totalGames   = fb.totalGames;   ch = true; }
-              if (fb.name && !fb.name.includes('@') && fb.name !== cu.name) { cu.name = fb.name; ch = true; }
-              if (ch) { currentUser = cu; window.currentUser = cu; if (typeof updateHomeStats === 'function') updateHomeStats(); }
+              let ch = false;
+              const fbTs = fb.updatedAt || 0;
+              const cuTs = cu.updatedAt || 0;
+              if (fbTs > cuTs) {
+                cu.totalScore=fb.totalScore||0; cu.totalHasanat=fb.totalHasanat||0;
+                cu.totalGames=fb.totalGames||0; cu.updatedAt=fbTs; ch=true;
+              } else {
+                if((fb.totalScore||0)>(cu.totalScore||0)){cu.totalScore=fb.totalScore;ch=true;}
+                if((fb.totalHasanat||0)>(cu.totalHasanat||0)){cu.totalHasanat=fb.totalHasanat;ch=true;}
+                if((fb.totalGames||0)>(cu.totalGames||0)){cu.totalGames=fb.totalGames;ch=true;}
+              }
+              if(fb.name&&!fb.name.includes('@')&&fb.name!==cu.name){cu.name=fb.name;ch=true;}
+              if(ch){currentUser=cu;window.currentUser=cu;if(typeof updateHomeStats==='function')updateHomeStats();}
             });
           }
-          return;
+        },
+        (errMsg) => {
+          // Firebase رفض → الباسورد اتغيّر → logout
+          if(errMsg&&errMsg.includes('خطأ')&&window.currentUser&&window.currentUser.username===user)
+            doLogout();
         }
-        _done = true;
+      );
+      return;
+    }
+
+    // مفيش بيانات محلية أو الباسورد غلط → Firebase إجباري مع ... بعد 300ms
+    const _lt = setTimeout(() => showLoginErr('...'), 300);
+    window.fbLogin(user, pass,
+      () => {
+        clearTimeout(_lt);
         if (typeof window._markAuthDone === 'function') window._markAuthDone();
         if (typeof window.fbGetAccount === 'function') {
           window.fbGetAccount(user, (_, fbData) => _enter(fbData));
         } else { _enter(null); }
       },
       (errMsg) => {
-        clearTimeout(_localFallback);
-        if (_done) {
-          // دخل محلياً لكن Firebase رفض → الباسورد اتغيّر → logout
-          if (errMsg && errMsg.includes('خطأ') && window.currentUser && window.currentUser.username === user)
-            doLogout();
-          return;
-        }
-        _done = true;
+        clearTimeout(_lt);
         window._loginInProgress = false;
         showLoginErr(errMsg || 'كلمة المرور خطأ — حاول مجدداً');
       }
@@ -4156,6 +4205,20 @@ function _finishLogin(username, isGuest) {
       }
     };
     setTimeout(_doSync, 800); // خلي Firebase Auth يكمل أولاً
+
+    // ★★ اكتب في لوحة الشرف فوراً عند الدخول لو عندك نقاط ★★
+    setTimeout(() => {
+      const cu = window.currentUser;
+      if (cu && !cu.isGuest && (cu.totalScore || 0) > 0 && typeof window.fbSaveUser === 'function') {
+        window.fbSaveUser(cu.username, {
+          name: cu.name || cu.username,
+          totalScore:   cu.totalScore   || 0,
+          totalHasanat: cu.totalHasanat || 0,
+          totalGames:   cu.totalGames   || 0,
+          isGuest: false,
+        });
+      }
+    }, 1500);
 
     // ★ مستمع لحظي للغلطات — الإضافات تظهر على كل الأجهزة فورًا
     const _watchMist = () => {
