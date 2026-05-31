@@ -4340,18 +4340,29 @@ function doLogout() {
   window._lbAllList = null;
   try { localStorage.removeItem('nour_last_user'); } catch(e) {}
   if (typeof window.fbLogout === 'function') window.fbLogout();
-  // ★ أظهر loginScreen مباشرة بدون reload
+  // ★ reload بعد الخروج — أبسط وأضمن حل لمشكلة الـ state
+  setTimeout(() => { location.reload(); }, 100);
+  return;
+  // ★ أظهر loginScreen مباشرة — reset كامل لكل الـ styles
   const _lsOut = document.getElementById('loginScreen');
   if (_lsOut) {
     _lsOut.style.cssText = '';
+    _lsOut.style.display = '';
+    _lsOut.style.visibility = '';
+    _lsOut.style.pointerEvents = '';
+    _lsOut.style.opacity = '';
     _lsOut.classList.remove('hide');
   }
-  // ★ reset الزرارين عشان يشتغلوا من أول وجديد
+  // ★ reset الزرارين والفورم
   const _lb = document.querySelector('#loginForm .login-btn');
   const _rb = document.querySelector('#registerForm .login-btn');
-  if (_lb) { _lb.disabled = false; _lb.textContent = 'دخول ✨'; }
-  if (_rb) { _rb.disabled = false; _rb.textContent = 'إنشاء الحساب 🌟'; }
-  setTimeout(() => { window._isLoggingOut = false; }, 1500);
+  if (_lb) { _lb.disabled = false; _lb.style.pointerEvents = ''; _lb.textContent = 'دخول ✨'; }
+  if (_rb) { _rb.disabled = false; _rb.style.pointerEvents = ''; _rb.textContent = 'إنشاء الحساب 🌟'; }
+  const _lf = document.getElementById('loginForm');
+  if (_lf) { _lf.style.pointerEvents = ''; _lf.style.display = 'block'; }
+  const _lp = document.querySelector('.login-panel');
+  if (_lp) { _lp.style.pointerEvents = ''; }
+  setTimeout(() => { window._isLoggingOut = false; }, 500);
 }
 
 function saveCurrentUser() {
