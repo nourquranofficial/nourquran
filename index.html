@@ -414,6 +414,7 @@ body:has(#loginScreen:not(.hide)) { overflow:hidden; }
 .scroll-hint { text-align:center; font-size:11px; color:rgba(201,151,58,0.5); margin-bottom:14px; }
 .scroll-hint-arrow { display:inline-block; animation:bounce-x 1s ease-in-out infinite; }
 @keyframes bounce-x { 0%,100%{transform:translateX(0);}50%{transform:translateX(4px);} }
+@keyframes _syncSpin { from{transform:rotate(0deg);}to{transform:rotate(360deg);} }
 
 /* ===== QUESTION COUNT SLIDER ===== */
 .qcount-wrap { margin-bottom:18px; }
@@ -3495,18 +3496,16 @@ function doLogin() {
             localStorage.setItem('nour_users', JSON.stringify(_lu));
             localStorage.setItem('nour_last_user', user);
           } catch(e) {}
-          // ★ استنى الـ keyboard يقفل
-          setTimeout(() => {
-            _restoreBtn();
-            const _lsEl = document.getElementById('loginScreen');
-            if (_lsEl) { _lsEl.classList.add('hide'); }
-            window.scrollTo(0, 0);
-            // ★ إعادة تعيين _fromAuth عشان loginSuccess ما يتعطلش
-            if (window.currentUser && window.currentUser.username !== user) {
-              window.currentUser = null; currentUser = null;
-            }
-            loginSuccess(realName || user, merged);
-          }, 400);
+          // ★ دخول فوري — بدون أي تأخير
+          _restoreBtn();
+          const _lsEl = document.getElementById('loginScreen');
+          if (_lsEl) { _lsEl.classList.add('hide'); }
+          window.scrollTo(0, 0);
+          // ★ إعادة تعيين _fromAuth عشان loginSuccess ما يتعطلش
+          if (window.currentUser && window.currentUser.username !== user) {
+            window.currentUser = null; currentUser = null;
+          }
+          loginSuccess(realName || user, merged);
           // ★ كتابة فورية عشان الاسم يظهر في الـ leaderboard
           if (typeof window.fbSaveUser === 'function') {
             window.fbSaveUser(user, Object.assign({}, merged, {isGuest: !!(merged && merged.isGuest)}));
@@ -3712,9 +3711,22 @@ function _sendForgotEmail() {
   // ★ لو الإيميل فاضي خذه من currentUser
   if (!email && window.currentUser && window.currentUser.username)
     email = window.currentUser.username;
-  if (!email || !email.includes('@')) { errEl.textContent = '⚠️ اكتب إيميلك الصح'; errEl.style.color='#FF9E9E'; return; }
-  if (!newPass || newPass.length < 4) { errEl.textContent = '⚠️ الباسورد لازم ٤ أحرف على الأقل'; errEl.style.color='#FF9E9E'; return; }
-  if (newPass !== confPass) { errEl.textContent = '⚠️ الباسورد مش متطابق'; errEl.style.color='#FF9E9E'; return; }
+  const _restoreFpBtn = () => {
+    const _b = document.getElementById('forgotPassBtn');
+    if (_b) { _b.disabled=false; _b.style.transform=''; _b.style.opacity=''; _b.innerHTML='تأكيد وحفظ الباسورد ✅'; }
+  };
+  if (!email || !email.includes('@')) { errEl.textContent = '⚠️ اكتب إيميلك الصح'; errEl.style.color='#FF9E9E'; _restoreFpBtn(); return; }
+  if (!newPass || newPass.length < 4) { errEl.textContent = '⚠️ الباسورد لازم ٤ أحرف على الأقل'; errEl.style.color='#FF9E9E'; _restoreFpBtn(); return; }
+  if (newPass !== confPass) { errEl.textContent = '⚠️ الباسورد مش متطابق'; errEl.style.color='#FF9E9E'; _restoreFpBtn(); return; }
+
+  // ★ Loading animation على الزرار
+  const _fpBtn = document.getElementById('forgotPassBtn');
+  if (_fpBtn) {
+    _fpBtn.disabled = true;
+    _fpBtn.style.transform = 'scale(0.97)';
+    _fpBtn.style.opacity = '0.85';
+    _fpBtn.innerHTML = '<span style="display:inline-flex;align-items:center;gap:8px;"><svg width="16" height="16" viewBox="0 0 16 16" style="animation:_syncSpin .7s linear infinite;flex-shrink:0;"><circle cx="8" cy="8" r="6" fill="none" stroke="rgba(26,18,8,0.35)" stroke-width="2"/><path d="M8 2 A6 6 0 0 1 14 8" fill="none" stroke="#1a1208" stroke-width="2" stroke-linecap="round"/></svg>جاري الحفظ...</span>';
+  }
 
   // ★ ١. احفظ محلياً فوراً
   try {
@@ -9893,7 +9905,7 @@ function _stopPolling() {
     <div id="forgotPassErr" style="color:#FF9E9E;font-size:13px;text-align:center;min-height:18px;margin-bottom:10px;"></div>
     <div style="display:flex;gap:8px;">
       <button onclick="closeForgotPassModal()" style="flex:1;padding:12px;background:rgba(255,254,249,0.05);border:1px solid rgba(201,151,58,0.2);border-radius:12px;color:rgba(245,217,139,0.6);font-family:'Cairo',sans-serif;font-size:14px;font-weight:600;cursor:pointer;">إلغاء</button>
-      <button onclick="_sendForgotEmail()" ontouchend="event.preventDefault();_sendForgotEmail();" style="flex:2;padding:12px;background:linear-gradient(135deg,#C9973A,#E8C46A);border:none;border-radius:12px;font-family:'Cairo',sans-serif;font-size:14px;font-weight:900;color:#1a1208;cursor:pointer;touch-action:manipulation;">تأكيد وحفظ الباسورد ✅</button>
+      <button id="forgotPassBtn" onclick="_sendForgotEmail()" ontouchend="event.preventDefault();_sendForgotEmail();" style="flex:2;padding:12px;background:linear-gradient(135deg,#C9973A,#E8C46A);background-size:200% 100%;border:none;border-radius:12px;font-family:'Cairo',sans-serif;font-size:14px;font-weight:900;color:#1a1208;cursor:pointer;touch-action:manipulation;transition:all .25s;position:relative;overflow:hidden;">تأكيد وحفظ الباسورد ✅</button>
     </div>
   </div>
 </div>
