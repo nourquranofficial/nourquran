@@ -1937,15 +1937,14 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         email: realUsername,
       };
       const doIt = () => {
-        if (window._loggedOut) return; // لو خرج أثناء التحميل
+        if (window._loggedOut) return;
         if (typeof window.loginSuccess === 'function') {
           window.loginSuccess(realUsername, merged);
-          if (merged.totalScore > fbScore || merged.totalHasanat > fbHasanat || merged.totalGames > fbGames) {
-            try {
-              if (typeof window.fbSaveFullUserData === 'function') window.fbSaveFullUserData(realUsername, merged);
-              if (typeof window.fbSaveUser === 'function' && merged.totalScore > 0) window.fbSaveUser(realUsername, Object.assign({}, merged, {isGuest: false}));
-            } catch(e) {}
-          }
+          // ★ كتابة فورية في الـ leaderboard حتى لو النقاط صفر عشان الاسم يظهر
+          try {
+            if (typeof window.fbSaveFullUserData === 'function') window.fbSaveFullUserData(realUsername, merged);
+            if (typeof window.fbSaveUser === 'function') window.fbSaveUser(realUsername, Object.assign({}, merged, {isGuest: false}));
+          } catch(e) {}
         } else {
           setTimeout(doIt, 30);
         }
@@ -2319,7 +2318,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     // ترتيب تنازلي حسب الحسنات (مع احترام مفتاح ظهور الضيوف)
     const _showGuests = window.SHOW_GUESTS_IN_RANKING !== false;
     const list = Object.entries(data || {})
-      .filter(([k, d]) => d && (d.totalHasanat || 0) > 0 &&
+      .filter(([k, d]) => d && d.name &&
         (_showGuests || (!d.isGuest && !String(k).startsWith('guest__'))))
       .sort(([, a], [, b]) => (b.totalHasanat || 0) - (a.totalHasanat || 0));
 
@@ -3399,7 +3398,8 @@ function doLogin() {
             window.scrollTo(0, 0);
             loginSuccess(realName || user, merged);
           }, 400);
-          if (typeof window.fbSaveUser === 'function' && merged.totalScore > 0) {
+          // ★ كتابة فورية عشان الاسم يظهر في الـ leaderboard
+          if (typeof window.fbSaveUser === 'function') {
             window.fbSaveUser(user, Object.assign({}, merged, {isGuest: false}));
           }
         };
@@ -3870,42 +3870,38 @@ function _saveNameEdit() {
   const inp = document.getElementById('_nameEditInput');
   if (!inp) return;
   const n = inp.value.trim();
-  if (!n || n.length < 2 || n.length > 30) { showToast('⚠️ الاسم لازم بين ٢ و٣٠ حرف'); return; }
+  if (!n || n.length < 2 || n.length > 30) { showToast('\u26a0\ufe0f الاسم لازم بين ٢ و٣٠ حرف'); return; }
   if (!currentUser || !currentUser.username) return;
 
+  const _email = currentUser.username;
+
+  // ★ ١. حدّث الـ UI فوراً (قبل أي حاجة)
   currentUser.name = n;
   window.currentUser = currentUser;
+  const el = document.getElementById('userNameDisplay');
+  if (el) el.innerHTML = '\ud83d\udc64 ' + n + ' <button onclick=\"event.stopPropagation();editDisplayName()\" title=\"غيّر اسمك للعرض\" style=\"background:none;border:none;font-size:13px;cursor:pointer;color:var(--gold);opacity:.7;padding:2px 4px;touch-action:manipulation;-webkit-tap-highlight-color:transparent;\">\u270f\ufe0f</button>';
+  _cancelNameEdit();
+  showToast('\u2705 تم تغيير الاسم: ' + n);
 
-  // ★ حفظ في localStorage بثلاث طرق عشان نضمن الاسم ما يضيعش
-  const _email = currentUser.username;
+  // ★ ٢. حفظ في localStorage
   try {
-    // ١. مفتاح مستقل للاسم مع timestamp
     localStorage.setItem('nour_name_' + _email, n);
     localStorage.setItem('nour_name_ts_' + _email, String(Date.now()));
-    // ٢. داخل nour_users
     const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
     if (!_lu[_email]) _lu[_email] = {};
     _lu[_email].name = n;
     localStorage.setItem('nour_users', JSON.stringify(_lu));
   } catch(e) {}
-
   saveCurrentUser();
 
-  // ★ حفظ في Firebase (مسار مستقل + leaderboard)
+  // ★ ٣. حفظ في Firebase في الخلفية
   if (typeof window.fbSaveName === 'function') window.fbSaveName(_email, n);
-  if (typeof window.fbSaveUser === 'function') {
-    window.fbSaveUser(_email, {
-      name: n, isGuest: false,
-      totalHasanat: currentUser.totalHasanat||0,
-      totalScore: currentUser.totalScore||0,
-      totalGames: currentUser.totalGames||0,
-    });
-  }
-
-  const el = document.getElementById('userNameDisplay');
-  if (el) el.innerHTML = '👤 ' + n + ' <button onclick="event.stopPropagation();editDisplayName()" title="غيّر اسمك للعرض" style="background:none;border:none;font-size:13px;cursor:pointer;color:var(--gold);opacity:.7;padding:2px 4px;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">✏️</button>';
-  _cancelNameEdit(); // أغلق الـ popup بعد الحفظ
-  showToast('✅ تم تغيير الاسم: ' + n);
+  if (typeof window.fbSaveUser === 'function') window.fbSaveUser(_email, {
+    name: n, isGuest: false,
+    totalHasanat: currentUser.totalHasanat||0,
+    totalScore: currentUser.totalScore||0,
+    totalGames: currentUser.totalGames||0,
+  });
   if (typeof renderLeaderboard === 'function') renderLeaderboard();
 }
 function _cancelNameEdit() {
@@ -8463,8 +8459,9 @@ function multiCreateRoom() {
             showToast('✅ تم إنشاء الغرفة — شارك الكود: ' + code, 4000);
           })
           .catch((err) => {
-            console.error('createRoom error:', err.code, err.message);
-            showToast('⚠️ خطأ في إنشاء الغرفة: ' + (err.message || 'تأكد من الاتصال'));
+            console.warn('createRoom retry:', err.code);
+            // ★ إعادة محاولة تلقائية بعد ثانية بدل عرض خطأ
+            setTimeout(_doCreate, 1000);
           });
       };
       if (typeof window.fbSignInAnon === 'function') {
@@ -8671,6 +8668,10 @@ function _startMultiGame() {
   multiState._roundId = Date.now();
   window._lockedScores = {};
   window._prevMultiScores = {};
+  // ★ مسح finalScores من الجولة السابقة عشان النتايج الجديدة تكون صح
+  if (typeof window.fbMulti !== 'undefined' && multiState.roomCode) {
+    window.fbMulti.updateRoom(multiState.roomCode, { finalScores: null }).catch(() => {});
+  }
   // ★ تصفير scores في الـ cache المحلي عشان multiLiveScores تبدأ من ٠ فوراً
   if (window._multiRoomCache && window._multiRoomCache.players) {
     Object.keys(window._multiRoomCache.players).forEach(function(k) {
@@ -8904,9 +8905,11 @@ function _multiAnswer(chosen, correct, q, clickedBtn, e) {
     saveMistake(q, chosen);
   }
   if (isRight) {
-    // ★ نقاط الغرفة: ١٠ أساس + bonus سرعة (كل ثانية متبقية = نقطة)
-    const speedBonus = Math.max(0, Math.round(timeLeft * 1.0));
-    const earned = 10 + speedBonus;
+    // ★ نقاط الغرفة: أساس × مضاعف المستوى + bonus السرعة
+    const _lvlDef = (typeof LEVEL_DEFS !== 'undefined' && LEVEL_DEFS[multiState.level]) || null;
+    const _mult   = _lvlDef ? (_lvlDef.hasanatMult || 1) : 1;
+    const speedBonus = Math.max(0, Math.round(timeLeft * _mult));
+    const earned = Math.round(10 * _mult) + speedBonus;
     multiState.myScore += earned;
     multiState._peakScore = Math.max(multiState._peakScore || 0, multiState.myScore);
     _bankMultiPoints(earned);
@@ -9167,42 +9170,44 @@ function _showMultiResults() {
   const _bestName  = (p) => (p && (p.finalName || p.name)) || 'لاعب';
 
   // ★ دالة عرض النتايج من Firebase — نفس النتيجة لكل اللاعبين
+  // ★ النظام النهائي للنتايج — finalScores المصدر الوحيد
   const _showUnified = () => {
     const _resEl = document.getElementById('multiResults');
     if (!_resEl || _resEl.style.display === 'none') return;
-    const _doRender = (roomData, finalScoresData) => {
+
+    const _doRender = (fs, playersData) => {
       if (!_resEl || _resEl.style.display === 'none') return;
-      const pl = roomData && roomData.players ? { ...roomData.players } : {};
-      // ★ دمج finalScores (الأضمن — مش بيتمسح بالـ reset)
-      if (finalScoresData) {
-        Object.entries(finalScoresData).forEach(([fpk, fd]) => {
-          if (!fd) return;
-          pl[fpk] = pl[fpk] || {};
-          pl[fpk].name       = pl[fpk].name || fd.name || 'لاعب';
-          pl[fpk].finalScore = Math.max(pl[fpk].finalScore || 0, fd.score || 0);
-          pl[fpk].score      = Math.max(pl[fpk].score || 0, fd.score || 0);
-        });
-      }
-      // أضف/حدّث نقطة اللاعب الحالي بالأعلى
+      const pl = {};
+      // ١. finalScores أولاً (الأدق)
+      if (fs) Object.entries(fs).forEach(([fpk, fd]) => {
+        if (fd) pl[fpk] = { score: fd.score || 0, name: fd.name || 'لاعب' };
+      });
+      // ٢. لاعبين مش كتبوا في finalScores — خذ من players
+      if (playersData) Object.entries(playersData).forEach(([fpk, pd]) => {
+        if (!pd || pl[fpk]) return;
+        if ((pd.score || 0) > 0)
+          pl[fpk] = { score: pd.score, name: pd.name || 'لاعب' };
+      });
+      // ٣. ضمان نقطة اللاعب الحالي صح دايماً
       if (pk) {
-        pl[pk] = pl[pk] || {};
-        pl[pk].finalScore = Math.max(_bestScore(pl[pk]), _trueScore);
-        pl[pk].score      = pl[pk].finalScore;
-        pl[pk].name       = pl[pk].name || multiState.playerName ||
-          (currentUser && (currentUser.name || currentUser.username)) || 'أنت';
+        pl[pk] = {
+          score: Math.max((pl[pk] && pl[pk].score) || 0, _trueScore),
+          name:  (pl[pk] && pl[pk].name) || multiState.playerName ||
+                 (currentUser && (currentUser.name || currentUser.username)) || 'أنت',
+        };
       }
       const sorted = Object.entries(pl)
-        .filter(([, p]) => p != null)
-        .sort((a, b) => _bestScore(b[1]) - _bestScore(a[1]));
+        .filter(([, p]) => p && p.name)
+        .sort((a, b) => (b[1].score || 0) - (a[1].score || 0));
       if (!sorted.length) return;
-      const winner    = sorted[0];
-      const isWinner  = winner[0] === pk;
+      const winner   = sorted[0];
+      const isWinner = winner[0] === pk;
       const tEl = document.getElementById('multiTrophyEmoji');
       const nEl = document.getElementById('multiWinnerName');
       const mEl = document.getElementById('multiWinnerMsg');
       const sEl = document.getElementById('multiFinalScores');
       if (tEl) tEl.textContent = isWinner ? '🏆' : '🎉';
-      if (nEl) nEl.textContent = _bestName(winner[1]);
+      if (nEl) nEl.textContent = winner[1].name;
       if (mEl) mEl.textContent = isWinner
         ? 'أنت الفائز! بارك الله فيك 🌟'
         : 'الفائز بالتحدي — بالتوفيق المرة الجاية!';
@@ -9212,27 +9217,26 @@ function _showMultiResults() {
           margin-bottom:6px;border:1px solid rgba(201,151,58,${i===0?'0.3':'0.1'});">
           <span style="font-size:22px;">${medals[i]||'👤'}</span>
           <span style="flex:1;font-size:15px;color:${i===0?'var(--gold)':'var(--cream)'};">
-            ${_bestName(p)}${u===pk?' (أنت)':''}</span>
+            ${p.name}${u===pk?' (أنت)':''}</span>
           <span style="font-size:18px;font-weight:900;color:var(--emerald-light);">
-            ${toArabicNum(_bestScore(p))}</span>
+            ${toArabicNum(p.score)}</span>
         </div>`
       ).join('');
     };
+
     if (typeof window.fbMulti !== 'undefined' && multiState.roomCode) {
-      // جيب finalScores + room معاً
-      window.fbMulti.getFinalScores(multiState.roomCode, (finalScores) => {
+      window.fbMulti.getFinalScores(multiState.roomCode, (fs) => {
         window.fbMulti.getRoom(multiState.roomCode, (room) => {
-          _doRender(room, finalScores);
+          _doRender(fs, room && room.players);
         });
       });
     } else {
-      _doRender(window._multiRoomCache, null);
+      _doRender(null, window._multiRoomCache && window._multiRoomCache.players);
     }
   };
 
-  // جيب النتايج من Firebase بعد 600ms (وقت كافي للكتابات توصل)
-  setTimeout(_showUnified, 600);
-  // وتاني مرة بعد 3 ثواني للمتأخرين
+  // جيب النتايج بعد 800ms وبعد 3 ثواني للمتأخرين
+  setTimeout(_showUnified, 800);
   setTimeout(_showUnified, 3000);
 }
 
