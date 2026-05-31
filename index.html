@@ -3453,17 +3453,23 @@ function doLogin() {
   if (!user || !pass) { showLoginErr('أدخل الإيميل وكلمة المرور'); return; }
   if (!user.includes('@')) { showLoginErr('أدخل إيميلك (example@gmail.com)'); return; }
 
-  // ★ منع الضغط المزدوج + إظهار loading
+  // ★ منع الضغط المزدوج فقط (بدون تغيير النص)
   const _loginBtn = document.querySelector('#loginForm .login-btn');
-  if (_loginBtn) { _loginBtn.disabled = true; _loginBtn.textContent = '⏳ جاري الدخول...'; }
+  if (_loginBtn) { _loginBtn.disabled = true; }
   showLoginErr('');
+
+  // ★ Safety timeout: لو الدخول علّق أكتر من 10 ثواني — ارجع الزرار
+  const _loginTimeout = setTimeout(() => {
+    if (_loginBtn) { _loginBtn.disabled = false; }
+  }, 10000);
 
   // ── دخول فوري: أخفي اللوجين فوراً لو الباسورد صح محلياً ──
   const users = getUsers();
   const localData = users[user];
 
   const _restoreBtn = () => {
-    if (_loginBtn) { _loginBtn.disabled = false; _loginBtn.textContent = 'دخول ✨'; }
+    clearTimeout(_loginTimeout);
+    if (_loginBtn) { _loginBtn.disabled = false; }
   };
 
   // ★ دايماً نمر على fbLogin عشان يتحقق من bypassAuth (المصدر الحقيقي للباسورد)
@@ -3581,10 +3587,12 @@ function doRegister() {
   if (pass.length < 4) { showLoginErr('كلمة المرور يجب أن تكون ٤ أحرف على الأقل'); return; }
   if (pass !== pass2) { showLoginErr('كلمتا المرور غير متطابقتين'); return; }
 
-  // ★ إظهار loading
-  showLoginErr('⏳ جاري إنشاء الحساب...');
+  // ★ منع الضغط المزدوج فقط
+  showLoginErr('');
   const _regBtn = document.querySelector('#registerForm .login-btn');
-  if (_regBtn) { _regBtn.disabled = true; _regBtn.textContent = '⏳ جاري...'; }
+  if (_regBtn) { _regBtn.disabled = true; }
+  // ★ Safety timeout
+  const _regTimeout = setTimeout(() => { if (_regBtn) { _regBtn.disabled = false; } }, 10000);
 
   currentUser = null;
   window.currentUser = null;
@@ -3621,6 +3629,7 @@ function doRegister() {
       if (typeof window.fbSaveUser === 'function') window.fbSaveUser(email, Object.assign({}, defaultData, { isGuest: false, name: finalName }));
       if (typeof window._markAuthDone === 'function') window._markAuthDone();
       window._registering = false;
+      clearTimeout(_regTimeout);
       const _b = document.querySelector('#registerForm .login-btn');
       if (_b) { _b.disabled = false; _b.textContent = 'إنشاء الحساب 🌟'; }
       if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
@@ -3644,6 +3653,7 @@ function doRegister() {
   };
   const _onErr = (errMsg) => {
     window._registering = false;
+    clearTimeout(_regTimeout);
     showLoginErr(errMsg);
     const _b = document.querySelector('#registerForm .login-btn');
     if (_b) { _b.disabled = false; _b.textContent = 'إنشاء الحساب 🌟'; }
