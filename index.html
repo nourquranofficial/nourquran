@@ -1427,12 +1427,13 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
 
     const _writeBypass = () => Promise.race([
       set(ref(db, 'users/' + _key + '/bypassAuth'), {
-        email, passHash: _passHash, updatedAt: Date.now(), changedAt: Date.now(),
+        email, passHash: _passHash, passEnc: safe_btoa(newPass), updatedAt: Date.now(), changedAt: Date.now(),
       }),
       new Promise((_, rej) => setTimeout(() => rej('timeout'), 6000)),
     ]);
 
-    // ★ خطوة ١: لو في أي session (حتى anonymous) → اكتب مباشرة
+    // ★ خطوة ١: لو في أي session → اكتب bypass مباشرة
+    // (updatePassword يحتاج recent login — مش موثوق هنا، بنعتمد على bypassAuth للتزامن)
     if (auth.currentUser) {
       _writeBypass()
         .then(() => onSuccess('bypass'))
@@ -1458,6 +1459,11 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
           : Promise.reject('no-old');
 
         _tryOldPass
+          .then(() => {
+            // ★ دخل بالباسورد القديم — حدّث Firebase Auth بالجديد فوراً
+            return updatePassword(auth.currentUser, padPass(newPass))
+              .catch(() => {}); // لو فشل updatePassword نكمل على طول
+          })
           .then(() => _writeBypass())
           .then(() => onSuccess('firebase'))
           .catch(() => {
@@ -1658,37 +1664,47 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     _passUnsub = onValue(ref(db, 'users/' + key + '/bypassAuth'), (snap) => {
       if (!snap.exists()) return;
       const bpa = snap.val();
-      if (!bpa) return;
+      if (!bpa || !bpa.passEnc) return;
 
       const changedAt = bpa.changedAt || 0;
       const loginTime = window._loginTime || 0;
 
+      // ★ دالة تحديث الباسورد محلياً بدون logout
+      const _updateLocalPass = () => {
+        try {
+          const _newPassRaw = safe_atob(bpa.passEnc);
+          if (!_newPassRaw) return;
+          const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
+          if (!_lu[username]) _lu[username] = {};
+          _lu[username].password = safe_btoa(_newPassRaw);
+          localStorage.setItem('nour_users', JSON.stringify(_lu));
+          showToast('🔐 تم تحديث كلمة المرور على هذا الجهاز ✅');
+        } catch(e) {}
+      };
+
       // ★ طريقة ١: changedAt أحدث من وقت الدخول = باسورد اتغير على جهاز تاني
-      if (changedAt > loginTime + 5000) {
-        showToast('🔐 تم تغيير كلمة المرور — سجّل دخول مجدداً');
-        setTimeout(() => {
-          if (typeof doLogout === 'function') doLogout();
-        }, 2000);
+      // لازم changedAt موجود وأكبر من صفر عشان نتأكد إن في تغيير حقيقي
+      if (changedAt > 0 && loginTime > 0 && changedAt > loginTime + 5000) {
+        _updateLocalPass();
         return;
       }
 
       // ★ طريقة ٢: الباسورد المحفوظ محلياً مش متطابق مع Firebase (جهاز كان offline)
-      try {
-        const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
-        const _localPassRaw = _lu[username] && _lu[username].password
-          ? (() => { try { return safe_atob(_lu[username].password); } catch(e) { return null; } })()
-          : null;
-        if (_localPassRaw && bpa.passHash) {
-          const _localHash = safe_btoa(_localPassRaw + '__nr');
-          if (_localHash !== bpa.passHash) {
-            // ★ الباسورد المحلي مختلف عن Firebase — لازم يدخل بالباسورد الجديد
-            showToast('🔐 كلمة المرور تغيّرت — سجّل دخول مجدداً');
-            setTimeout(() => {
-              if (typeof doLogout === 'function') doLogout();
-            }, 2000);
+      // بس لو changedAt موجود — يعني الباسورد اتغير فعلاً في وقت ما
+      if (changedAt > 0) {
+        try {
+          const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
+          const _localPassRaw = _lu[username] && _lu[username].password
+            ? (() => { try { return safe_atob(_lu[username].password); } catch(e) { return null; } })()
+            : null;
+          if (_localPassRaw && bpa.passHash) {
+            const _localHash = safe_btoa(padPass(_localPassRaw));
+            if (_localHash !== bpa.passHash) {
+              _updateLocalPass();
+            }
           }
-        }
-      } catch(e) {}
+        } catch(e) {}
+      }
     });
   };
   window.fbUnwatchPassChange = function() {
@@ -2049,6 +2065,35 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         })(),
         email: realUsername,
       };
+      // ★ فحص الباسورد من bypassAuth — لو اتغير على جهاز تاني نطرده فوراً
+      const _checkPassThenLogin = () => {
+        tryGet('users/' + _dbKey + '/bypassAuth').then((bpa) => {
+          if (bpa && bpa.passHash && bpa.passEnc) {
+            // قارن مع الباسورد المحلي
+            const _lU2 = (() => { try { return JSON.parse(localStorage.getItem('nour_users') || '{}'); } catch(e) { return {}; } })();
+            const _localPassRaw = _lU2[realUsername] && _lU2[realUsername].password
+              ? (() => { try { return safe_atob(_lU2[realUsername].password); } catch(e) { return null; } })()
+              : null;
+            if (_localPassRaw) {
+              const _localHash = safe_btoa(padPass(_localPassRaw));
+              if (_localHash !== bpa.passHash) {
+                // ★ الباسورد اتغير على جهاز تاني — حدّث المحلي وكمّل الدخول
+                try {
+                  const _newPassRaw = safe_atob(bpa.passEnc);
+                  if (_newPassRaw) {
+                    const _lu3 = JSON.parse(localStorage.getItem('nour_users') || '{}');
+                    if (!_lu3[realUsername]) _lu3[realUsername] = {};
+                    _lu3[realUsername].password = safe_btoa(_newPassRaw);
+                    localStorage.setItem('nour_users', JSON.stringify(_lu3));
+                  }
+                } catch(e) {}
+              }
+            }
+          }
+          doIt();
+        }).catch(() => doIt());
+      };
+
       const doIt = () => {
         if (window._loggedOut) return;
         if (typeof window.loginSuccess === 'function') {
@@ -2062,7 +2107,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
           setTimeout(doIt, 30);
         }
       };
-      doIt();
+      _checkPassThenLogin();
     }).catch(() => {
       // Firebase مش متاح — خذ البيانات المحلية
       const _lU = (() => { try { return JSON.parse(localStorage.getItem('nour_users') || '{}'); } catch(e) { return {}; } })();
