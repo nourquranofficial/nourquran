@@ -3643,6 +3643,8 @@ function _sendForgotEmail() {
   const _newHash = btoa(newPass + '__nr');
   const _bypassRef = ref(db, 'users/' + _key2 + '/bypassAuth');
   const _changedAt = Date.now();
+  // ★ نحدّث _loginTime عشان الجهاز الحالي ما يتطردش بواسطة fbWatchPassChange
+  window._loginTime = _changedAt + 60000;
   const _doWrite = (attempt) => {
     set(_bypassRef, { email: email, passHash: _newHash, updatedAt: _changedAt, changedAt: _changedAt })
       .catch(() => { if (attempt < 5) setTimeout(() => _doWrite(attempt + 1), 600 * attempt); });
