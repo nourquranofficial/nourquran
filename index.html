@@ -646,6 +646,7 @@ body:has(#loginScreen:not(.hide)) { overflow:hidden; }
   border-radius:20px;
   background:linear-gradient(135deg, rgba(201,151,58,0.06) 0%, rgba(27,107,74,0.06) 100%);
   border:1px solid rgba(201,151,58,0.18);
+  min-height:80px;
 }
 .lb-podium-slide {
   display:flex; align-items:center; gap:16px;
@@ -2216,16 +2217,21 @@ window._loginInProgress = false;
       const newScore   = Math.max((cur && cur.totalScore)   || 0, data.totalScore   || 0);
       const newHasanat = Math.max((cur && cur.totalHasanat) || 0, data.totalHasanat || 0);
       const newGames   = Math.max((cur && cur.totalGames)   || 0, data.totalGames   || 0);
-      // ★ الاسم: لو موجود في Firebase خذه (يمنع التضارب بين الأجهزة)
-      //   بس لو data.name أطول أو أحسن (مش إيميل) خذه
-      const curName  = (cur && cur.name && !cur.name.includes('@')) ? cur.name : null;
-      const dataName = (data.name && !data.name.includes('@')) ? data.name : null;
-      const newName  = curName || dataName || username;
+      // ★ الاسم: نستخدم nameUpdatedAt timestamp — الأحدث يكسب
+      const curName       = (cur && cur.name && !cur.name.includes('@')) ? cur.name : null;
+      const dataName      = (data.name && !data.name.includes('@')) ? data.name : null;
+      const curNameTs     = (cur && cur.nameUpdatedAt) || 0;
+      const dataNameTs    = data.nameUpdatedAt || 0;
+      // لو data جاي مع nameUpdatedAt أحدث → خذه (تغيير اسم جديد)
+      // وإلا خذ الموجود في Firebase (يمنع التضارب)
+      const newName = (dataNameTs > curNameTs && dataName) ? dataName : (curName || dataName || username);
+      const newNameTs = Math.max(curNameTs, dataNameTs);
       // لو مفيش تغيير → ارجع cur بدون كتابة
       if (cur && cur.totalScore === newScore && cur.totalHasanat === newHasanat
           && cur.totalGames === newGames && cur.name === newName) return cur;
       return {
         name:             newName,
+        nameUpdatedAt:    newNameTs,
         totalHasanat:     newHasanat,
         totalScore:       newScore,
         totalGames:       newGames,
@@ -2767,6 +2773,7 @@ function _callWhenReady(fn, args) {
         <button class="review-nav-btn" style="margin-bottom:0;" onclick="showReviewScreen()">📖 مراجعة السور</button>
         <button class="mistakes-nav-btn" style="margin-bottom:0;" onclick="showMistakesScreen()">❌ الغلطات</button>
       </div>
+      <button onclick="goToLeaderboard()" style="background:linear-gradient(135deg,rgba(201,151,58,0.15),rgba(201,151,58,0.08));border:1px solid rgba(201,151,58,0.4);border-radius:14px;padding:12px;font-family:'Cairo',sans-serif;font-size:14px;font-weight:700;color:var(--gold);width:100%;cursor:pointer;touch-action:manipulation;">🏆 لوحة الشرف والترتيب العام</button>
 
     </div>
 
@@ -2781,7 +2788,8 @@ function _callWhenReady(fn, args) {
 
     <!-- streakDays/Dots still referenced by JS -->
     <div style="display:none;"><div id="streakDays"></div><div id="streakDots"></div></div>
-    <div class="lb-section">
+    <div class="lb-section" id="lbSection">
+      <div style="text-align:center;padding:10px 0 4px;font-size:15px;font-weight:700;color:rgba(201,151,58,0.9);font-family:'Cairo',sans-serif;">🏆 لوحة الشرف</div>
       <!-- المنصة المتحركة للمراكز الـ٣ -->
       <div class="lb-podium-wrap" id="lbPodiumWrap"></div>
       <div class="lb-dots" id="lbDots"></div>
@@ -4064,10 +4072,11 @@ function _saveNameEdit() {
   saveCurrentUser();
 
   // ★ حفظ في Firebase (مسار مستقل + leaderboard)
+  const _nameTs = Date.now();
   if (typeof window.fbSaveName === 'function') window.fbSaveName(_email, n);
   if (typeof window.fbSaveUser === 'function') {
     window.fbSaveUser(_email, {
-      name: n, isGuest: false,
+      name: n, nameUpdatedAt: _nameTs, isGuest: false,
       totalHasanat: currentUser.totalHasanat||0,
       totalScore: currentUser.totalScore||0,
       totalGames: currentUser.totalGames||0,
@@ -7970,8 +7979,21 @@ function updateGlobalRankChip() {
 window.updateGlobalRankChip = updateGlobalRankChip;
 
 function goToLeaderboard() {
-  const el = document.querySelector('.lb-section') || document.getElementById('lbPodiumWrap');
-  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  const el = document.getElementById('lbSection') || document.querySelector('.lb-section') || document.getElementById('lbPodiumWrap');
+  if (!el) return;
+  // حساب الـ offset من أعلى الصفحة
+  const rect = el.getBoundingClientRect();
+  const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+  const top = rect.top + scrollTop - 60; // 60px margin من فوق
+  window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+  // لو scrollTo مش اشتغل (بعض المتصفحات) — fallback
+  setTimeout(() => {
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, 100);
+  // flash بصري عشان المستخدم يشوف اللوحة
+  el.style.transition = 'box-shadow 0.3s ease';
+  el.style.boxShadow = '0 0 0 3px rgba(201,151,58,0.6)';
+  setTimeout(() => { el.style.boxShadow = ''; }, 1000);
 }
 
 // ★ إعادة مزامنة نقط الحساب من السحابة (يخلي كل الأجهزة موحّدة لما ترجع للتطبيق)
