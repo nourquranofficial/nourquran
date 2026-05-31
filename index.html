@@ -8981,9 +8981,15 @@ function _startMultiGame() {
   multiState._roundId = Date.now();
   window._lockedScores = {};
   window._prevMultiScores = {};
-  // ★ مسح finalScores من الجولة السابقة عشان النتايج الجديدة تكون صح
+  // ★ مسح finalScores بعد ثانيتين — عشان كل اللاعبين يشوفوا النتايج الصح الأول
   if (typeof window.fbMulti !== 'undefined' && multiState.roomCode) {
-    window.fbMulti.updateRoom(multiState.roomCode, { finalScores: null }).catch(() => {});
+    const _codeToReset = multiState.roomCode;
+    const _roundToReset = multiState._roundId;
+    setTimeout(() => {
+      if (multiState.roomCode === _codeToReset && multiState._roundId === _roundToReset) {
+        window.fbMulti.updateRoom(_codeToReset, { finalScores: null }).catch(() => {});
+      }
+    }, 2000);
   }
   // ★ تصفير scores في الـ cache المحلي عشان multiLiveScores تبدأ من ٠ فوراً
   if (window._multiRoomCache && window._multiRoomCache.players) {
@@ -9594,12 +9600,6 @@ function multiPlayAgain() {
     return;
   }
 
-  // ★ إخفاء النتايج القديمة فوراً لكل من ضغط الزرار
-  const _resEl = document.getElementById('multiResults');
-  if (_resEl) {
-    _resEl.innerHTML = '<div style="text-align:center;padding:40px 20px;color:rgba(245,217,139,0.5);font-family:Cairo,sans-serif;font-size:15px;">⏳ جاري تحضير الجولة الجديدة...</div>';
-  }
-
   // ★ أي لاعب يقدر يبدأ — الأول اللي بيدوس بيكتب على Firebase
   // الباقيين بيشوفوا phase=playing من الـ listener ويبدأوا تلقائي
   const btn = document.getElementById('multiPlayAgainBtn');
@@ -9638,9 +9638,12 @@ function multiPlayAgain() {
       questions: multiState.questions.map(compressQ),
       totalQ: multiState.totalQ,
     }).catch(() => {});
-    Object.keys(room.players || {}).forEach(pk => {
-      window.fbMulti.updatePlayer(multiState.roomCode, pk, { score: 0, answered: false, done: false, finalScore: 0, finalName: null }).catch(() => {});
-    });
+    // ★ نرست نقاط اللاعبين بعد ثانيتين — بعد ما كل اللاعبين يشوفوا النتايج
+    setTimeout(() => {
+      Object.keys(room.players || {}).forEach(pk => {
+        window.fbMulti.updatePlayer(multiState.roomCode, pk, { score: 0, answered: false, done: false, finalScore: 0, finalName: null }).catch(() => {});
+      });
+    }, 2000);
   }
 
   // المضيف يدخل اللعبة الجديدة فورًا
