@@ -3454,10 +3454,14 @@ function doLogin() {
   if (!user || !pass) { showLoginErr('أدخل الإيميل وكلمة المرور'); return; }
   if (!user.includes('@')) { showLoginErr('أدخل إيميلك (example@gmail.com)'); return; }
 
-  // ★ منع الضغط المزدوج + إظهار loading
+  // ★ منع الضغط المزدوج — أخفِ شاشة اللوجين فوراً
   const _loginBtn = document.querySelector('#loginForm .login-btn');
-  if (_loginBtn) { _loginBtn.disabled = true; _loginBtn.textContent = '⏳ جاري الدخول...'; }
+  if (_loginBtn) { _loginBtn.disabled = true; }
   showLoginErr('');
+  // ★ أخفِ شاشة الدخول فوراً بدون أي انتظار
+  const _lsImmediate = document.getElementById('loginScreen');
+  if (_lsImmediate) { _lsImmediate.classList.add('hide'); }
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
 
   // ── دخول فوري: أخفي اللوجين فوراً لو الباسورد صح محلياً ──
   const users = getUsers();
@@ -3537,7 +3541,8 @@ function doLogin() {
       (errMsg) => {
         _restoreBtn();
         currentUser = null; window.currentUser = null;
-        const _lsR = document.getElementById('loginScreen'); if(_lsR){_lsR.classList.remove('hide');_lsR.style.display='';_lsR.style.pointerEvents='';}
+        const _lsR = document.getElementById('loginScreen');
+        if(_lsR){ _lsR.classList.remove('hide'); _lsR.style.display=''; _lsR.style.pointerEvents=''; }
         // ★ Fallback محلي: بس لو Firebase مش متاح (مش لو رفض الباسورد)
         const _lFresh = getUsers()[user];
         const _fbReject = errMsg && (errMsg.includes('خاطئة') || errMsg.includes('denied') || errMsg.includes('wrong'));
