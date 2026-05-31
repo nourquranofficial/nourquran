@@ -1585,6 +1585,29 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     if (_dataUnsub) { _dataUnsub(); _dataUnsub = null; }
   };
 
+  // ★ مراقبة تغيير الباسورد — يفرض logout على كل الأجهزة
+  let _passUnsub = null;
+  window.fbWatchPassChange = function(username) {
+    if (_passUnsub) { _passUnsub(); _passUnsub = null; }
+    if (!username) return;
+    const key = dataKey(username);
+    _passUnsub = onValue(ref(db, 'users/' + key + '/bypassAuth/changedAt'), (snap) => {
+      if (!snap.exists()) return;
+      const changedAt = snap.val();
+      const loginTime = window._loginTime || 0;
+      // لو الباسورد اتغير بعد ما دخلت → اطرد من كل الأجهزة
+      if (changedAt > loginTime + 5000) { // 5 ثواني margin
+        showToast('🔐 تم تغيير كلمة المرور — سجّل دخول مجدداً');
+        setTimeout(() => {
+          if (typeof doLogout === 'function') doLogout();
+        }, 2000);
+      }
+    });
+  };
+  window.fbUnwatchPassChange = function() {
+    if (_passUnsub) { _passUnsub(); _passUnsub = null; }
+  };
+
   // ★ اقرأ الاسم من localStorage بكل الطرق
   window._getStoredName = function(email) {
     if (!email) return null;
@@ -2273,19 +2296,33 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
 
   // ★ تنظيف تلقائي: مسح الضيوف من الداتا بيز كل ٣ أيام
   (function _cleanOldGuests() {
-    const _3days = 3 * 24 * 60 * 60 * 1000;
+    const _3days = 2 * 24 * 60 * 60 * 1000; // ★ يومين
     const _now   = Date.now();
+    // مسح من leaderboard
     get(ref(db, LB_PATH)).then(snap => {
       if (!snap.exists()) return;
-      const data = snap.val();
-      Object.entries(data).forEach(([key, entry]) => {
+      Object.entries(snap.val()).forEach(([key, entry]) => {
         if (!entry) return;
-        // ضيف قديم: isGuest=true أو key بيبدأ بـ guest__ + updatedAt أكتر من ٣ أيام
         const isGuest = entry.isGuest || String(key).startsWith('guest__');
         if (!isGuest) return;
         const lastSeen = entry.updatedAt || entry.lastPlay || 0;
         if (_now - lastSeen > _3days) {
           remove(ref(db, LB_PATH + key)).catch(() => {});
+        }
+      });
+    }).catch(() => {});
+
+    // ★ مسح من users أيضاً
+    get(ref(db, 'users/')).then(snap => {
+      if (!snap.exists()) return;
+      Object.entries(snap.val()).forEach(([key, entry]) => {
+        if (!entry) return;
+        const isGuest = String(key).startsWith('guest__') ||
+          (entry.bypassAuth && entry.bypassAuth.email && String(entry.bypassAuth.email).startsWith('guest'));
+        if (!isGuest) return;
+        const lastSeen = (entry.data && (entry.data.updatedAt || entry.data.lastPlay)) || 0;
+        if (_now - lastSeen > _3days) {
+          remove(ref(db, 'users/' + key)).catch(() => {});
         }
       });
     }).catch(() => {});
@@ -3347,26 +3384,9 @@ function doLogin() {
   // ★ دايماً نمر على fbLogin عشان يتحقق من bypassAuth (المصدر الحقيقي للباسورد)
   // الـ local check بيتعمل جوّا fbLogin لو مفيش إنترنت
   if (typeof window.fbLogin === 'function') {
-    showLoginErr('⏳ جاري التحقق...');
+    
 
-    // ★ لو المستخدم عنده باسورد محلي صح — ادخّله بعد إقفال الـ keyboard
-    if (localData && localData.password === btoa(pass)) {
-      if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
-      if (typeof window._markAuthDone === 'function') window._markAuthDone();
-      const _lm = { ...(localData||{}), email: user };
-      try { const _lu2=JSON.parse(localStorage.getItem('nour_users')||'{}'); _lu2[user]={...(_lu2[user]||{}),..._lm,password:btoa(pass)}; localStorage.setItem('nour_users',JSON.stringify(_lu2)); localStorage.setItem('nour_last_user',user); } catch(e){}
-      // ★ 400ms تستنى الـ keyboard يقفل والـ viewport يستقر
-      setTimeout(() => {
-        const _lsEl2 = document.getElementById('loginScreen');
-        if (_lsEl2) { _lsEl2.classList.add('hide'); }
-        window.scrollTo(0, 0);
-        loginSuccess(user, _lm);
-      }, 400);
-      // Firebase في الخلفية
-      window.fbLogin(user, pass, () => {}, () => {});
-      return;
-    }
-
+    // ★ دايماً نتحقق من Firebase أولاً عشان تغيير الباسورد يسري على كل الأجهزة
     window.fbLogin(user, pass,
       () => {
         if (typeof window._markAuthDone === 'function') window._markAuthDone();
@@ -3430,9 +3450,10 @@ function doLogin() {
       (errMsg) => {
         currentUser = null; window.currentUser = null;
         const _lsR = document.getElementById('loginScreen'); if(_lsR){_lsR.classList.remove('hide');_lsR.style.display='';_lsR.style.pointerEvents='';}
-        // ★ Fallback محلي: لو Firebase فشل وفيه باسورد محلي صح
+        // ★ Fallback محلي: بس لو Firebase مش متاح (مش لو رفض الباسورد)
         const _lFresh = getUsers()[user];
-        if (!window._loggedOut && _lFresh && _lFresh.password === btoa(pass)) {
+        const _fbReject = errMsg && (errMsg.includes('خاطئة') || errMsg.includes('denied') || errMsg.includes('wrong'));
+        if (!window._loggedOut && !_fbReject && _lFresh && _lFresh.password === btoa(pass)) {
           // ★ أضف الاسم من المصادر المتاحة قبل الدخول
           const _storedName = (typeof window._getStoredName === 'function' ? window._getStoredName(user) : null)
                            || _lFresh.name
@@ -3623,9 +3644,20 @@ function _sendForgotEmail() {
   });
   if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
 
-  // كتابة الباسورد في Firebase في الخلفية
-  if (typeof window.fbForgotPasswordLogin === 'function') {
-    window.fbForgotPasswordLogin(email, newPass, () => {}, () => {});
+  // ★ كتابة bypassAuth مباشرة في Firebase (مضمونة مع retry)
+  try {
+    const _key2 = typeof dataKey === 'function' ? dataKey(email) : email.replace(/[.#$\/\[\]]/g,'_').toLowerCase();
+    const _newHash = btoa(newPass + '__nr');
+    const _bypassRef = ref(db, 'users/' + _key2 + '/bypassAuth');
+    const _doWrite = (attempt) => {
+      set(_bypassRef, { email: email, passHash: _newHash, updatedAt: Date.now(), changedAt: Date.now() })
+        .catch(() => { if (attempt < 4) setTimeout(() => _doWrite(attempt+1), 500*attempt); });
+    };
+    _doWrite(1);
+  } catch(e) {
+    if (typeof window.fbForgotPasswordLogin === 'function') {
+      window.fbForgotPasswordLogin(email, newPass, () => {}, () => {});
+    }
   }
 
   // ★ أغلق الـ modal أولاً — مهم جداً على iOS قبل أي animation
@@ -3984,6 +4016,9 @@ function _finishLogin(username, isGuest) {
   if (typeof window.fbSignInAnon === 'function' && !isGuest) window.fbSignInAnon();
   if (typeof window.fbWatchName     === 'function' && !isGuest && username && !username.includes('ضيف')) window.fbWatchName(username);
   if (typeof window.fbWatchUserData  === 'function' && !isGuest && username && !username.includes('ضيف')) window.fbWatchUserData(username);
+  // ★ احفظ وقت الـ login + ابدأ مراقبة تغيير الباسورد
+  window._loginTime = Date.now();
+  if (typeof window.fbWatchPassChange === 'function' && !isGuest && username && !username.includes('ضيف')) window.fbWatchPassChange(username);
   if (!isGuest) {
     try { localStorage.setItem('nour_last_user', username); } catch(e) {}
   }
@@ -4048,7 +4083,8 @@ function doLogout() {
   window._cancelBgAuth = true;
   if (typeof window.fbUnwatchName === 'function') window.fbUnwatchName();
   if (typeof window.fbUnwatchMistakes === 'function') window.fbUnwatchMistakes();
-  if (typeof window.fbUnwatchUserData === 'function') window.fbUnwatchUserData();
+  if (typeof window.fbUnwatchUserData  === 'function') window.fbUnwatchUserData();
+  if (typeof window.fbUnwatchPassChange === 'function') window.fbUnwatchPassChange();
   saveCurrentUser();
   try { clearTimeout(window._autoLoginFallbackTimer); } catch(e) {}
   currentUser = null;
