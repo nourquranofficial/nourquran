@@ -2716,10 +2716,6 @@ function _callWhenReady(fn, args) {
           <button type="button" class="pw-eye" onclick="togglePw('loginPass',this)" title="إظهار/إخفاء">👁</button>
         </div>
       </div>
-      <div style="text-align:right;margin-bottom:10px;">
-        <span onclick="doForgotPassword()" style="font-size:11px;color:rgba(201,151,58,0.6);cursor:pointer;text-decoration:underline;">نسيت كلمة المرور؟</span>
-      </div>
-
       <button type="submit" class="login-btn">دخول ✨</button>
       <div class="login-divider"><span>أو</span></div>
       <div class="login-guest" onclick="guestLogin()">🕊️ الدخول بدون حساب (ضيف)</div>
@@ -9922,43 +9918,6 @@ function _stopPolling() {
 </script>
 
 <!-- ===== CONFIRM MODAL ===== -->
-<!-- ★ بوب آب نسيت كلمة المرور — إيميل + باسورد جديد -->
-<div id="forgotPassModal" style="display:none;position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.8);align-items:center;justify-content:center;">
-  <div style="background:linear-gradient(160deg,#1e1508,#12100a);border:1px solid rgba(201,151,58,0.35);border-radius:20px;padding:28px 24px;max-width:360px;width:92%;box-shadow:0 8px 40px rgba(0,0,0,0.7);">
-    <div style="text-align:center;margin-bottom:18px;">
-      <div style="font-size:36px;margin-bottom:4px;">🔑</div>
-      <div style="font-size:17px;font-weight:700;color:var(--gold);font-family:'Cairo',sans-serif;">تغيير كلمة المرور</div>
-      <div style="font-size:11px;color:rgba(245,217,139,0.4);margin-top:4px;">اكتب الباسورد الجديد (٤ أحرف على الأقل)</div>
-    </div>
-    <div class="login-field">
-      <label>البريد الإلكتروني</label>
-      <span class="login-field-icon">📧</span>
-      <input type="email" id="forgotEmailInput" autocomplete="email" placeholder="example@gmail.com" dir="ltr"
-        style="width:100%;background:rgba(255,254,249,0.04);border:1.5px solid rgba(201,151,58,0.2);border-radius:14px;padding:12px 16px 12px 44px;font-family:'Cairo',sans-serif;font-size:15px;color:var(--cream);direction:ltr;outline:none;">
-    </div>
-    <div class="login-field">
-      <label>كلمة المرور الجديدة</label>
-      <div class="pw-wrap">
-        <input type="password" id="forgotNewPass" autocomplete="new-password" placeholder="٤ أحرف على الأقل"
-          style="width:100%;background:rgba(255,254,249,0.04);border:1.5px solid rgba(201,151,58,0.2);border-radius:14px;padding:12px 16px 12px 40px;font-family:'Cairo',sans-serif;font-size:15px;color:var(--cream);direction:rtl;outline:none;">
-        <button type="button" class="pw-eye" onclick="togglePw('forgotNewPass',this)">👁</button>
-      </div>
-    </div>
-    <div class="login-field" style="margin-bottom:6px;">
-      <label>تأكيد كلمة المرور</label>
-      <div class="pw-wrap">
-        <input type="password" id="forgotConfirmPass" autocomplete="new-password" placeholder="أعد كتابة الباسورد"
-          style="width:100%;background:rgba(255,254,249,0.04);border:1.5px solid rgba(201,151,58,0.2);border-radius:14px;padding:12px 16px 12px 40px;font-family:'Cairo',sans-serif;font-size:15px;color:var(--cream);direction:rtl;outline:none;">
-        <button type="button" class="pw-eye" onclick="togglePw('forgotConfirmPass',this)">👁</button>
-      </div>
-    </div>
-    <div id="forgotPassErr" style="color:#FF9E9E;font-size:13px;text-align:center;min-height:18px;margin-bottom:10px;"></div>
-    <div style="display:flex;gap:8px;">
-      <button onclick="closeForgotPassModal()" style="flex:1;padding:12px;background:rgba(255,254,249,0.05);border:1px solid rgba(201,151,58,0.2);border-radius:12px;color:rgba(245,217,139,0.6);font-family:'Cairo',sans-serif;font-size:14px;font-weight:600;cursor:pointer;">إلغاء</button>
-      <button onclick="_sendForgotEmail()" ontouchend="event.preventDefault();_sendForgotEmail();" style="flex:2;padding:12px;background:linear-gradient(135deg,#C9973A,#E8C46A);border:none;border-radius:12px;font-family:'Cairo',sans-serif;font-size:14px;font-weight:900;color:#1a1208;cursor:pointer;touch-action:manipulation;">تأكيد وحفظ الباسورد ✅</button>
-    </div>
-  </div>
-</div>
 
 
 <div id="confirmModal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.7);align-items:center;justify-content:center;">
@@ -9968,49 +9927,6 @@ function _stopPolling() {
       <button id="confirmNo" onclick="closeConfirm()" style="flex:1;padding:12px;background:rgba(255,254,249,0.05);border:1px solid rgba(201,151,58,0.2);border-radius:12px;color:rgba(245,217,139,0.6);font-family:'Cairo',sans-serif;font-size:15px;font-weight:600;cursor:pointer;">لأ</button>
       <button id="confirmYes" style="flex:1;padding:12px;background:linear-gradient(135deg,#C0392B,#E74C3C);border:none;border-radius:12px;color:white;font-family:'Cairo',sans-serif;font-size:15px;font-weight:700;cursor:pointer;">تصفير</button>
     </div>
-  </div>
-</div>
-
-<!-- ★ شاشة تغيير كلمة المرور — نفس استايل شاشة الدخول -->
-<div id="resetPassModal" style="display:none;position:fixed;inset:0;z-index:9999;background:#12100a;align-items:center;justify-content:center;">
-  <div style="width:100%;max-width:420px;margin:auto;padding:32px 28px;background:linear-gradient(160deg,#1e1508 0%,#12100a 60%,#0e1810 100%);border:1px solid rgba(201,151,58,0.25);border-radius:24px;box-shadow:0 8px 40px rgba(0,0,0,0.7);">
-
-    <!-- لوجو -->
-    <div style="text-align:center;margin-bottom:24px;">
-      <div style="font-size:44px;filter:drop-shadow(0 0 16px rgba(201,151,58,0.7));">🌙</div>
-      <div style="font-family:'Amiri',serif;font-size:28px;color:var(--gold);letter-spacing:2px;margin-top:4px;">نـور</div>
-      <div style="font-size:13px;color:rgba(245,217,139,0.5);margin-top:2px;">تغيير كلمة المرور</div>
-    </div>
-
-    <!-- إيميل (للعرض) -->
-    <div id="resetPassEmailBox" style="background:rgba(201,151,58,0.07);border:1px solid rgba(201,151,58,0.2);border-radius:12px;padding:10px 16px;margin-bottom:20px;text-align:center;direction:ltr;">
-      <span id="resetPassEmail" style="font-size:13px;color:rgba(245,217,139,0.6);"></span>
-    </div>
-
-    <!-- باسورد جديد -->
-    <div class="login-field">
-      <label>كلمة المرور الجديدة</label>
-      <div class="pw-wrap">
-        <input type="password" id="resetNewPass" autocomplete="new-password" placeholder="٤ أحرف على الأقل" style="width:100%;background:rgba(255,254,249,0.04);border:1.5px solid rgba(201,151,58,0.2);border-radius:14px;padding:13px 16px 13px 40px;font-family:'Cairo',sans-serif;font-size:15px;color:var(--cream);direction:rtl;outline:none;transition:all .25s;">
-        <button type="button" class="pw-eye" onclick="togglePw('resetNewPass',this)">👁</button>
-      </div>
-    </div>
-
-    <!-- تأكيد -->
-    <div class="login-field" style="margin-bottom:6px;">
-      <label>تأكيد كلمة المرور</label>
-      <div class="pw-wrap">
-        <input type="password" id="resetNewPass2" autocomplete="new-password" placeholder="أعد كتابة كلمة المرور" style="width:100%;background:rgba(255,254,249,0.04);border:1.5px solid rgba(201,151,58,0.2);border-radius:14px;padding:13px 16px 13px 40px;font-family:'Cairo',sans-serif;font-size:15px;color:var(--cream);direction:rtl;outline:none;transition:all .25s;">
-        <button type="button" class="pw-eye" onclick="togglePw('resetNewPass2',this)">👁</button>
-      </div>
-    </div>
-
-    <div id="resetPassErr" style="color:#FF9E9E;font-size:13px;text-align:center;min-height:20px;margin-bottom:10px;"></div>
-
-    <!-- زرار -->
-    <button onclick="doConfirmReset()" class="login-btn" style="width:100%;">
-      حفظ الباسورد والدخول ✨
-    </button>
   </div>
 </div>
 
