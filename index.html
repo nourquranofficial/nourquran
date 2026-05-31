@@ -153,19 +153,7 @@
   --shadow: rgba(26,18,8,0.18);
 }
 * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-/* ★ استجابة فورية للنقر على كل العناصر القابلة للضغط — يشيل الـ 300ms tap delay على الموبايل */
-button, a, [onclick], .stat-card, .level-card, .user-logout, .lb-dot,
-input[type="button"], input[type="submit"], label, select {
-  touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
-}
-button, [onclick] { cursor: pointer; }
-/* ★ feedback بصري فوري عند الضغط */
-button:active, [onclick]:active, .level-card:active, .stat-card:active {
-  transform: scale(0.97);
-  transition: transform 0.05s ease;
-}
-body { font-family:'Cairo',sans-serif; background:var(--ink); color:var(--cream); min-height:100vh; overflow-x:hidden; touch-action: manipulation; }
+body { font-family:'Cairo',sans-serif; background:var(--ink); color:var(--cream); min-height:100vh; overflow-x:hidden; }
 
 /* ===== STARS ===== */
 .stars-bg { position:fixed; inset:0; pointer-events:none; z-index:0;
@@ -646,7 +634,6 @@ body:has(#loginScreen:not(.hide)) { overflow:hidden; }
   border-radius:20px;
   background:linear-gradient(135deg, rgba(201,151,58,0.06) 0%, rgba(27,107,74,0.06) 100%);
   border:1px solid rgba(201,151,58,0.18);
-  min-height:80px;
 }
 .lb-podium-slide {
   display:flex; align-items:center; gap:16px;
@@ -1161,9 +1148,6 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
 </style>
 
 <!-- Firebase -->
-<script>
-window._loginInProgress = false;
-</script>
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
   import { getDatabase, ref, set, remove, onValue, get, update, onDisconnect, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
@@ -1268,9 +1252,8 @@ window._loginInProgress = false;
           localStorage.setItem('nour_users', JSON.stringify(_u));
         } catch(e) {}
         // ★ اكتب bypassAuth من أول لحظة عشان كل الأجهزة تعرف الباسورد
-        const _regTs = Date.now();
         const _bpa = set(ref(db, 'users/' + key + '/bypassAuth'), {
-          email, passHash: btoa(padPass(password)), updatedAt: _regTs, changedAt: _regTs,
+          email, passHash: btoa(padPass(password)), updatedAt: Date.now(),
         }).catch(() => {});
         const _prof = set(ref(db, 'users/' + key + '/profile'), {
           email, createdAt: Date.now()
@@ -1319,77 +1302,49 @@ window._loginInProgress = false;
             });
         } else {
           // ★ الباسورد غلط — حتى لو Firebase Auth يقبله بالقديم → ارفض
-          onError('كلمة المرور خطأ — حاول مجدداً');
+          onError('الإيميل أو كلمة المرور خاطئة');
         }
       } else {
-        // مفيش bypassAuth → جرّب Firebase Auth بالباسورد + __nr ثم بدونه
-        const _tryAuth = (pass1, pass2) => {
-          signInWithEmailAndPassword(auth, fbEmail, pass1)
-            .then(() => {
-              const _ts = Date.now();
-              set(ref(db, 'users/' + _key + '/bypassAuth'), {
-                email, passHash: btoa(padPass(password)), updatedAt: _ts, changedAt: _ts,
-              }).catch(() => {});
+        // مفيش bypassAuth → Firebase Auth هو المصدر، وبنكتب bypassAuth للمرات الجاية
+        signInWithEmailAndPassword(auth, fbEmail, padPass(password))
+          .then(() => {
+            // ★ اكتب bypassAuth للمرة الأولى عشان كل الأجهزة تعرف الباسورد الصح
+            set(ref(db, 'users/' + _key + '/bypassAuth'), {
+              email, passHash: btoa(padPass(password)), updatedAt: Date.now(),
+            }).catch(() => {});
+            try {
+              const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
+              if (!_lu[email]) _lu[email] = {};
+              _lu[email].password = btoa(password);
+              localStorage.setItem('nour_users', JSON.stringify(_lu));
+            } catch(e) {}
+            onSuccess();
+          })
+          .catch((e) => {
+            if (e.code === 'auth/too-many-requests') {
               try {
-                const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
-                if (!_lu[email]) _lu[email] = {};
-                _lu[email].password = btoa(password);
-                localStorage.setItem('nour_users', JSON.stringify(_lu));
-              } catch(e) {}
-              onSuccess();
-            })
-            .catch((e) => {
-              if (pass2) { _tryAuth(pass2, null); return; }
-              // كل محاولات Firebase Auth فشلت
-              // Fallback: لو الباسورد صح محلياً → اكتب bypassAuth وادخّل
-              try {
-                const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
-                if (_lu[email] && _lu[email].password === btoa(password)) {
-                  // اكتب bypassAuth عشان المرات الجاية تكون أسرع
-                  const _ts = Date.now();
-                  set(ref(db, 'users/' + _key + '/bypassAuth'), {
-                    email, passHash: btoa(padPass(password)), updatedAt: _ts, changedAt: _ts,
-                  }).catch(() => {});
-                  onSuccess();
-                  return;
-                }
+                const users = JSON.parse(localStorage.getItem('nour_users') || '{}');
+                if (users[email] && users[email].password === btoa(password)) { onSuccess(); return; }
               } catch(ex) {}
-              if (e.code === 'auth/too-many-requests') {
-                try {
-                  const users = JSON.parse(localStorage.getItem('nour_users') || '{}');
-                  if (users[email] && users[email].password === btoa(password)) { onSuccess(); return; }
-                } catch(ex) {}
-                onError('الحساب محجوب مؤقتاً من Firebase، حاول بعد قليل');
-              } else if (e.code === 'auth/user-not-found') {
-                onError('الإيميل ده مش مسجّل — أنشئ حساباً جديداً');
-              } else if (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential' || e.code === 'auth/invalid-login-credentials') {
-                onError('كلمة المرور خطأ — حاول مجدداً');
-              } else if (e.code === 'auth/network-request-failed') {
-                onError('في مشكلة في الإنترنت — اتأكد من اتصالك');
-              } else {
-                onError('تعذّر الدخول: ' + (e.code || 'خطأ غير معروف'));
-              }
-            });
-        };
-        _tryAuth(padPass(password), password); // جرّب مع __nr أولاً، ثم بدونه
+              onError('الحساب محجوب مؤقتاً من Firebase، حاول بعد قليل');
+            } else if (e.code === 'auth/user-not-found') {
+              onError('الإيميل ده مش مسجّل — أنشئ حساباً جديداً');
+            } else if (e.code === 'auth/operation-not-allowed' || e.code === 'auth/configuration-not-found') {
+              onError('⛔ خدمة الحسابات مش مفعّلة في Firebase (Authentication ← Email/Password ← Enable).');
+            } else if (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential' || e.code === 'auth/invalid-login-credentials') {
+              onError('الإيميل أو كلمة المرور خاطئة');
+            } else if (e.code === 'auth/network-request-failed') {
+              onError('في مشكلة في الإنترنت — اتأكد من اتصالك');
+            } else {
+              onError('تعذّر الدخول: ' + (e.code || 'خطأ غير معروف'));
+            }
+          });
       }
     }).catch(() => {
-      // Firebase مش متاح — جرّب Firebase Auth مباشرة، ثم localStorage كـ fallback أخير
+      // Firebase مش متاح — جرّب Firebase Auth مباشرة
       signInWithEmailAndPassword(auth, fbEmail, padPass(password))
         .then(() => onSuccess())
-        .catch(() => {
-          // Firebase Auth كمان مش متاح — fallback للـ localStorage (offline mode)
-          try {
-            const _offlineUsers = JSON.parse(localStorage.getItem('nour_users') || '{}');
-            if (_offlineUsers[email] && _offlineUsers[email].password === btoa(password)) {
-              onSuccess();
-            } else {
-              onError('في مشكلة في الإنترنت — اتأكد من اتصالك وحاول تاني');
-            }
-          } catch(ex) {
-            onError('في مشكلة في الإنترنت — اتأكد من اتصالك وحاول تاني');
-          }
-        });
+        .catch((e) => onError('الإيميل أو كلمة المرور خاطئة'));
     });
   };
 
@@ -1398,15 +1353,12 @@ window._loginInProgress = false;
     const _key      = dataKey(email);
     const _passHash = btoa(padPass(newPass));
 
-    const _writeBypass = () => {
-      const _ts = Date.now();
-      return Promise.race([
-        set(ref(db, 'users/' + _key + '/bypassAuth'), {
-          email, passHash: _passHash, updatedAt: _ts, changedAt: _ts,
-        }),
-        new Promise((_, rej) => setTimeout(() => rej('timeout'), 6000)),
-      ]);
-    };
+    const _writeBypass = () => Promise.race([
+      set(ref(db, 'users/' + _key + '/bypassAuth'), {
+        email, passHash: _passHash, updatedAt: Date.now(),
+      }),
+      new Promise((_, rej) => setTimeout(() => rej('timeout'), 6000)),
+    ]);
 
     // ★ خطوة ١: لو في أي session (حتى anonymous) → اكتب مباشرة
     if (auth.currentUser) {
@@ -1452,32 +1404,7 @@ window._loginInProgress = false;
 
   window.fbLogout = function() { signOut(auth).catch(() => {}); };
 
-  // ★★ مراقبة تغيير الباسورد — يطرد الأجهزة التانية فوراً لما الباسورد يتغيّر ★★
-  let _passUnsub = null;
-  window.fbWatchPassChange = function(username) {
-    if (_passUnsub) { try { _passUnsub(); } catch(e) {} _passUnsub = null; }
-    if (!username) return;
-    const _key = dataKey(username);
-    const _startTime = window._loginTime || Date.now();
-
-    _passUnsub = onValue(ref(db, 'users/' + _key + '/bypassAuth'), (snap) => {
-      if (!snap.exists()) return;
-      const bpa = snap.val();
-      if (bpa && bpa.changedAt && bpa.changedAt > _startTime + 1000) {
-        console.warn('🔐 الباسورد اتغيّر — جاري الخروج');
-        // ★ امسح الباسورد من localStorage عشان fast path ما يدخّلش بالقديمة
-        try {
-          const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
-          if (_lu[username]) {
-            delete _lu[username].password;
-            localStorage.setItem('nour_users', JSON.stringify(_lu));
-          }
-        } catch(e) {}
-        if (typeof doLogout === 'function') doLogout();
-        else { try { localStorage.removeItem('nour_last_user'); } catch(e) {} location.reload(); }
-      }
-    }, () => {});
-  };
+  // جلب/حفظ بيانات المستخدم من Firebase DB
   window.fbGetUserData = function(username, onResult) {
     const key = dataKey(username);
     get(ref(db, 'users/' + key + '/data'))
@@ -1607,68 +1534,6 @@ window._loginInProgress = false;
   };
   window.fbUnwatchName = function() {
     if (_nameUnsub) { _nameUnsub(); _nameUnsub = null; }
-  };
-
-  // ★★ مراقبة النقاط والاسم real-time على كل الأجهزة ★★
-  let _userDataUnsub = null;
-  window.fbWatchUserData = function(username) {
-    if (_userDataUnsub) { try { _userDataUnsub(); } catch(e) {} _userDataUnsub = null; }
-    if (!username) return;
-    const key = dataKey(username);
-    // ★ نسمع users/key/data — أي تغيير في النقاط من أي جهاز يظهر هنا
-    _userDataUnsub = onValue(ref(db, 'users/' + key + '/data'), (snap) => {
-      if (!snap.exists()) return;
-      const d = snap.val();
-      if (!window.currentUser || window.currentUser.username !== username) return;
-      // ★ لو في تصفير حديث (آخر 10 ثواني) → ما نرجّعش النقاط
-      if (window._recentReset && Date.now() - window._recentReset < 10000) return;
-      let changed = false;
-      const cu = window.currentUser;
-      // خذ أحدث قيمة من Firebase (updatedAt هو المرجع)
-      const fbTs = d.updatedAt || 0;
-      const localTs = cu.updatedAt || 0;
-      if (fbTs > localTs) {
-        // Firebase أحدث → خذ قيمه
-        if (d.totalScore   !== cu.totalScore)   { cu.totalScore   = d.totalScore   || 0; changed = true; }
-        if (d.totalHasanat !== cu.totalHasanat) { cu.totalHasanat = d.totalHasanat || 0; changed = true; }
-        if (d.totalGames   !== cu.totalGames)   { cu.totalGames   = d.totalGames   || 0; changed = true; }
-        if (changed) cu.updatedAt = fbTs;
-      } else {
-        // Firebase أقدم → خذ الأعلى فقط (بيانات Firebase ناقصة)
-        if ((d.totalScore||0)   > (cu.totalScore||0))   { cu.totalScore   = d.totalScore;   changed = true; }
-        if ((d.totalHasanat||0) > (cu.totalHasanat||0)) { cu.totalHasanat = d.totalHasanat; changed = true; }
-        if ((d.totalGames||0)   > (cu.totalGames||0))   { cu.totalGames   = d.totalGames;   changed = true; }
-      }
-      if (changed) {
-        currentUser = cu; window.currentUser = cu;
-        try {
-          const _lu = JSON.parse(localStorage.getItem('nour_users')||'{}');
-          if (_lu[username]) {
-            _lu[username].totalScore   = cu.totalScore;
-            _lu[username].totalHasanat = cu.totalHasanat;
-            _lu[username].totalGames   = cu.totalGames;
-            localStorage.setItem('nour_users', JSON.stringify(_lu));
-          }
-        } catch(e) {}
-        if (typeof updateHomeStats === 'function') updateHomeStats();
-      }
-    }, () => {});
-    // ★ نسمع الاسم من leaderboard
-    onValue(ref(db, 'leaderboard/' + key + '/name'), (snap) => {
-      if (!snap.exists()) return;
-      const fbName = snap.val();
-      if (!fbName || typeof fbName !== 'string' || fbName.includes('@')) return;
-      if (!window.currentUser || window.currentUser.username !== username) return;
-      if (window.currentUser.name === fbName) return;
-      window.currentUser.name = fbName;
-      currentUser = window.currentUser;
-      try { localStorage.setItem('nour_name_' + username, fbName); } catch(e) {}
-      const el = document.getElementById('userNameDisplay');
-      if (el) el.innerHTML = '👤 ' + fbName + ' <button onclick="event.stopPropagation();editDisplayName()" style="background:none;border:none;font-size:13px;cursor:pointer;color:var(--gold);opacity:.7;padding:2px 4px;">✏️</button>';
-    }, () => {});
-  };
-  window.fbUnwatchUserData = function() {
-    if (_userDataUnsub) { try { _userDataUnsub(); } catch(e) {} _userDataUnsub = null; }
   };
 
   // ★ اقرأ الاسم من localStorage بكل الطرق
@@ -1805,7 +1670,7 @@ window._loginInProgress = false;
         const days7 = Object.keys(merged).sort().reverse().slice(0, 7);
         const trimmed = {};
         days7.forEach(d => { trimmed[d] = merged[d]; });
-        try { localStorage.setItem(localKey, JSON.stringify(trimmed)); } catch(e) {}
+        localStorage.setItem(localKey, JSON.stringify(trimmed));
       }
 
       // ── تقدم المراجعة ──
@@ -1827,7 +1692,7 @@ window._loginInProgress = false;
             merged[surah] = fb;
           }
         });
-        try { localStorage.setItem(localKey, JSON.stringify(merged)); } catch(e) {}
+        localStorage.setItem(localKey, JSON.stringify(merged));
         // لو Firebase أحدث → ارفع المدمج للسيرفر
         set(ref(db, 'users/' + key + '/revprog'), merged).catch(() => {});
       }
@@ -1844,7 +1709,7 @@ window._loginInProgress = false;
           if ((fbSurah[s] || 0) > (localSurah[s] || 0)) merged[s] = fbSurah[s];
           else merged[s] = localSurah[s] || 0;
         });
-        try { localStorage.setItem(localKey, JSON.stringify(merged)); } catch(e) {}
+        localStorage.setItem(localKey, JSON.stringify(merged));
         set(ref(db, 'users/' + key + '/surahprog'), merged).catch(() => {});
       }
 
@@ -1857,7 +1722,7 @@ window._loginInProgress = false;
           try { localMem = JSON.parse(localStorage.getItem(localKey) || '[]'); } catch {}
           // دمج: union بين الاتنين
           const merged = [...new Set([...localMem, ...fbMem])];
-          try { localStorage.setItem(localKey, JSON.stringify(merged)); } catch(e) {}
+          localStorage.setItem(localKey, JSON.stringify(merged));
           // أعد تحميل قائمة المحفوظات لو موجودة
           if (window.currentUser && window.currentUser.username === username) {
             if (typeof window.memorizedSurahs !== 'undefined') window.memorizedSurahs = merged;
@@ -1895,15 +1760,6 @@ window._loginInProgress = false;
         updatedAt:    Date.now(),
       };
     }).then((result) => {
-      if (!result.committed) {
-        // Transaction aborted — retry once if still logged in
-        setTimeout(() => {
-          if (!window._loggedOut && window.currentUser && window.currentUser.username === username) {
-            if (window.fbIncrementScore) window.fbIncrementScore(username, scoreAdd, hasanatAdd, gamesAdd);
-          }
-        }, 1000);
-        return;
-      }
       if (result.committed && result.snapshot.exists()) {
         const newData = result.snapshot.val();
         if (window.currentUser && window.currentUser.username === username) {
@@ -1928,20 +1784,24 @@ window._loginInProgress = false;
         }
       }
     }).catch(() => {
-      // fallback: transaction فشل — نحاول مرة تانية بعد delay
-      setTimeout(() => {
-        runTransaction(dataRef, (curr) => {
-          if (curr === null) return { totalScore: scoreAdd||0, totalGames: gamesAdd||0, totalHasanat: hasanatAdd||0, streak:0, lastPlay:null, updatedAt: Date.now() };
-          return { ...curr, totalScore: (curr.totalScore||0)+(scoreAdd||0), totalGames: (curr.totalGames||0)+(gamesAdd||0), totalHasanat: (curr.totalHasanat||0)+(hasanatAdd||0), updatedAt: Date.now() };
-        }).then(result => {
-          if (result.committed && result.snapshot.exists()) {
-            const nd = result.snapshot.val();
-            if (typeof window.fbSaveUser === 'function' && nd.totalScore > 0) {
-              window.fbSaveUser(username, { totalScore: nd.totalScore, totalHasanat: nd.totalHasanat, totalGames: nd.totalGames, isGuest: false, name: (window.currentUser && window.currentUser.name) || '' });
-            }
+      // fallback لو transaction فشل
+      get(dataRef).then(snap => {
+        const curr = snap.exists() ? snap.val() : {};
+        const newScore   = (curr.totalScore   || 0) + (scoreAdd   || 0);
+        const newHasanat = (curr.totalHasanat || 0) + (hasanatAdd || 0);
+        const newGames   = (curr.totalGames   || 0) + (gamesAdd   || 0);
+        update(dataRef, {
+          totalScore:   newScore,
+          totalGames:   newGames,
+          totalHasanat: newHasanat,
+          updatedAt:    Date.now(),
+        }).then(() => {
+          // تحديث لوحة الشرف بعد الـ fallback برضو
+          if (typeof window.fbSaveUser === 'function' && newScore > 0) {
+            window.fbSaveUser(username, { totalScore: newScore, totalHasanat: newHasanat, totalGames: newGames, isGuest: false, name: (window.currentUser && window.currentUser.name) || '' });
           }
         }).catch(() => {});
-      }, 2000);
+      }).catch(() => {});
     });
   };
 
@@ -2070,9 +1930,8 @@ window._loginInProgress = false;
   const ROOMS_PATH = 'nour_rooms/';
 
     window._expandMultiQ = (q) => {
-      if (!q) return null;
       // ★ idempotent: لو السؤال موسّع أصلاً (فيه blank)، رجّعه زي ما هو من غير ما تكسره
-      if (q.blank !== undefined) return q;
+      if (q && q.blank !== undefined) return q;
       return {
         surah: q.s, ayah: q.a, blank: q.b,
         wrong: q.w || [], qtype: q.t || 'blank', ayahNum: q.n || null,
@@ -2144,12 +2003,10 @@ window._loginInProgress = false;
     //   بيتكتب مع كل إجابة + في آخر اللعبة، وبيتأكد من تسجيل الدخول المجهول أولاً.
     saveFinalScore: function(roomCode, playerKey, score, playerName) {
       const path = ROOMS_PATH + roomCode + '/finalScores/' + playerKey;
-      const _roundId = (window.multiState && window.multiState._roundId) || Date.now();
       const _doSet = () => set(ref(db, path), {
         name: playerName || 'لاعب',
         score: score || 0,
         ts: Date.now(),
-        roundId: _roundId,
       });
       if (typeof window.fbSignInAnon === 'function' && !auth.currentUser) {
         return window.fbSignInAnon().then(_doSet).catch(_doSet);
@@ -2161,10 +2018,6 @@ window._loginInProgress = false;
       get(ref(db, ROOMS_PATH + roomCode + '/finalScores')).then((snap) => {
         callback(snap.exists() ? snap.val() : null);
       }).catch(() => callback(null));
-    },
-
-    removeFinalScores: function(roomCode) {
-      return remove(ref(db, ROOMS_PATH + roomCode + '/finalScores')).catch(() => {});
     },
 
     // مسح الغرفة تلقائياً بعد انتهاء اللعبة بـ delay (عشان اللاعبين يشوفوا النتيجة)
@@ -2213,47 +2066,18 @@ window._loginInProgress = false;
     }
     // transaction: بنقارن الـtimestamp بس ★ دايمًا بناخد الأعلى في النقاط — النقاط مش بتنقص أبدًا
     runTransaction(entryRef, (cur) => {
-      // ★ دايماً نأخذ الأعلى في النقاط — مش بنعتمد على timestamp وحده
-      const newScore   = Math.max((cur && cur.totalScore)   || 0, data.totalScore   || 0);
-      const newHasanat = Math.max((cur && cur.totalHasanat) || 0, data.totalHasanat || 0);
-      const newGames   = Math.max((cur && cur.totalGames)   || 0, data.totalGames   || 0);
-      // ★ الاسم: نستخدم nameUpdatedAt timestamp — الأحدث يكسب
-      const curName       = (cur && cur.name && !cur.name.includes('@')) ? cur.name : null;
-      const dataName      = (data.name && !data.name.includes('@')) ? data.name : null;
-      const curNameTs     = (cur && cur.nameUpdatedAt) || 0;
-      const dataNameTs    = data.nameUpdatedAt || 0;
-      // لو data جاي مع nameUpdatedAt أحدث → خذه (تغيير اسم جديد)
-      // وإلا خذ الموجود في Firebase (يمنع التضارب)
-      const newName = (dataNameTs > curNameTs && dataName) ? dataName : (curName || dataName || username);
-      const newNameTs = Math.max(curNameTs, dataNameTs);
-      // لو مفيش تغيير → ارجع cur بدون كتابة
-      if (cur && cur.totalScore === newScore && cur.totalHasanat === newHasanat
-          && cur.totalGames === newGames && cur.name === newName) return cur;
+      if (cur && (cur.updatedAt || 0) > ts) return cur; // فيه أحدث منه — سيبه
       return {
-        name:             newName,
-        nameUpdatedAt:    newNameTs,
-        totalHasanat:     newHasanat,
-        totalScore:       newScore,
-        totalGames:       newGames,
+        name:             data.name || (cur && cur.name) || username, // ★ الاسم للعرض وليس الإيميل
+        // ★★ ناخد الأعلى بين القديم والجديد — مستحيل تنقص النقاط حتى لو حصل overwrite خطأ
+        totalHasanat:     Math.max((cur && cur.totalHasanat) || 0, data.totalHasanat || 0),
+        totalScore:       Math.max((cur && cur.totalScore)   || 0, data.totalScore   || 0),
+        totalGames:       Math.max((cur && cur.totalGames)   || 0, data.totalGames   || 0),
         isGuest:          isGuest,
         updatedAt:        ts,
         mistakesClearedAt: Math.max((cur && cur.mistakesClearedAt) || 0, data.mistakesClearedAt || 0),
       };
-    }).catch(e => {
-      // لو فشل بسبب permissions — جرّب بعد anonymous sign-in
-      if (e && (e.code === 'PERMISSION_DENIED' || String(e).includes('permission'))) {
-        signInAnonymously(auth).then(() => {
-          set(ref(db, LB_PATH + key), {
-            name: data.name || username,
-            totalHasanat: data.totalHasanat || 0,
-            totalScore:   data.totalScore   || 0,
-            totalGames:   data.totalGames   || 0,
-            isGuest:      isGuest,
-            updatedAt:    ts,
-          }).catch(() => {});
-        }).catch(() => {});
-      }
-    });
+    }).catch(e => console.error('fbSaveUser error:', e));
   };
   // رفع علامة مسح الغلطات فقط (من غير ما نلمس النقط) — تتوحّد عبر الأجهزة
   window.fbMarkMistakesCleared = function(username, isGuest) {
@@ -2279,13 +2103,8 @@ window._loginInProgress = false;
   window.fbResetLeaderboard = function(username, isGuest) {
     if (!username) return;
     const key = isGuest ? makeKey(username, true) : dataKey(username);
-    // ★ حافظ على الاسم الحقيقي — ما نرجّعهوش للإيميل بعد التصفير
-    const _realName = (window.currentUser && window.currentUser.name && !window.currentUser.name.includes('@'))
-      ? window.currentUser.name
-      : (() => { try { return localStorage.getItem('nour_name_' + username); } catch(e) { return null; } })()
-      || username;
     set(ref(db, LB_PATH + key), {
-      name: _realName,
+      name: username,
       totalScore: 0, totalGames: 0, totalHasanat: 0,
       isGuest: isGuest || false,
       updatedAt: Date.now(),
@@ -2404,10 +2223,7 @@ window._loginInProgress = false;
   }
   _attachLbListener();
 
-  // ★ expose unsubscribe عشان doLogout يقدر يوقف الـ listener
-  window.fbUnwatchLeaderboard = function() {
-    if (_lbUnsub) { try { _lbUnsub(); } catch(e) {} _lbUnsub = null; }
-  };
+  // ★ تنظيف تلقائي: مسح الضيوف من الداتا بيز كل ٣ أيام
   (function _cleanOldGuests() {
     const _3days = 3 * 24 * 60 * 60 * 1000;
     const _now   = Date.now();
@@ -2451,24 +2267,12 @@ window._loginInProgress = false;
 
     const toA = n => String(Math.round(n || 0)).replace(/\d/g, d => '٠١٢٣٤٥٦٧٨٩'[d]);
 
-    // ترتيب تنازلي حسب الحسنات → الجلسات → النقاط (tiebreakers مستقرة)
+    // ترتيب تنازلي حسب الحسنات (مع احترام مفتاح ظهور الضيوف)
     const _showGuests = window.SHOW_GUESTS_IN_RANKING !== false;
     const list = Object.entries(data || {})
       .filter(([k, d]) => d && (d.totalHasanat || 0) > 0 &&
         (_showGuests || (!d.isGuest && !String(k).startsWith('guest__'))))
-      .sort(([ka, a], [kb, b]) => {
-        // 1. الحسنات (الأهم)
-        const dh = (b.totalHasanat || 0) - (a.totalHasanat || 0);
-        if (dh !== 0) return dh;
-        // 2. عدد الجلسات (لمن لديهم نفس الحسنات)
-        const dg = (b.totalGames || 0) - (a.totalGames || 0);
-        if (dg !== 0) return dg;
-        // 3. النقاط
-        const ds = (b.totalScore || 0) - (a.totalScore || 0);
-        if (ds !== 0) return ds;
-        // 4. الأقدم في التسجيل (مستقر)
-        return String(ka).localeCompare(String(kb));
-      });
+      .sort(([, a], [, b]) => (b.totalHasanat || 0) - (a.totalHasanat || 0));
 
     window._lbAllList = list;
 
@@ -2785,7 +2589,6 @@ function _callWhenReady(fn, args) {
         <button class="review-nav-btn" style="margin-bottom:0;" onclick="showReviewScreen()">📖 مراجعة السور</button>
         <button class="mistakes-nav-btn" style="margin-bottom:0;" onclick="showMistakesScreen()">❌ الغلطات</button>
       </div>
-      <button onclick="goToLeaderboard()" style="background:linear-gradient(135deg,rgba(201,151,58,0.15),rgba(201,151,58,0.08));border:1px solid rgba(201,151,58,0.4);border-radius:14px;padding:12px;font-family:'Cairo',sans-serif;font-size:14px;font-weight:700;color:var(--gold);width:100%;cursor:pointer;touch-action:manipulation;">🏆 لوحة الشرف والترتيب العام</button>
 
     </div>
 
@@ -2800,8 +2603,7 @@ function _callWhenReady(fn, args) {
 
     <!-- streakDays/Dots still referenced by JS -->
     <div style="display:none;"><div id="streakDays"></div><div id="streakDots"></div></div>
-    <div class="lb-section" id="lbSection">
-      <div style="text-align:center;padding:10px 0 4px;font-size:15px;font-weight:700;color:rgba(201,151,58,0.9);font-family:'Cairo',sans-serif;">🏆 لوحة الشرف</div>
+    <div class="lb-section">
       <!-- المنصة المتحركة للمراكز الـ٣ -->
       <div class="lb-podium-wrap" id="lbPodiumWrap"></div>
       <div class="lb-dots" id="lbDots"></div>
@@ -3390,12 +3192,6 @@ let currentUser = null;
     const data  = users[lastUser];
     if (!data) { localStorage.removeItem('nour_last_user'); return; }
 
-    // ★ لو الحساب المحفوظ ضيف → امسحه وأظهر شاشة الدخول
-    if (data.isGuest || lastUser.startsWith('ضيف_') || !lastUser.includes('@')) {
-      localStorage.removeItem('nour_last_user');
-      return;
-    }
-
     window._pendingAutoLogin = { username: lastUser, data };
 
     // أخفي شاشة الدخول فوراً وأظهر الرئيسية
@@ -3477,7 +3273,7 @@ window.togglePw = togglePw;
       // نحتفظ بس بالحسابات التي مفتاحها إيميل (يحتوي @)
       if (k.includes('@')) clean[k] = v;
     });
-    try { localStorage.setItem('nour_users', JSON.stringify(clean)); } catch(e) {}
+    localStorage.setItem('nour_users', JSON.stringify(clean));
     // لو الحساب المحفوظ قديم (بدون @) امسحه
     const last = localStorage.getItem('nour_last_user');
     if (last && !last.includes('@')) {
@@ -3488,114 +3284,128 @@ window.togglePw = togglePw;
 })();
 
 function doLogin() {
-  if (window._loginInProgress) return;
-  window._loginInProgress = true;
   window._loggedOut = false;
   window._cancelBgAuth = false;
-  if (typeof window._resetAuthDone === 'function') window._resetAuthDone();
-
   const user = document.getElementById('loginUser').value.trim().toLowerCase();
-  const pass = document.getElementById('loginPass').value.trim();
-  if (!user || !pass) { window._loginInProgress = false; showLoginErr('أدخل الإيميل وكلمة المرور'); return; }
-  if (!user.includes('@')) { window._loginInProgress = false; showLoginErr('أدخل إيميلك (example@gmail.com)'); return; }
+  const pass = document.getElementById('loginPass').value;
+  if (!user || !pass) { showLoginErr('أدخل الإيميل وكلمة المرور'); return; }
+  if (!user.includes('@')) { showLoginErr('أدخل إيميلك (example@gmail.com)'); return; }
 
-  const localData = getUsers()[user];
+  // ── دخول فوري: أخفي اللوجين فوراً لو الباسورد صح محلياً ──
+  const users = getUsers();
+  const localData = users[user];
 
-  // ── دالة الدخول ──────────────────────────────────────────────
-  const _enter = (fbData) => {
-    if (window._loggedOut) { window._loginInProgress = false; return; }
-    window._loginInProgress = false;
-    window._loginTime = Date.now();
-    const loc = localData || {};
-    const fb  = fbData  || {};
-    // ★ دايماً نأخذ الأعلى بين Firebase والمحلي
-    const merged = {
-      totalScore:   Math.max(fb.totalScore   || 0, loc.totalScore   || 0),
-      totalGames:   Math.max(fb.totalGames   || 0, loc.totalGames   || 0),
-      totalHasanat: Math.max(fb.totalHasanat || 0, loc.totalHasanat || 0),
-      streak:       Math.max(fb.streak       || 0, loc.streak       || 0),
-      lastPlay:     fb.lastPlay || loc.lastPlay || null,
-      name: (typeof window._getStoredName === 'function' ? window._getStoredName(user) : null)
-            || (fb.name && !fb.name.includes('@') ? fb.name : null)
-            || (loc.name && !loc.name.includes('@') ? loc.name : null)
-            || user.split('@')[0],
-      email: user,
-    };
-    try {
-      const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
-      _lu[user] = { ...(_lu[user]||{}), ...merged, password: btoa(pass) };
-      localStorage.setItem('nour_users', JSON.stringify(_lu));
-      localStorage.setItem('nour_last_user', user);
-    } catch(e) {}
-    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
-    const s = document.getElementById('loginScreen');
-    if (s) s.classList.add('hide');
-    window.scrollTo(0, 0);
-    loginSuccess(user, merged);
-  };
-
-  // ── دخول فوري لو الباسورد صح محلياً، Firebase يتحقق في الخلفية ──
+  // ★ دايماً نمر على fbLogin عشان يتحقق من bypassAuth (المصدر الحقيقي للباسورد)
+  // الـ local check بيتعمل جوّا fbLogin لو مفيش إنترنت
   if (typeof window.fbLogin === 'function') {
-    const _localOk = localData && localData.password === btoa(pass);
+    showLoginErr('⏳ جاري التحقق...');
 
-    if (_localOk) {
-      // ★ ادخّل محلياً فوراً
-      _enter(localData);
-      // ★ Firebase في الخلفية: لو bypassAuth موجود وغير متطابق → طرد فوري
-      window.fbLogin(user, pass,
-        () => {
-          if (typeof window.fbGetAccount === 'function') {
-            window.fbGetAccount(user, (_, fb) => {
-              if (!fb || !window.currentUser || window.currentUser.username !== user) return;
-              const cu = window.currentUser;
-              let ch = false;
-              const fbTs = fb.updatedAt || 0;
-              const cuTs = cu.updatedAt || 0;
-              if (fbTs > cuTs) {
-                cu.totalScore=fb.totalScore||0; cu.totalHasanat=fb.totalHasanat||0;
-                cu.totalGames=fb.totalGames||0; cu.updatedAt=fbTs; ch=true;
-              } else {
-                if((fb.totalScore||0)>(cu.totalScore||0)){cu.totalScore=fb.totalScore;ch=true;}
-                if((fb.totalHasanat||0)>(cu.totalHasanat||0)){cu.totalHasanat=fb.totalHasanat;ch=true;}
-                if((fb.totalGames||0)>(cu.totalGames||0)){cu.totalGames=fb.totalGames;ch=true;}
-              }
-              if(fb.name&&!fb.name.includes('@')&&fb.name!==cu.name){cu.name=fb.name;ch=true;}
-              if(ch){currentUser=cu;window.currentUser=cu;if(typeof updateHomeStats==='function')updateHomeStats();}
-            });
-          }
-        },
-        (errMsg) => {
-          // Firebase رفض → الباسورد اتغيّر → logout
-          if(errMsg&&errMsg.includes('خطأ')&&window.currentUser&&window.currentUser.username===user)
-            doLogout();
-        }
-      );
+    // ★ لو المستخدم عنده باسورد محلي صح — ادخّله بعد إقفال الـ keyboard
+    if (localData && localData.password === btoa(pass)) {
+      if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+      if (typeof window._markAuthDone === 'function') window._markAuthDone();
+      const _lm = { ...(localData||{}), email: user };
+      try { const _lu2=JSON.parse(localStorage.getItem('nour_users')||'{}'); _lu2[user]={...(_lu2[user]||{}),..._lm,password:btoa(pass)}; localStorage.setItem('nour_users',JSON.stringify(_lu2)); localStorage.setItem('nour_last_user',user); } catch(e){}
+      // ★ 400ms تستنى الـ keyboard يقفل والـ viewport يستقر
+      setTimeout(() => {
+        const _lsEl2 = document.getElementById('loginScreen');
+        if (_lsEl2) { _lsEl2.classList.add('hide'); }
+        window.scrollTo(0, 0);
+        loginSuccess(user, _lm);
+      }, 400);
+      // Firebase في الخلفية
+      window.fbLogin(user, pass, () => {}, () => {});
       return;
     }
 
-    // مفيش بيانات محلية أو الباسورد غلط → Firebase إجباري مع ... بعد 300ms
-    const _lt = setTimeout(() => showLoginErr('...'), 300);
     window.fbLogin(user, pass,
       () => {
-        clearTimeout(_lt);
         if (typeof window._markAuthDone === 'function') window._markAuthDone();
+        // ★ blur أي input نشط عشان الـ keyboard يقفل على الموبايل
+        if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+        const _finishFresh = (realName, fbData, fbNameOverride) => {
+          if (window._loggedOut) return; // لو خرج أثناء التحميل
+          const lData = users[user] || {};
+          const merged = {
+            totalScore:   Math.max((fbData && fbData.totalScore)   || 0, lData.totalScore   || 0),
+            totalGames:   Math.max((fbData && fbData.totalGames)   || 0, lData.totalGames   || 0),
+            totalHasanat: Math.max((fbData && fbData.totalHasanat) || 0, lData.totalHasanat || 0),
+            streak:       Math.max((fbData && fbData.streak)       || 0, lData.streak       || 0),
+            lastPlay:     (fbData && fbData.lastPlay) || lData.lastPlay || null,
+            // ★ الاسم: المسار المستقل أولاً، ثم localStorage، ثم data
+            name: (typeof window._getStoredName === 'function' ? window._getStoredName(user) : null) || fbNameOverride || lData.name || (fbData && fbData.name) || '',
+            email: user,
+          };
+          try {
+            const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
+            _lu[user] = { ...(_lu[user]||{}), ...merged, password: btoa(pass) };
+            localStorage.setItem('nour_users', JSON.stringify(_lu));
+            localStorage.setItem('nour_last_user', user);
+          } catch(e) {}
+          // ★ استنى الـ keyboard يقفل
+          setTimeout(() => {
+            const _lsEl = document.getElementById('loginScreen');
+            if (_lsEl) { _lsEl.classList.add('hide'); }
+            window.scrollTo(0, 0);
+            loginSuccess(realName || user, merged);
+          }, 400);
+          if (typeof window.fbSaveUser === 'function' && merged.totalScore > 0) {
+            window.fbSaveUser(user, Object.assign({}, merged, {isGuest: false}));
+          }
+        };
+        // اقرأ البيانات + الاسم المستقل
+        const _key = typeof window._dataKey === 'function' ? window._dataKey(user) : user;
+        const _readName = typeof window.fbGetName === 'function'
+          ? new Promise(res => window.fbGetName(user, res))
+          : Promise.resolve(null);
+        const _readLbName = new Promise(res => {
+          const _lk = typeof window._dataKey === 'function' ? window._dataKey(user) : user;
+          get(ref(db, 'leaderboard/' + _lk + '/name')).then(s => res(s.exists() && typeof s.val()==='string' && !s.val().includes('@') ? s.val() : null)).catch(() => res(null));
+        });
         if (typeof window.fbGetAccount === 'function') {
-          window.fbGetAccount(user, (_, fbData) => _enter(fbData));
-        } else { _enter(null); }
+          Promise.all([
+            new Promise(res => window.fbGetAccount(user, (rn, fd) => res([rn, fd]))),
+            _readName,
+            _readLbName,
+          ]).then(([[realName, fbData], fbName, lbName]) => _finishFresh(realName || user, fbData, fbName || lbName));
+        } else if (typeof window.fbGetUserData === 'function') {
+          Promise.all([
+            new Promise(res => window.fbGetUserData(user, res)),
+            _readName,
+          ]).then(([fbData, fbName]) => _finishFresh(user, fbData, fbName));
+        } else {
+          _finishFresh(user, localData, null);
+        }
       },
       (errMsg) => {
-        clearTimeout(_lt);
-        window._loginInProgress = false;
-        showLoginErr(errMsg || 'كلمة المرور خطأ — حاول مجدداً');
+        currentUser = null; window.currentUser = null;
+        const _lsR = document.getElementById('loginScreen'); if(_lsR){_lsR.classList.remove('hide');_lsR.style.display='';_lsR.style.pointerEvents='';}
+        // ★ Fallback محلي: لو Firebase فشل وفيه باسورد محلي صح
+        const _lFresh = getUsers()[user];
+        if (!window._loggedOut && _lFresh && _lFresh.password === btoa(pass)) {
+          // ★ أضف الاسم من المصادر المتاحة قبل الدخول
+          const _storedName = (typeof window._getStoredName === 'function' ? window._getStoredName(user) : null)
+                           || _lFresh.name
+                           || (user && user.includes('@') ? user.split('@')[0] : user);
+          const _enriched = { ..._lFresh, name: _storedName, email: user };
+          document.getElementById('loginScreen').classList.add('hide');
+          loginSuccess(user, _enriched);
+          return;
+        }
+        showLoginErr(errMsg || 'الإيميل أو كلمة المرور خاطئة');
       }
     );
     return;
   }
 
-  // ── Offline: مفيش Firebase ────────────────────────────────────
-  if (!localData || !localData.password) { window._loginInProgress = false; showLoginErr('الحساب غير موجود'); return; }
-  if (localData.password !== btoa(pass))  { window._loginInProgress = false; showLoginErr('كلمة المرور خطأ — حاول مجدداً'); return; }
-  _enter(localData);
+  // Fallback لو Firebase مش متاح خالص
+  if (!localData || !localData.password) { showLoginErr('الحساب غير موجود'); return; }
+  if (localData.password !== btoa(pass)) { showLoginErr('كلمة المرور خاطئة'); return; }
+  const _offlineName = (typeof window._getStoredName === 'function' ? window._getStoredName(user) : null)
+                    || localData.name
+                    || (user && user.includes('@') ? user.split('@')[0] : user);
+  document.getElementById('loginScreen').classList.add('hide');
+  loginSuccess(user, { ...localData, name: _offlineName, email: user });
 }
 
 function doRegister() {
@@ -3612,8 +3422,6 @@ function doRegister() {
 
   // ★ إظهار loading
   showLoginErr('⏳ جاري إنشاء الحساب...');
-  // ★ reset _authDone عشان onAuthStateChanged يشتغل بعد التسجيل
-  if (typeof window._resetAuthDone === 'function') window._resetAuthDone();
   const _regBtn = document.querySelector('#registerForm .login-btn');
   if (_regBtn) { _regBtn.disabled = true; _regBtn.textContent = '⏳ جاري...'; }
 
@@ -3652,7 +3460,6 @@ function doRegister() {
       if (typeof window.fbSaveUser === 'function') window.fbSaveUser(email, Object.assign({}, defaultData, { isGuest: false, name: finalName }));
       if (typeof window._markAuthDone === 'function') window._markAuthDone();
       window._registering = false;
-      window._loginInProgress = false;
       const _b = document.querySelector('#registerForm .login-btn');
       if (_b) { _b.disabled = false; _b.textContent = 'إنشاء الحساب 🌟'; }
       if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
@@ -3676,7 +3483,6 @@ function doRegister() {
   };
   const _onErr = (errMsg) => {
     window._registering = false;
-    window._loginInProgress = false;
     showLoginErr(errMsg);
     const _b = document.querySelector('#registerForm .login-btn');
     if (_b) { _b.disabled = false; _b.textContent = 'إنشاء الحساب 🌟'; }
@@ -3686,7 +3492,6 @@ function doRegister() {
     if (typeof window.fbRegister !== 'function') {
       if (attempt < 12) { setTimeout(() => _tryRegister(attempt + 1), 500); return; }
       window._registering = false;
-      window._loginInProgress = false;
       showLoginErr('⏳ الاتصال بالخادم لسه بيتحمّل — اتأكد من الإنترنت وحاول تاني بعد ثانية.');
       return;
     }
@@ -3700,10 +3505,6 @@ function doRegister() {
 function doForgotPassword() {
   const modal = document.getElementById('forgotPassModal');
   if (!modal) return;
-  // ★ sign in anonymously عشان نضمن إن auth.currentUser موجود لما نكتب bypassAuth
-  if (typeof signInAnonymously === 'function' && !auth.currentUser) {
-    signInAnonymously(auth).catch(() => {});
-  }
   // ★ نملي الإيميل: من currentUser أولاً، ثم من حقل الدخول
   const inp = document.getElementById('forgotEmailInput');
   if (inp) {
@@ -3734,68 +3535,75 @@ function closeForgotPassModal() {
   }
 }
 function _sendForgotEmail() {
+  const email    = (document.getElementById('forgotEmailInput').value || '').trim().toLowerCase();
+  const newPass  = (document.getElementById('forgotNewPass').value || '').trim();
+  const confPass = (document.getElementById('forgotConfirmPass').value || '').trim();
+  const errEl    = document.getElementById('forgotPassErr');
+
+  // ★ لو الإيميل فاضي خذه من currentUser
+  const _finalEmail = email || (window.currentUser && window.currentUser.username) || '';
+  if (!_finalEmail || !_finalEmail.includes('@')) { errEl.textContent = '⚠️ اكتب إيميلك الصح'; errEl.style.color='#FF9E9E'; return; }
+  if (_finalEmail !== email) { email = _finalEmail; }
+  if (!newPass || newPass.length < 4) { errEl.textContent = '⚠️ الباسورد لازم ٤ أحرف على الأقل'; errEl.style.color='#FF9E9E'; return; }
+  if (newPass !== confPass) { errEl.textContent = '⚠️ الباسورد مش متطابق'; errEl.style.color='#FF9E9E'; return; }
+
+  // ★ خطوة ١: احفظ محلياً فوراً
   try {
-    const emailEl   = document.getElementById('forgotEmailInput');
-    const passEl    = document.getElementById('forgotNewPass');
-    const confEl    = document.getElementById('forgotConfirmPass');
-    const errEl     = document.getElementById('forgotPassErr');
-    const modalEl   = document.getElementById('forgotPassModal');
+    const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
+    if (!_lu[email]) _lu[email] = {};
+    _lu[email].password = btoa(newPass);
+    _lu[email].email    = email;
+    const _n = localStorage.getItem('nour_name_' + email) || _lu[email].name;
+    if (_n) _lu[email].name = _n;
+    localStorage.setItem('nour_users', JSON.stringify(_lu));
+    localStorage.setItem('nour_last_user', email);
+  } catch(e) {}
 
-    const email   = (emailEl ? emailEl.value : '').trim().toLowerCase();
-    const newPass = (passEl  ? passEl.value  : '').trim();
-    const conf    = (confEl  ? confEl.value  : '').trim();
+  // ★ أغلق الـ keyboard من كل inputs الـ modal
+  ['forgotEmailInput','forgotNewPass','forgotConfirmPass'].forEach(function(id){
+    var el = document.getElementById(id); if(el) el.blur();
+  });
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
 
-    const showErr = (m) => { if(errEl){ errEl.textContent=m; errEl.style.color='#FF9E9E'; } };
-
-    const _em = email || (window.currentUser && window.currentUser.username) || '';
-    if (!_em || !_em.includes('@'))  { showErr('⚠️ اكتب إيميلك الصح'); return; }
-    if (!newPass || newPass.length < 4) { showErr('⚠️ الباسورد لازم ٤ أحرف على الأقل'); return; }
-    if (newPass !== conf)            { showErr('⚠️ الباسورد مش متطابق'); return; }
-
-    // حفظ محلي
-    try {
-      var lu = JSON.parse(localStorage.getItem('nour_users')||'{}');
-      if(!lu[_em]) lu[_em]={};
-      lu[_em].password = btoa(newPass);
-      lu[_em].email    = _em;
-      localStorage.setItem('nour_users', JSON.stringify(lu));
-      localStorage.setItem('nour_last_user', _em);
-    } catch(e){}
-
-    // حدّث _loginTime عشان الـ watcher ما يطردك
-    window._loginTime = Date.now() + 5000;
-    if (typeof window.fbWatchPassChange === 'function') {
-      window.fbWatchPassChange(null);
-      setTimeout(function(){
-        if(window.currentUser && window.currentUser.username === _em)
-          window.fbWatchPassChange(_em);
-      }, 6000);
-    }
-
-
-    // أغلق الـ keyboard
-    if(document.activeElement) document.activeElement.blur();
-
-    // أخفِ الـ modal فوراً
-    if(modalEl){ modalEl.style.display='none'; modalEl.style.visibility='hidden'; modalEl.style.pointerEvents='none'; }
-
-    // دالة الأنيميشن
-    var _showAnim = function() {
-      var ov = document.createElement('div');
-      ov.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;pointer-events:none;';
-      ov.innerHTML = '<div style="background:linear-gradient(160deg,#1e1508,#12100a);border:1px solid rgba(201,151,58,0.35);border-radius:24px;padding:36px 48px;text-align:center;box-shadow:0 12px 50px rgba(0,0,0,0.75);"><div style="font-size:64px;margin-bottom:12px;">✅</div><div style="font-size:17px;font-weight:900;color:#C9973A;font-family:Cairo,sans-serif;">تم تغيير كلمة المرور</div><div style="font-size:12px;color:rgba(245,217,139,0.5);margin-top:6px;font-family:Cairo,sans-serif;">تم الحفظ على كل الأجهزة 🤍</div></div>';
-      document.body.appendChild(ov);
-      setTimeout(function(){ if(ov.parentNode) ov.parentNode.removeChild(ov); }, 2000);
-    };
-
-    // Firebase — اكتب bypassAuth ثم اعرض الأنيميشن
-    if (typeof window.fbForgotPasswordLogin === 'function') {
-      window.fbForgotPasswordLogin(_em, newPass, function(){ _showAnim(); }, function(){ _showAnim(); });
-    } else { _showAnim(); }
-  } catch(e) {
-    console.error('_sendForgotEmail error:', e);
-    alert('حصل خطأ: ' + e.message);
+  // كتابة الباسورد في Firebase في الخلفية
+  if (typeof window.fbForgotPasswordLogin === 'function') {
+    window.fbForgotPasswordLogin(email, newPass, () => {}, () => {});
   }
+
+  // ★ أغلق الـ modal أولاً — مهم جداً على iOS قبل أي animation
+  const _fpm = document.getElementById('forgotPassModal');
+  if (_fpm) {
+    _fpm.style.display = 'none';
+    _fpm.style.pointerEvents = 'none';
+    _fpm.style.visibility = 'hidden';
+  }
+  window.scrollTo(0, 0);
+
+  // ★ animation في عنصر مؤقت منفصل تماماً عن الـ modal
+  const _overlay = document.createElement('div');
+  _overlay.style.cssText = 'position:fixed;inset:0;z-index:5000;display:flex;align-items:center;justify-content:center;pointer-events:none;';
+  _overlay.innerHTML =
+    '<style>' +
+    '@keyframes _ckCircle{0%{stroke-dashoffset:283;opacity:0}20%{opacity:1}100%{stroke-dashoffset:0}}' +
+    '@keyframes _ckCheck{0%,40%{stroke-dashoffset:60;opacity:0}50%{opacity:1}100%{stroke-dashoffset:0}}' +
+    '@keyframes _ckFadeIn{0%{opacity:0;transform:scale(.7)}60%{transform:scale(1.08)}100%{opacity:1;transform:scale(1)}}' +
+    '@keyframes _ckFadeOut{0%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(.85)}}' +
+    '</style>' +
+    '<div id="_ckBox" style="background:linear-gradient(160deg,#1e1508,#12100a);border:1px solid rgba(201,151,58,0.35);border-radius:24px;padding:36px 48px;text-align:center;pointer-events:none;box-shadow:0 12px 50px rgba(0,0,0,0.75);animation:_ckFadeIn .4s cubic-bezier(.34,1.56,.64,1) both;">' +
+    '<svg width="88" height="88" viewBox="0 0 100 100" style="display:block;margin:0 auto 16px;" fill="none">' +
+    '<circle cx="50" cy="50" r="45" stroke="rgba(201,151,58,0.15)" stroke-width="5"/>' +
+    '<circle cx="50" cy="50" r="45" stroke="#C9973A" stroke-width="5" stroke-linecap="round" stroke-dasharray="283" stroke-dashoffset="283" style="transform-origin:50% 50%;transform:rotate(-90deg);animation:_ckCircle .6s cubic-bezier(.4,0,.2,1) .05s forwards;"/>' +
+    '<polyline points="28,52 44,67 72,35" stroke="#F5D98B" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="60" stroke-dashoffset="60" style="animation:_ckCheck .4s cubic-bezier(.4,0,.2,1) .5s forwards;"/>' +
+    '</svg>' +
+    '<div style="font-size:17px;font-weight:900;color:#C9973A;font-family:Cairo,sans-serif;pointer-events:none;">تم تغيير كلمة المرور</div>' +
+    '<div style="font-size:12px;color:rgba(245,217,139,0.5);margin-top:6px;font-family:Cairo,sans-serif;pointer-events:none;">تم الحفظ بنجاح 🤍</div>' +
+    '</div>';
+  document.body.appendChild(_overlay);
+  setTimeout(() => {
+    const _box = _overlay.querySelector('#_ckBox');
+    if (_box) _box.style.animation = '_ckFadeOut .3s ease forwards';
+    setTimeout(() => { if (_overlay.parentNode) _overlay.parentNode.removeChild(_overlay); }, 320);
+  }, 1800);
 }
 
 window.doForgotPassword = doForgotPassword;
@@ -3852,7 +3660,7 @@ window._sendForgotEmail = _sendForgotEmail;
           try {
             const _u = JSON.parse(localStorage.getItem('nour_users') || '{}');
             if (!_u[email]) _u[email] = {};
-            _u[email].password = btoa(unescape(encodeURIComponent(pending.newPass)));
+            _u[email].password = btoa(pending.newPass);
             localStorage.setItem('nour_users', JSON.stringify(_u));
           } catch(e) {}
           showToast && showToast('✅ تم تغيير كلمة المرور ودخلت أوتوماتيك!');
@@ -3919,60 +3727,15 @@ window.doConfirmReset = doConfirmReset;
 
 // ★ رجوع سريع من وضع الضيف لحساب اللاعب المحفوظ بدوسة واحدة
 function _switchBackToSaved() {
-  window._loginInProgress = false;
   try {
     const lastUser = localStorage.getItem('nour_last_user');
     if (!lastUser) { doLogout(); return; }
     const users = JSON.parse(localStorage.getItem('nour_users') || '{}');
     const data  = users[lastUser];
     if (!data) { doLogout(); return; }
-
-    // ★ لو عندنا باسورد محفوظ، نمر على fbLogin عشان bypassAuth يتحقق
-    const savedPass = data.password ? (() => { try { return atob(data.password); } catch(e) { return null; } })() : null;
-    if (savedPass && typeof window.fbLogin === 'function') {
-      window._loginInProgress = true;
-      window._loggedOut = false;
-      if (typeof window._resetAuthDone === 'function') window._resetAuthDone();
-      window.fbLogin(lastUser, savedPass,
-        () => {
-          window._loginInProgress = false;
-          window._loginTime = Date.now();
-          if (typeof window.fbWatchPassChange === 'function') window.fbWatchPassChange(lastUser);
-          if (typeof window._markAuthDone === 'function') window._markAuthDone();
-          // جلب أحدث البيانات
-          if (typeof window.fbGetAccount === 'function') {
-            window.fbGetAccount(lastUser, (_, fbData) => {
-              const merged = fbData ? {
-                ...data,
-                totalScore:   Math.max(data.totalScore||0, fbData.totalScore||0),
-                totalGames:   Math.max(data.totalGames||0, fbData.totalGames||0),
-                totalHasanat: Math.max(data.totalHasanat||0, fbData.totalHasanat||0),
-                name: (!data.name || data.name.includes('@')) && fbData.name ? fbData.name : (data.name || lastUser.split('@')[0]),
-              } : data;
-              loginSuccess(lastUser, merged, false);
-              showToast('✅ رجعت لحساب: ' + (merged.name || lastUser));
-            });
-          } else {
-            loginSuccess(lastUser, data, false);
-            showToast('✅ رجعت لحساب: ' + (data.name || lastUser));
-          }
-        },
-        () => {
-          // Firebase فشل — ادخّل بالبيانات المحلية
-          window._loginInProgress = false;
-          window._loginTime = Date.now();
-          if (typeof window.fbWatchPassChange === 'function') window.fbWatchPassChange(lastUser);
-          loginSuccess(lastUser, data, false);
-          showToast('✅ رجعت لحساب: ' + (data.name || lastUser));
-        }
-      );
-    } else {
-      // مفيش باسورد محفوظ — ادخّل مباشرة
-      window._loginTime = Date.now();
-      if (typeof window.fbWatchPassChange === 'function') window.fbWatchPassChange(lastUser);
-      loginSuccess(lastUser, data, false);
-      showToast('✅ رجعت لحساب: ' + (data.name || lastUser));
-    }
+    // أعد الدخول مباشرة للحساب المحفوظ (نفس مسار auto-login)
+    loginSuccess(lastUser, data, false);
+    showToast('✅ رجعت لحساب: ' + (data.name || lastUser));
   } catch (e) {
     doLogout();
   }
@@ -3980,7 +3743,6 @@ function _switchBackToSaved() {
 window._switchBackToSaved = _switchBackToSaved;
 
 function guestLogin() {
-  window._loginInProgress = false; // ★ الضيف مش بيمر على fbLogin
   const guestName = 'ضيف_' + Math.floor(Math.random()*9999);
   const data = { ...createDefaultUserData(), name: guestName };
   loginSuccess(guestName, data, true);
@@ -4039,7 +3801,7 @@ function editDisplayName() {
     overlay.innerHTML =
       '<div style="background:linear-gradient(160deg,#1e1508,#12100a);border:1px solid rgba(201,151,58,0.4);border-radius:18px;padding:24px 20px;width:100%;max-width:320px;text-align:center;">' +
         '<div style="font-size:14px;color:var(--gold);font-family:Cairo,sans-serif;font-weight:700;margin-bottom:14px;">✏️ تعديل الاسم</div>' +
-        '<input id="_nameEditInput" type="text" maxlength="30" placeholder="اكتب اسمك هنا" autocomplete="off" autocorrect="off" spellcheck="false" name="nour_name_edit"' +
+        '<input id="_nameEditInput" type="text" maxlength="30" placeholder="اكتب اسمك هنا"' +
         ' style="width:100%;background:rgba(201,151,58,0.1);border:1.5px solid rgba(201,151,58,0.4);border-radius:12px;padding:10px 14px;font-family:Cairo,sans-serif;font-size:15px;color:var(--gold);direction:rtl;outline:none;text-align:right;box-sizing:border-box;">' +
         '<div style="display:flex;gap:8px;margin-top:12px;">' +
           '<button onclick="_cancelNameEdit()" style="flex:1;padding:10px;background:rgba(255,254,249,0.05);border:1px solid rgba(201,151,58,0.2);border-radius:10px;color:rgba(245,217,139,0.5);font-family:Cairo,sans-serif;font-size:14px;cursor:pointer;">إلغاء</button>' +
@@ -4084,11 +3846,10 @@ function _saveNameEdit() {
   saveCurrentUser();
 
   // ★ حفظ في Firebase (مسار مستقل + leaderboard)
-  const _nameTs = Date.now();
   if (typeof window.fbSaveName === 'function') window.fbSaveName(_email, n);
   if (typeof window.fbSaveUser === 'function') {
     window.fbSaveUser(_email, {
-      name: n, nameUpdatedAt: _nameTs, isGuest: false,
+      name: n, isGuest: false,
       totalHasanat: currentUser.totalHasanat||0,
       totalScore: currentUser.totalScore||0,
       totalGames: currentUser.totalGames||0,
@@ -4175,19 +3936,11 @@ function _finishLogin(username, isGuest) {
       (() => { try { return JSON.parse(localStorage.getItem('nour_users')||'{}')[username]?.name; } catch(e){} return null; })();
     if (_n && !_n.includes('@') && _n.trim()) currentUser.name = _n.trim();
   }
-  const _disp = _displayName(currentUser || { username })
-    || (username && username.includes('@') ? username.split('@')[0] : username) || '';
+  const _disp = _displayName(currentUser || { username });
   const _el = document.getElementById('userNameDisplay');
   _el.innerHTML = '👤 ' + _disp + ' <button onclick="event.stopPropagation();editDisplayName()" title="غيّر اسمك للعرض" style="background:none;border:none;font-size:13px;cursor:pointer;color:var(--gold);opacity:.7;padding:2px 4px;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">✏️</button>';
   if (typeof window.fbSignInAnon === 'function' && !isGuest) window.fbSignInAnon();
   if (typeof window.fbWatchName === 'function' && !isGuest && username && !username.includes('ضيف')) window.fbWatchName(username);
-  // ★★ مراقبة النقاط والاسم real-time ★★
-  if (typeof window.fbWatchUserData === 'function' && !isGuest && username && !username.includes('ضيف')) window.fbWatchUserData(username);
-  // ★★ مراقبة تغيير الباسورد ★★
-  if (!isGuest && username && !username.includes('ضيف')) {
-    if (!window._loginTime) window._loginTime = Date.now();
-    if (typeof window.fbWatchPassChange === 'function') window.fbWatchPassChange(username);
-  }
   if (!isGuest) {
     try { localStorage.setItem('nour_last_user', username); } catch(e) {}
   }
@@ -4227,20 +3980,6 @@ function _finishLogin(username, isGuest) {
     };
     setTimeout(_doSync, 800); // خلي Firebase Auth يكمل أولاً
 
-    // ★★ اكتب في لوحة الشرف فوراً عند الدخول لو عندك نقاط ★★
-    setTimeout(() => {
-      const cu = window.currentUser;
-      if (cu && !cu.isGuest && (cu.totalScore || 0) > 0 && typeof window.fbSaveUser === 'function') {
-        window.fbSaveUser(cu.username, {
-          name: cu.name || cu.username,
-          totalScore:   cu.totalScore   || 0,
-          totalHasanat: cu.totalHasanat || 0,
-          totalGames:   cu.totalGames   || 0,
-          isGuest: false,
-        });
-      }
-    }, 1500);
-
     // ★ مستمع لحظي للغلطات — الإضافات تظهر على كل الأجهزة فورًا
     const _watchMist = () => {
       if (typeof window.fbWatchMistakes !== 'function') { setTimeout(_watchMist, 500); return; }
@@ -4264,14 +4003,9 @@ function doLogout() {
   window._isLoggingOut = true;
   window._loggedOut = true;
   window._cancelBgAuth = true;
-  window._loginInProgress = false;
   if (typeof window.fbUnwatchName === 'function') window.fbUnwatchName();
   if (typeof window.fbUnwatchMistakes === 'function') window.fbUnwatchMistakes();
   if (typeof window.fbUnwatchUserData === 'function') window.fbUnwatchUserData();
-  if (typeof window.fbUnwatchLeaderboard === 'function') window.fbUnwatchLeaderboard();
-  // ★ وقف مراقبة تغيير الباسورد عشان ما يطردش بعد الخروج
-  if (typeof window.fbWatchPassChange === 'function') window.fbWatchPassChange(null);
-  window._loginTime = 0;
   saveCurrentUser();
   try { clearTimeout(window._autoLoginFallbackTimer); } catch(e) {}
   currentUser = null;
@@ -4739,7 +4473,7 @@ function loadMemorizedSurahs() {
 
 function saveMemorizedSurahs() {
   if (!currentUser || currentUser.isGuest) return;
-  try { localStorage.setItem('nour_memorized_' + currentUser.username, JSON.stringify(memorizedSurahs)); } catch(e) {}
+  localStorage.setItem('nour_memorized_' + currentUser.username, JSON.stringify(memorizedSurahs));
   // ★ sync على Firebase
   if (typeof window.fbSaveMemorized === 'function') {
     window.fbSaveMemorized(currentUser.username, memorizedSurahs);
@@ -6241,7 +5975,7 @@ function saveSurahProgress(surahName, nextIndex) {
   let data = {};
   try { data = JSON.parse(localStorage.getItem(key) || '{}'); } catch {}
   data[surahName] = nextIndex;
-  try { localStorage.setItem(key, JSON.stringify(data)); } catch(e) {}
+  localStorage.setItem(key, JSON.stringify(data));
   // ★ sync على Firebase
   if (typeof window.fbSaveSurahProg === 'function') {
     window.fbSaveSurahProg(currentUser.username, data);
@@ -6680,7 +6414,7 @@ function renderQuestion() {
 }
 
 function renderMCQ(q) {
-  const choices = shuffle([q.blank, ...(q.wrong || [])]);
+  const choices = shuffle([q.blank, ...q.wrong]);
   const wrap = document.getElementById('mcqWrap');
   const isAyahChoice = q.qtype === 'next' || q.qtype === 'prev' || q.qtype === 'similar' || q.qtype === 'firstword' || q.qtype === 'reverse';
   const isNumChoice = q.qtype === 'num';
@@ -6748,7 +6482,7 @@ function showListenChoices() {
   const q = state.questions[state.qIndex];
   safeHTML('ayahText', q.ayah.replace(q.blank, '<span class="blank"></span>'));
   document.getElementById('listenBtn').style.display = 'none';
-  const choices = shuffle([q.blank, ...(q.wrong || [])]);
+  const choices = shuffle([q.blank, ...q.wrong]);
   const wrap = document.getElementById('listenChoices');
   // ★ شيلنا أزرار الصوت من الاختيارات — اللاعب بيختار من النص بس
   choices.forEach(ch => {
@@ -6907,7 +6641,7 @@ function _saveReviewPos(surahName, pos, total) {
     inProgress: true,
     lastPlay: Date.now()
   };
-  try { localStorage.setItem(key, JSON.stringify(d)); } catch(e) {}
+  localStorage.setItem(key, JSON.stringify(d));
   if (typeof window.fbSaveRevProg === 'function') window.fbSaveRevProg(currentUser.username, d);
 }
 
@@ -7165,8 +6899,23 @@ function goHome() {
   state.reviewSurah = null;
   // إيقاف polling الـ multiplayer — ومسح اللاعب من الغرفة لو كان فيها
   if (multiState && multiState.roomCode && multiState.phase !== 'lobby') {
-    multiLeaveRoom();
+    const code = multiState.roomCode;
+    const pk = multiState.playerKey || multiState.playerName;
+    clearInterval(multiState.questionTimer);
+    _stopPolling();
+    if (typeof window.fbMulti !== 'undefined' && code) {
+      window.fbMulti.removePlayer(code, pk);
+      const room = window._multiRoomCache;
+      if (room && room.hostUser === (currentUser && currentUser.username)) {
+        window.fbMulti.updateRoom(code, { phase: 'closed' }).catch(() => {});
+        setTimeout(() => window.fbMulti.deleteRoom(code).catch(() => {}), 1500);
+      }
+    }
+    window._multiRoomCache = null;
+    multiState.roomCode = null;
+    multiState.phase = 'lobby';
   }
+  if (typeof _stopPolling === 'function') _stopPolling();
   showScreen('homeScreen');
   updateHomeStats();
 }
@@ -7203,7 +6952,7 @@ function saveMistake(q, chosen) {
   const keys = Object.keys(all).sort().reverse().slice(0,7);
   const trimmed = {};
   keys.forEach(k => trimmed[k] = all[k]);
-  try { localStorage.setItem(key, JSON.stringify(trimmed)); } catch(e) {}
+  localStorage.setItem(key, JSON.stringify(trimmed));
   // ★ sync على Firebase (مسجلين فقط)
   if (!currentUser.isGuest && typeof window.fbSaveMistakes === 'function') {
     window.fbSaveMistakes(currentUser.username, trimmed);
@@ -7277,7 +7026,7 @@ function deleteMistakeItem(ayahKey, dayKey) {
   if (!all[dayKey]) return;
   all[dayKey] = all[dayKey].filter(m => (m.ayah + '|' + m.blank) !== ayahKey);
   if (all[dayKey].length === 0) delete all[dayKey];
-  try { localStorage.setItem(key, JSON.stringify(all)); } catch(e) {}
+  localStorage.setItem(key, JSON.stringify(all));
   showMistakesScreen();
   showToast('🗑️ تم مسح الغلطة');
 }
@@ -7297,7 +7046,7 @@ function saveMistakeForLater(ayahKey, dayKey) {
   const exists = saved.some(s => (s.ayah + '|' + s.blank) === ayahKey);
   if (!exists) {
     saved.push({...m, savedAt: Date.now()});
-    try { localStorage.setItem(savedKey, JSON.stringify(saved)); } catch(e) {}
+    localStorage.setItem(savedKey, JSON.stringify(saved));
     showToast('✅ تم حفظها للمراجعة لاحقاً');
   } else {
     showToast('📌 محفوظة بالفعل');
@@ -7461,7 +7210,7 @@ function markSurahReviewStarted(surahName, total) {
     inProgress: true,
     lastPlay: Date.now()
   };
-  try { localStorage.setItem(key, JSON.stringify(d)); } catch(e) {}
+  localStorage.setItem(key, JSON.stringify(d));
   // ★ sync على Firebase
   if (typeof window.fbSaveRevProg === 'function') {
     window.fbSaveRevProg(currentUser.username, d);
@@ -7480,7 +7229,7 @@ function saveSurahReviewProgress(surahName, correct, total) {
   const streak = perfect ? (prev.streak||0)+1 : prev.streak||0;
   // ★ خلّصنا السورة للآخر → الشريط مكتمل (done=total) ومكان الوقوف يتصفّر
   d[surahName] = { done: total, total, streak, pos: 0, lastPlay: Date.now(), inProgress: !finished };
-  try { localStorage.setItem(key, JSON.stringify(d)); } catch(e) {}
+  localStorage.setItem(key, JSON.stringify(d));
   // ★ sync على Firebase
   if (typeof window.fbSaveRevProg === 'function') {
     window.fbSaveRevProg(currentUser.username, d);
@@ -7530,7 +7279,7 @@ function resetSurahProgress(surahName) {
   try { d = JSON.parse(localStorage.getItem(key) || '{}'); } catch {}
   // ★ فضّي السورة تمامًا (تقدّم + مكان وقوف + شريط أخضر) ترجع زي سورة جديدة
   delete d[surahName];
-  try { localStorage.setItem(key, JSON.stringify(d)); } catch(e) {}
+  localStorage.setItem(key, JSON.stringify(d));
   // ★ sync على Firebase
   if (typeof window.fbSaveRevProg === 'function') {
     window.fbSaveRevProg(currentUser.username, d);
@@ -7991,21 +7740,8 @@ function updateGlobalRankChip() {
 window.updateGlobalRankChip = updateGlobalRankChip;
 
 function goToLeaderboard() {
-  const el = document.getElementById('lbSection') || document.querySelector('.lb-section') || document.getElementById('lbPodiumWrap');
-  if (!el) return;
-  // حساب الـ offset من أعلى الصفحة
-  const rect = el.getBoundingClientRect();
-  const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
-  const top = rect.top + scrollTop - 60; // 60px margin من فوق
-  window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
-  // لو scrollTo مش اشتغل (بعض المتصفحات) — fallback
-  setTimeout(() => {
-    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }, 100);
-  // flash بصري عشان المستخدم يشوف اللوحة
-  el.style.transition = 'box-shadow 0.3s ease';
-  el.style.boxShadow = '0 0 0 3px rgba(201,151,58,0.6)';
-  setTimeout(() => { el.style.boxShadow = ''; }, 1000);
+  const el = document.querySelector('.lb-section') || document.getElementById('lbPodiumWrap');
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
 // ★ إعادة مزامنة نقط الحساب من السحابة (يخلي كل الأجهزة موحّدة لما ترجع للتطبيق)
@@ -8407,11 +8143,9 @@ let multiState = {
   myScore: 0,
   _peakScore: 0,
   _startedAt: 0,
-  _roundId: 0,
   _scoreSavedThisRound: false,
   totalQ: 20,
   qTime: 15,
-  level: 0,
   surahFilter: '',
   phase: 'lobby',
   answerTimer: null,
@@ -8561,12 +8295,14 @@ function _generateRoomCode() {
 }
 
 function _getRoomData(code) {
+  // للقراءة الفورية بنستخدم الـ local cache
   return window._multiRoomCache || null;
 }
 function _setRoomData(code, data) {
-  // محلي فقط — الكتابة على Firebase بتتم بشكل صريح عبر fbMulti.updateRoom/createRoom
   window._multiRoomCache = data;
-  if (typeof window.fbMulti === 'undefined') {
+  if (typeof window.fbMulti !== 'undefined') {
+    window.fbMulti.updateRoom(code, data);
+  } else {
     try { localStorage.setItem(MULTI_PREFIX + code, JSON.stringify(data)); } catch {}
   }
 }
@@ -8606,7 +8342,7 @@ function multiCreateRoom() {
   const initRoom = {
     code, hostUser: currentUser.username, phase: 'waiting',
     surahFilter: surahVal, totalQ: 0, questions: [], maxPlayers, qTime, level: mLevel,
-    players: { [playerKey]: { name: _displayName(currentUser), score: 0, answered: false, ready: true, roundId: 0, lastSeen: Date.now() } },
+    players: { [playerKey]: { name: _displayName(currentUser), score: 0, answered: false, ready: true, lastSeen: Date.now() } },
     currentQ: 0, createdAt: Date.now(),
   };
   window._multiRoomCache = initRoom;
@@ -8652,8 +8388,8 @@ function multiCreateRoom() {
     if (typeof window.fbMulti !== 'undefined') {
       const _doCreate = () => {
         const compressQ = (q) => {
-          const obj = { s: q.surah||q.s||'', a: q.ayah||q.a||'', b: (q.blank!==undefined?q.blank:(q.b||'')), w: (q.wrong||q.w||[]).slice(0,3), t: q.qtype||q.t||'blank' };
-          if (q.ayahNum||q.n) obj.n = q.ayahNum||q.n;
+          const obj = { s: q.surah||'', a: q.ayah||'', b: q.blank||'', w: (q.wrong||[]).slice(0,3), t: q.qtype||'blank' };
+          if (q.ayahNum) obj.n = q.ayahNum;
           return obj;
         };
         const rawRoom = { ...room, questions: questions.map(compressQ) };
@@ -8686,18 +8422,11 @@ function multiCreateRoom() {
 function _bounceFromJoin(msg) {
   _stopPolling();
   clearInterval(multiState.questionTimer);
-  clearTimeout(multiState.answerTimer);
-  window._multiRoomCache  = null;
-  multiState.roomCode     = null;
-  multiState.phase        = 'lobby';
-  multiState.playerKey    = null;
-  multiState.playerName   = null;
-  multiState.isHost       = false;
-  multiState.questions    = [];
-  multiState.myScore      = 0;
-  multiState._roundId     = 0;
+  window._multiRoomCache = null;
+  multiState.roomCode = null;
+  multiState.phase = 'lobby';
   showToast(msg, 3000);
-  showMultiScreen();
+  showMultiScreen(); // رجوع للوبي
 }
 
 function multiJoinRoom() {
@@ -8708,7 +8437,7 @@ function multiJoinRoom() {
   const playerKey = typeof window._makeKey === 'function'
     ? window._makeKey(currentUser.username, false)
     : currentUser.username;
-  const playerData = { name: _displayName(currentUser), score: 0, answered: false, ready: true, roundId: 0, lastSeen: Date.now() };
+  const playerData = { name: _displayName(currentUser), score: 0, answered: false, ready: true, lastSeen: Date.now() };
 
   // ★★ استجابة لحظية: ادخل قاعة الانتظار فورًا بمجرد الضغط — التحقق والتسجيل في الخلفية ★★
   multiState.roomCode = code;
@@ -8722,33 +8451,27 @@ function multiJoinRoom() {
   // التحقق + التسجيل في الخلفية
   const validateAndRegister = (room) => {
     if (!room) { _bounceFromJoin('⚠️ الغرفة مش موجودة — تأكد من الكود'); return; }
-    if (room.phase === 'playing')  { _bounceFromJoin('⚠️ اللعبة بدأت بالفعل، استنى الجولة الجاية'); return; }
-    if (room.phase === 'finished' || room.phase === 'closed') { _bounceFromJoin('⚠️ الغرفة انتهت — اطلب من المضيف يفتح غرفة جديدة'); return; }
+    if (room.phase === 'playing') { _bounceFromJoin('⚠️ اللعبة بدأت بالفعل، استنى الجولة الجاية'); return; }
     const players = room.players || {};
     const maxPl = room.maxPlayers || 4;
     if (!players[playerKey] && Object.keys(players).length >= maxPl) {
       _bounceFromJoin('⚠️ الغرفة مكتملة (' + toArabicNum(maxPl) + ' لاعبين)'); return;
     }
     // سليمة — سجّل اللاعب + جهّز الأسئلة
-    room.players = players || {};
+    room.players = players;
     room.players[playerKey] = playerData;
     if (room.questions && room.questions.length > 0 && room.questions[0].s !== undefined) {
-      room.questions = room.questions.map(window._expandMultiQ).filter(Boolean);
+      room.questions = room.questions.map(window._expandMultiQ);
     }
     window._multiRoomCache = room;
-    // ★ نوسّع الأسئلة لو مضغوطة قبل ما نخزنها
-    if (room.questions && room.questions.length > 0 && room.questions[0] && room.questions[0].s !== undefined) {
-      room.questions = room.questions.map(window._expandMultiQ).filter(Boolean);
-    }
-    multiState.questions = (room.questions || []).filter(Boolean);
-    multiState.totalQ    = room.totalQ || room.questions.length;
+    multiState.questions = (room.questions || []).map(window._expandMultiQ);
+    multiState.totalQ = room.totalQ;
     _updateWaitingUI();
     if (typeof window.fbMulti !== 'undefined') {
       _startPolling();
-      const _write = (attempt) => window.fbMulti.updatePlayer(code, playerKey, playerData)
-        .then(() => { window.fbMulti.setDisconnect(code, playerKey, false); })
-        .catch(() => { if (attempt < 4) setTimeout(() => _write(attempt + 1), 500 * attempt); });
-      _write(1);
+      const _write = () => window.fbMulti.updatePlayer(code, playerKey, playerData)
+        .then(() => { window.fbMulti.setDisconnect(code, playerKey, false); });
+      _write().catch(() => { _write().catch(() => {}); });
     } else {
       _setRoomData(code, room);
       multiState.playerKey = currentUser.username;
@@ -8814,14 +8537,15 @@ function _updateWaitingUI() {
 
   // لو المضيف بدأ اللعبة (للـ non-host عبر cache polling — الـ Firebase listener يتعامل منفرداً)
   if (room.phase === 'playing' && multiState.phase === 'waiting' && !multiState.isHost) {
+    // نوسّع الأسئلة لو مضغوطة
     if (room.questions && room.questions.length > 0 && room.questions[0].s !== undefined) {
-      room.questions = room.questions.map(window._expandMultiQ).filter(Boolean);
+      room.questions = room.questions.map(window._expandMultiQ);
       window._multiRoomCache = room;
     }
-    multiState.questions = (room.questions || []).filter(Boolean);
-    multiState.totalQ    = room.totalQ || (room.questions ? room.questions.length : 0);
-    multiState.qTime     = room.qTime || 15;
-    _startMultiGame(room.roundId || room.startedAt);
+    multiState.questions = (room.questions || []).map(window._expandMultiQ);
+    multiState.totalQ = room.totalQ || room.questions.length;
+    multiState.qTime = room.qTime || 15;
+    _startMultiGame();
   }
 }
 
@@ -8846,6 +8570,7 @@ function multiShareWhatsApp() {
 
 function multiStartGame() {
   if (!multiState.isHost) return;
+  // ★ منع بدء اللعبة مرتين (لو المضيف دوس "ابدأ" بسرعة مرتين)
   if (multiState.phase === 'playing') return;
   if (!multiState.questions || multiState.questions.length < 3) {
     showToast('⏳ جاري تحضير الأسئلة...');
@@ -8854,48 +8579,34 @@ function multiStartGame() {
   }
   const room = _getRoomData(multiState.roomCode);
   if (!room) return;
-  const _now = Date.now();
-  room.questions  = multiState.questions;
-  room.totalQ     = multiState.questions.length;
-  room.phase      = 'playing';
-  room.startedAt  = _now;
-  room.roundId    = _now; // ★ مصدر الحقيقة — كل اللاعبين يأخذونه من هنا
-  room.currentQ   = 0;
-  Object.keys(room.players || {}).forEach(u => {
-    room.players[u].score    = 0;
-    room.players[u].answered = false;
-    room.players[u].roundId  = _now; // ★ تصفير roundId لكل لاعب
-  });
+  room.questions = multiState.questions;
+  room.totalQ = multiState.questions.length;
+  room.phase = 'playing';
+  room.startedAt = Date.now();
+  room.currentQ = 0;
+  Object.keys(room.players).forEach(u => { room.players[u].score = 0; room.players[u].answered = false; });
   window._multiRoomCache = room;
   if (typeof window.fbMulti !== 'undefined') {
-    const compressQ = (q) => {
-      const obj = { s: q.surah||q.s||'', a: q.ayah||q.a||'', b: (q.blank!==undefined?q.blank:(q.b||'')), w: (q.wrong||q.w||[]).slice(0,3), t: q.qtype||q.t||'blank' };
-      if (q.ayahNum||q.n) obj.n = q.ayahNum||q.n;
-      return obj;
-    };
+    // نبعت phase + totalQ عشان اللاعبين التانيين يعرفوا عدد الأسئلة
     window.fbMulti.updateRoom(multiState.roomCode, {
-      phase: 'playing', startedAt: _now, roundId: _now,
-      currentQ: 0, totalQ: room.totalQ,
-      questions: multiState.questions.map(compressQ),
-    }).catch(() => {});
-    // ★ صفّر كل لاعب مع roundId
-    Object.keys(room.players || {}).forEach(u => {
-      window.fbMulti.updatePlayer(multiState.roomCode, u, { score: 0, answered: false, done: false, finalScore: null, finalName: null, roundId: _now }).catch(() => {});
+      phase: 'playing',
+      startedAt: room.startedAt,
+      currentQ: 0,
+      totalQ: room.totalQ || multiState.totalQ,
     });
   } else {
     _setRoomData(multiState.roomCode, room);
   }
-  _startMultiGame(_now);
+  _startMultiGame();
 }
 
-function _startMultiGame(roundId) {
+function _startMultiGame() {
   multiState.phase = 'playing';
   multiState.qIndex = 0;
   multiState.myScore = 0;
   multiState._peakScore = 0;
   multiState._scoreSavedThisRound = false;
-  multiState._startedAt = roundId || Date.now();
-  multiState._roundId   = multiState._startedAt; // ★ مصدر واحد موثوق
+  multiState._startedAt = Date.now();
   window._lockedScores = {};
   window._prevMultiScores = {};
   const scoreEl = document.getElementById('multiMyScore');
@@ -8910,11 +8621,7 @@ function _startMultiGame(roundId) {
 }
 
 function _renderMultiQuestion() {
-  if (!multiState.questions || multiState.questions.length === 0) {
-    showToast('⚠️ مفيش أسئلة — خرج من الغرفة وحاول تاني');
-    return;
-  }
-  // ★ حماية نهائية: نتأكد إن السؤال موسّع
+  // ★ حماية نهائية: نتأكد إن السؤال موسّع (لو ساب الحماية قبل كده). idempotent فمأمون.
   if (multiState.questions[multiState.qIndex] && multiState.questions[multiState.qIndex].blank === undefined) {
     multiState.questions[multiState.qIndex] = window._expandMultiQ(multiState.questions[multiState.qIndex]);
   }
@@ -8931,7 +8638,7 @@ function _renderMultiQuestion() {
   clearInterval(multiState.questionTimer);
 
   document.getElementById('multiQNum').textContent = toArabicNum(multiState.qIndex + 1);
-  document.getElementById('multiProgressFill').style.width = (multiState.totalQ > 0 ? ((multiState.qIndex / multiState.totalQ) * 100) : 0) + '%';
+  document.getElementById('multiProgressFill').style.width = ((multiState.qIndex / multiState.totalQ) * 100) + '%';
   document.getElementById('multiMyScore').textContent = toArabicNum(multiState.myScore);
   document.getElementById('multiSurahLbl').textContent = 'سورة ' + q.surah;
 
@@ -8956,18 +8663,11 @@ function _renderMultiQuestion() {
   const ayahDisplay = q.qtype === 'next' ? q.ayah :
                       q.qtype === 'prev' ? q.ayah :
                       q.qtype === 'num'  ? q.ayah :
-                      (q.ayah && q.blank && q.ayah.includes(q.blank)) ? q.ayah.replace(q.blank, blankHTML) : ((q.ayah || '') + ' ' + blankHTML);
+                      q.ayah.includes(q.blank) ? q.ayah.replace(q.blank, blankHTML) : q.ayah + ' ' + blankHTML;
   document.getElementById('multiAyahText').innerHTML = ayahDisplay;
 
   // الخيارات
-  const choices = [...new Set([q.blank, ...(q.wrong || [])])].sort(() => Math.random()-0.5).slice(0, 4);
-  if (choices.length < 2) {
-    // سؤال بدون خيارات كافية — تجاوزه
-    multiState.qIndex++;
-    if (multiState.qIndex >= multiState.totalQ) { _showMultiResults(); return; }
-    _renderMultiQuestion();
-    return;
-  }
+  const choices = [...new Set([q.blank, ...q.wrong])].sort(() => Math.random()-0.5).slice(0, 4);
   const wrap = document.getElementById('multiChoicesWrap');
   wrap.innerHTML = '';
   const isAyah = q.qtype === 'next' || q.qtype === 'prev' || q.qtype === 'similar' || q.qtype === 'firstword' || q.qtype === 'reverse';
@@ -8998,7 +8698,7 @@ function _renderMultiQuestion() {
   const pk0 = multiState.playerKey || multiState.playerName;
   if (room && room.players && room.players[pk0]) {
     if (typeof window.fbMulti !== 'undefined') {
-      window.fbMulti.updatePlayer(multiState.roomCode, pk0, { answered: false }).catch(() => {});
+      window.fbMulti.updatePlayer(multiState.roomCode, pk0, { answered: false });
     } else {
       room.players[pk0].answered = false;
       _setRoomData(multiState.roomCode, room);
@@ -9053,7 +8753,7 @@ function _renderMultiQuestion() {
       // sync missed
       const pkT = multiState.playerKey || multiState.playerName;
       if (typeof window.fbMulti !== 'undefined') {
-        window.fbMulti.updatePlayer(multiState.roomCode, pkT, { answered: true, lastSeen: Date.now() }).catch(() => {});
+        window.fbMulti.updatePlayer(multiState.roomCode, pkT, { answered: true, lastSeen: Date.now() });
       }
       _updateMultiLiveScores();
       clearTimeout(multiState.answerTimer);
@@ -9062,9 +8762,8 @@ function _renderMultiQuestion() {
       if (typeof window.fbMulti !== 'undefined' && multiState.roomCode) {
         const _roomT = window._multiRoomCache;
         if (!_roomT || _roomT.currentQ === undefined || _roomT.currentQ === multiState.qIndex) {
-          window.fbMulti.updateRoom(multiState.roomCode, { currentQ: _nextQT }).catch(() => {});
+          window.fbMulti.updateRoom(multiState.roomCode, { currentQ: _nextQT });
         }
-        clearTimeout(multiState.answerTimer);
         multiState.answerTimer = setTimeout(() => {
           if (multiState.qIndex < _nextQT && multiState.phase !== 'results') {
             multiState.qIndex = _nextQT;
@@ -9073,7 +8772,6 @@ function _renderMultiQuestion() {
           }
         }, 700);
       } else {
-        clearTimeout(multiState.answerTimer);
         multiState.answerTimer = setTimeout(() => {
           multiState.qIndex = _nextQT;
           if (multiState.qIndex >= multiState.totalQ) _showMultiResults();
@@ -9165,37 +8863,41 @@ function _multiAnswer(chosen, correct, q, clickedBtn, e) {
 
   // Sync score to Firebase + تحديث الـ cache فوراً
   const pk = multiState.playerKey || multiState.playerName;
-  const _rid = multiState._roundId || multiState._startedAt || 0;
   if (typeof window.fbMulti !== 'undefined') {
-    const _scoreData = { score: multiState.myScore, answered: true, lastSeen: Date.now(), roundId: _rid };
+    // ★ كتابة بإعادة محاولة: لو فشلت لأي سبب (شبكة/auth)، يحاول 3 مرات بـbackoff
+    //   ده بيضمن إن نقطة كل لاعب توصل لFirebase حتى لو حصل خلل لحظي
+    const _scoreData = { score: multiState.myScore, answered: true, lastSeen: Date.now() };
     const _doWrite = (attempt) => {
       const p = window.fbMulti.updatePlayer(multiState.roomCode, pk, _scoreData);
       if (p && p.catch) {
-        p.catch(() => { if (attempt < 3) setTimeout(() => _doWrite(attempt + 1), 400 * attempt); });
+        p.catch(() => {
+          if (attempt < 3) setTimeout(() => _doWrite(attempt + 1), 400 * attempt);
+        });
       }
     };
     _doWrite(1);
+    // ★★ كمان نكتب في الغرفة (finalScores) مع كل إجابة (مش بس آخر اللعبة)
+    //    كده نقطة اللاعب موجودة في مكان آمن طول الوقت، ومحدش بيمسحه.
     if (typeof window.fbMulti.saveFinalScore === 'function') {
       const _nm = multiState.playerName || (currentUser && (currentUser.name || currentUser.username)) || 'لاعب';
-      const _snapRid = _rid; // حفظ roundId الحالي في closure
-      // ★ بنكتب بس لو الجولة لسه نفسها (guard ضد الكتابة بعد مرة تانية)
-      if (multiState._roundId === _snapRid) {
-        window.fbMulti.saveFinalScore(multiState.roomCode, pk, multiState.myScore, _nm).catch(() => {});
-      }
+      window.fbMulti.saveFinalScore(multiState.roomCode, pk, multiState.myScore, _nm);
     }
-    // تحديث الـ cache فوراً مع roundId
+    // تحديث الـ cache فوراً عشان live scores تتغير على طول
     if (!window._multiRoomCache) window._multiRoomCache = { players: {} };
     if (!window._multiRoomCache.players) window._multiRoomCache.players = {};
     if (!window._multiRoomCache.players[pk]) window._multiRoomCache.players[pk] = {};
-    window._multiRoomCache.players[pk].score    = multiState.myScore;
+    window._multiRoomCache.players[pk].score = multiState.myScore;
     window._multiRoomCache.players[pk].answered = true;
-    window._multiRoomCache.players[pk].roundId  = _rid;
+    const room2 = window._multiRoomCache;
+    if (room2 && room2.players && room2.players[pk]) {
+      room2.players[pk].score = multiState.myScore;
+      room2.players[pk].answered = true;
+    }
   } else {
     const room2 = _getRoomData(multiState.roomCode);
     if (room2 && room2.players && room2.players[pk]) {
-      room2.players[pk].score    = multiState.myScore;
+      room2.players[pk].score = multiState.myScore;
       room2.players[pk].answered = true;
-      room2.players[pk].roundId  = _rid;
       room2.players[pk].lastSeen = Date.now();
       _setRoomData(multiState.roomCode, room2);
     }
@@ -9213,10 +8915,9 @@ function _multiAnswer(chosen, correct, q, clickedBtn, e) {
       if (_nextQ >= multiState.totalQ) {
         window.fbMulti.updateRoom(multiState.roomCode, { currentQ: _nextQ, phase: 'finished' }).catch(() => {});
       } else {
-        window.fbMulti.updateRoom(multiState.roomCode, { currentQ: _nextQ }).catch(() => {});
+        window.fbMulti.updateRoom(multiState.roomCode, { currentQ: _nextQ });
       }
     }
-    clearTimeout(multiState.answerTimer);
     multiState.answerTimer = setTimeout(() => {
       if (multiState.qIndex < _nextQ && multiState.phase !== 'results') {
         clearInterval(multiState.questionTimer);
@@ -9226,7 +8927,6 @@ function _multiAnswer(chosen, correct, q, clickedBtn, e) {
       }
     }, 700);
   } else {
-    clearTimeout(multiState.answerTimer);
     multiState.answerTimer = setTimeout(() => {
       if (multiState.phase !== 'results') {
         multiState.qIndex = _nextQ;
@@ -9240,17 +8940,9 @@ function _multiAnswer(chosen, correct, q, clickedBtn, e) {
 function _updateMultiLiveScores() {
   const room = _getRoomData(multiState.roomCode);
   if (!room) return;
-  const _rid = multiState._roundId || multiState._startedAt || 0;
   const players = room.players || {};
   const pk = multiState.playerKey || multiState.playerName;
-  // ★ فلتر: نقاط الجولة الحالية فقط — أي لاعب roundId مختلف تعتبر نقطته صفر
-  const sorted = Object.entries(players)
-    .filter(([, p]) => p != null)
-    .map(([u, p]) => {
-      const sameRound = !_rid || !p.roundId || p.roundId === _rid;
-      return [u, { ...p, score: sameRound ? (p.score || 0) : 0 }];
-    })
-    .sort((a,b) => (b[1].score||0) - (a[1].score||0));
+  const sorted = Object.entries(players).filter(([, p]) => p != null).sort((a,b) => (b[1].score||0) - (a[1].score||0));
   const medals = ['🥇','🥈','🥉','🎖️'];
 
   // ★ تتبّع النقاط السابقة لرصد الزيادة وإظهار توهّج لحظي عند تحديث نقطة أي لاعب
@@ -9288,141 +8980,198 @@ function _updateMultiLiveScores() {
 }
 
 function _showMultiResults() {
-  if (multiState.phase === 'results') return;
+  if (multiState.phase === 'results') return; // ★ منع الاستدعاء المزدوج
   clearTimeout(multiState.answerTimer);
   clearInterval(multiState.questionTimer);
   multiState.phase = 'results';
 
-  const pk            = multiState.playerKey || multiState.playerName;
-  const _myFinalName  = multiState.playerName || (currentUser && (currentUser.name || currentUser.username)) || 'لاعب';
-  const _trueScore    = Math.max(multiState.myScore || 0, multiState._peakScore || 0);
-  const _currentRoundId = multiState._roundId || multiState._startedAt || 0;
+  const pk = multiState.playerKey || multiState.playerName;
+  const _myFinalName = multiState.playerName || (currentUser && (currentUser.name || currentUser.username)) || 'لاعب';
 
-  // ══════════════════════════════════════════════════════
-  // ١. احفظ نتيجتي في finalScores (المصدر الوحيد الموثوق)
-  // ══════════════════════════════════════════════════════
+  // ★★ احسب النقطة الحقيقية أولاً — قبل أي كتابة على Firebase
+  const _trueScore = Math.max(multiState.myScore || 0, multiState._peakScore || 0);
+
   if (typeof window.fbMulti !== 'undefined') {
-    // saveFinalScore — مع retry مضمون مع guard على roundId
     if (typeof window.fbMulti.saveFinalScore === 'function') {
       const _saveDedicated = (attempt) => {
-        if (multiState._roundId !== _currentRoundId) return; // ★ جولة جديدة بدأت — وقّف
         const p = window.fbMulti.saveFinalScore(multiState.roomCode, pk, _trueScore, _myFinalName);
-        if (p && p.catch) p.catch(() => { if (attempt < 5) setTimeout(() => _saveDedicated(attempt + 1), 600 * attempt); });
+        if (p && p.catch) {
+          p.catch(() => { if (attempt < 4) setTimeout(() => _saveDedicated(attempt + 1), 400 * attempt); });
+        }
       };
       _saveDedicated(1);
-      setTimeout(() => _saveDedicated(2), 1500);
-      setTimeout(() => _saveDedicated(3), 4000);
+      setTimeout(() => _saveDedicated(1), 1500);
+      setTimeout(() => _saveDedicated(1), 4000);
     }
-    // updatePlayer — roundId مع كل كتابة + guard
-    const _finalPlayerData = { score: _trueScore, done: true, lastSeen: Date.now(), finalScore: _trueScore, finalName: _myFinalName, roundId: _currentRoundId };
+
+    const _finalScore = {
+      score:      _trueScore,
+      done:       true,
+      lastSeen:   Date.now(),
+      finalScore: _trueScore,
+      finalName:  _myFinalName,
+    };
     const _writeFinal = (attempt) => {
-      if (multiState._roundId !== _currentRoundId) return; // ★ جولة جديدة — وقّف
-      const p = window.fbMulti.updatePlayer(multiState.roomCode, pk, _finalPlayerData);
-      if (p && p.catch) p.catch(() => { if (attempt < 4) setTimeout(() => _writeFinal(attempt + 1), 600 * attempt); });
+      const p = window.fbMulti.updatePlayer(multiState.roomCode, pk, _finalScore);
+      if (p && p.catch) {
+        p.catch(() => { if (attempt < 3) setTimeout(() => _writeFinal(attempt + 1), 500 * attempt); });
+      }
     };
     _writeFinal(1);
-    setTimeout(() => _writeFinal(2), 2000);
-    setTimeout(() => _writeFinal(3), 5000);
+    setTimeout(() => _writeFinal(1), 2000);
+    setTimeout(() => _writeFinal(1), 5000);
     if (multiState.isHost) {
       window.fbMulti.updateRoom(multiState.roomCode, { phase: 'finished' }).catch(() => {});
     }
   } else {
     const room = _getRoomData(multiState.roomCode);
     if (room && room.players && room.players[pk]) {
-      room.players[pk] = { ...(room.players[pk]||{}), score: _trueScore, finalScore: _trueScore, roundId: _currentRoundId, done: true };
+      room.players[pk].score      = _trueScore;
+      room.players[pk].finalScore = _trueScore;
+      room.players[pk].done       = true;
       if (multiState.isHost) room.phase = 'finished';
       _setRoomData(multiState.roomCode, room);
     }
   }
 
-  // ══════════════════════════════════════════════════════
-  // ٢. عدّ اللعبة (مرة واحدة بس)
-  // ══════════════════════════════════════════════════════
+  // ===== عدّ اللعبة (النقاط نفسها اتحفظت فورًا مع كل إجابة عبر _bankMultiPoints) =====
+  // ★ guard: _showMultiResults ممكن تتنادى أكتر من مرة، فالعدّ مرة واحدة بس.
+  //   النقاط مش بتتجمع هنا تاني عشان ماتتضاعفش — اتحفظت بالفعل لحظة كل إجابة صح.
   const _cu = currentUser || window.currentUser;
   if (_cu && !multiState._scoreSavedThisRound) {
     multiState._scoreSavedThisRound = true;
     _cu.totalGames = (_cu.totalGames || 0) + 1;
     _cu.lastPlay   = Date.now();
-    currentUser = _cu; window.currentUser = _cu;
+    currentUser = _cu;
+    window.currentUser = _cu;
     if (!_cu.isGuest) {
       saveCurrentUser();
-      if (typeof window.fbIncrementScore === 'function') window.fbIncrementScore(_cu.username, 0, 0, 1);
+      if (typeof window.fbIncrementScore === 'function') {
+        window.fbIncrementScore(_cu.username, 0, 0, 1); // عدّ اللعبة فقط — النقاط اتحفظت قبل كده
+      }
     } else if (typeof window.fbSaveUser === 'function') {
-      window.fbSaveUser(_cu.username, { totalHasanat: _cu.totalHasanat, totalScore: _cu.totalScore, totalGames: _cu.totalGames, isGuest: true });
+      window.fbSaveUser(_cu.username, {
+        totalHasanat: _cu.totalHasanat,
+        totalScore:   _cu.totalScore,
+        totalGames:   _cu.totalGames,
+        isGuest:      true,
+      });
     }
     updateHomeStats();
   }
 
   document.getElementById('multiGameArea').style.display = 'none';
-  document.getElementById('multiResults').style.display  = 'block';
+  document.getElementById('multiResults').style.display = 'block';
 
-  // ══════════════════════════════════════════════════════
-  // ٣. دالة العرض — مصدر واحد: finalScores فقط
-  //    كل لاعب بيحفظ نتيجته هناك → موحّدة عند الكل
-  // ══════════════════════════════════════════════════════
-  const medals = ['🥇','🥈','🥉','🎖️'];
-
-  const _renderScores = (scoresMap) => {
-    // scoresMap: { pk → { name, score, roundId } }
-    // فلتر: نقاط الجولة الحالية فقط (roundId مطابق أو مفيش roundId قديم)
-    const filtered = {};
-    Object.entries(scoresMap).forEach(([u, d]) => {
-      if (!d) return;
-      // لو roundId موجود ومختلف → تجاهل
-      if (d.roundId && _currentRoundId && d.roundId !== _currentRoundId) return;
-      filtered[u] = d;
-    });
-    // ضمان: نقطة اللاعب نفسه دايماً موجودة بالقيمة الصح
-    filtered[pk] = { ...(filtered[pk]||{}), name: _myFinalName, score: _trueScore, roundId: _currentRoundId };
-
-    const sorted = Object.entries(filtered).sort((a,b) => (b[1].score||0) - (a[1].score||0));
-    const winner = sorted[0];
-    const isWinner = winner && winner[0] === pk;
-
-    const trophyEl  = document.getElementById('multiTrophyEmoji');
-    const winnerEl  = document.getElementById('multiWinnerName');
-    const msgEl     = document.getElementById('multiWinnerMsg');
-    const scoresEl  = document.getElementById('multiFinalScores');
-    if (trophyEl) trophyEl.textContent = isWinner ? '🏆' : '🎉';
-    if (winnerEl) winnerEl.textContent = winner ? (winner[1].name || 'لاعب') : '';
-    if (msgEl)    msgEl.textContent    = isWinner ? 'أنت الفائز! بارك الله فيك 🌟' : 'الفائز بالتحدي — بالتوفيق المرة الجاية!';
-    if (scoresEl) scoresEl.innerHTML   = sorted.map(([u, d], i) =>
-      `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(255,254,249,${i===0?'0.07':'0.03'});border-radius:12px;margin-bottom:6px;border:1px solid rgba(201,151,58,${i===0?'0.3':'0.1'});">
-        <span style="font-size:22px;">${medals[i]||'👤'}</span>
-        <span style="flex:1;font-size:15px;color:${i===0?'var(--gold)':'var(--cream)'};">${d.name||'لاعب'}${u===pk?' (أنت)':''}</span>
-        <span style="font-size:18px;font-weight:900;color:var(--emerald-light);">${toArabicNum(d.score||0)}</span>
-      </div>`
-    ).join('');
+  // ★★ نظام النقاط الـmonotonic: النتيجة المعروضة مرة متنزلش أبدًا.
+  //    لو لاعب ظهر بـ٥٠، يفضل ٥٠ حتى لو قراءة لاحقة رجّعت صفر (بسبب reset/تأخير شبكة).
+  //    ده بيحل المشكلة نهائيًا من ناحية العرض.
+  window._lockedScores = {}; // reset لكل نتيجة جديدة
+  const _recordMax = (key, val) => {
+    window._lockedScores[key] = Math.max(window._lockedScores[key] || 0, val || 0);
+    return window._lockedScores[key];
   };
 
-  // عرض أولي من الـ cache المحلي فوراً (بنقطة نفسك بس)
-  _renderScores({ [pk]: { name: _myFinalName, score: _trueScore, roundId: _currentRoundId } });
+  // ★ helpers: نختار أفضل قيمة متاحة لكل لاعب (الأولوية لـfinalScore اللي مفيش حاجة تكتب عليه)
+  const _bestScore = (p) => Math.max(
+    (p && typeof p.finalScore === 'number') ? p.finalScore : 0,
+    (p && typeof p.score === 'number') ? p.score : 0
+  );
+  const _bestName = (p) => (p && (p.finalName || p.name)) || 'لاعب';
 
-  // ══════════════════════════════════════════════════════
-  // ٤. refresh من Firebase — المصدر الوحيد الموثوق
-  //    نكرر ٣ مرات بفواصل زمنية عشان كل اللاعيبة يكونوا حفظوا
-  // ══════════════════════════════════════════════════════
+  const finalRoom = window._multiRoomCache;
+  const players = finalRoom ? { ...(finalRoom.players || {}) } : {};
+  // ★ _trueScore محسوب فوق — نستخدمه هنا للعرض
+  if (pk) {
+    const _prev = players[pk] || {};
+    players[pk] = {
+      ..._prev,
+      name:       _bestName(_prev) === 'لاعب' ? (multiState.playerName || (currentUser && (currentUser.name || currentUser.username)) || 'أنت') : _bestName(_prev),
+      finalScore: Math.max(_bestScore(_prev), _trueScore),
+      score:      Math.max(_bestScore(_prev), _trueScore),
+    };
+  }
+  // سجّل أعلى قيمة لكل لاعب (monotonic)
+  Object.entries(players).forEach(([u, p]) => { if (p != null) _recordMax(u, _bestScore(p)); });
+  const sorted = Object.entries(players).filter(([, p]) => p != null).sort((a,b) => _recordMax(b[0], _bestScore(b[1])) - _recordMax(a[0], _bestScore(a[1])));
+  const medals = ['🥇','🥈','🥉','🎖️'];
+
+  const winner = sorted[0];
+  const isWinner = winner && winner[0] === pk;
+  document.getElementById('multiTrophyEmoji').textContent = isWinner ? '🏆' : '🎉';
+  document.getElementById('multiWinnerName').textContent = winner ? _bestName(winner[1]) : '';
+  document.getElementById('multiWinnerMsg').textContent = isWinner ? 'أنت الفائز! بارك الله فيك 🌟' : 'الفائز بالتحدي — بالتوفيق المرة الجاية!';
+
+  document.getElementById('multiFinalScores').innerHTML = sorted.map(([u, p], i) =>
+    `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(255,254,249,${i===0?'0.07':'0.03'});border-radius:12px;margin-bottom:6px;border:1px solid rgba(201,151,58,${i===0?'0.3':'0.1'});">
+      <span style="font-size:22px;">${medals[i]||'👤'}</span>
+      <span style="flex:1;font-size:15px;color:${i===0?'var(--gold)':'var(--cream)'};">${_bestName(p)}${u===pk?' (أنت)':''}</span>
+      <span style="font-size:18px;font-weight:900;color:var(--emerald-light);">${toArabicNum(_recordMax(u, _bestScore(p)))}</span>
+    </div>`
+  ).join('');
+
+  // ★ بعد ثانية، نجيب أحدث بيانات من Firebase ونعيد العرض عشان كل اللاعيبة يشوفوا نفس النتيجة
+  //    (ده بيحل مشكلة التضارب لو كتابة لاعب على Firebase وصلت متأخرة)
   if (typeof window.fbMulti !== 'undefined' && multiState.roomCode) {
-    const _refresh = () => {
-      if (multiState._roundId !== _currentRoundId) return; // ★ جولة جديدة — وقّف
-      if (multiState.phase !== 'results') return;          // ★ مش في النتايج — وقّف
-      if (typeof window.fbMulti.getFinalScores !== 'function') return;
-      window.fbMulti.getFinalScores(multiState.roomCode, (finalScores) => {
-        if (!finalScores) return;
-        // حوّل finalScores لـ scoresMap موحّد { pk → { name, score, roundId } }
-        const scoresMap = {};
-        Object.entries(finalScores).forEach(([u, d]) => {
-          if (!d) return;
-          scoresMap[u] = { name: d.name || 'لاعب', score: d.score || 0, roundId: d.roundId || null };
+    const _refreshResults = (attempt) => {
+      // ★★ نقرأ من المسار المخصّص للنتايج النهائية أولاً (الأقوى والأضمن)
+      const _readFinals = (cb) => {
+        if (typeof window.fbMulti.getFinalScores === 'function') {
+          window.fbMulti.getFinalScores(multiState.roomCode, cb);
+        } else cb(null);
+      };
+      _readFinals((finalScores) => {
+        window.fbMulti.getRoom(multiState.roomCode, (freshRoom) => {
+          // ★ ندمج المصدرين: نقاط نهائية مستقلة (الأولوية) + بيانات اللاعبين العادية
+          const freshPlayers = (freshRoom && freshRoom.players) ? { ...freshRoom.players } : {};
+          // ندمج بيانات النقاط النهائية (المسار المستقل) فوق أي حاجة
+          if (finalScores) {
+            Object.entries(finalScores).forEach(([fpk, fdata]) => {
+              if (!fdata) return;
+              freshPlayers[fpk] = {
+                ...(freshPlayers[fpk] || {}),
+                name: (freshPlayers[fpk] && freshPlayers[fpk].name) || fdata.name || 'لاعب',
+                finalName: fdata.name,
+                finalScore: fdata.score || 0,
+                score: Math.max((freshPlayers[fpk] && freshPlayers[fpk].score) || 0, fdata.score || 0),
+              };
+            });
+          }
+          if (freshRoom) window._multiRoomCache = freshRoom;
+          // override لنقطة اللاعب نفسه — مضمونة من المصدر المحلي
+          if (pk) {
+            const _prev = freshPlayers[pk] || {};
+            freshPlayers[pk] = {
+              ..._prev,
+              name:  _bestName(_prev) === 'لاعب' ? (multiState.playerName || (currentUser && currentUser.username) || 'أنت') : _bestName(_prev),
+              finalScore: Math.max(_bestScore(_prev), _trueScore),
+              score:      Math.max(_bestScore(_prev), _trueScore),
+            };
+          }
+          const freshSorted = Object.entries(freshPlayers).filter(([, p]) => p != null).sort((a,b) => _recordMax(b[0], _bestScore(b[1])) - _recordMax(a[0], _bestScore(a[1])));
+          const freshWinner = freshSorted[0];
+          const freshIsWinner = freshWinner && freshWinner[0] === pk;
+          const winnerEl = document.getElementById('multiWinnerName');
+          const trophyEl = document.getElementById('multiTrophyEmoji');
+          const msgEl    = document.getElementById('multiWinnerMsg');
+          if (trophyEl) trophyEl.textContent = freshIsWinner ? '🏆' : '🎉';
+          if (winnerEl) winnerEl.textContent = freshWinner ? _bestName(freshWinner[1]) : '';
+          if (msgEl) msgEl.textContent = freshIsWinner ? 'أنت الفائز! بارك الله فيك 🌟' : 'الفائز بالتحدي — بالتوفيق المرة الجاية!';
+          const scoresEl = document.getElementById('multiFinalScores');
+          if (scoresEl) scoresEl.innerHTML = freshSorted.map(([u, p], i) =>
+            `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(255,254,249,${i===0?'0.07':'0.03'});border-radius:12px;margin-bottom:6px;border:1px solid rgba(201,151,58,${i===0?'0.3':'0.1'});">
+              <span style="font-size:22px;">${medals[i]||'👤'}</span>
+              <span style="flex:1;font-size:15px;color:${i===0?'var(--gold)':'var(--cream)'};">${_bestName(p)}${u===pk?' (أنت)':''}</span>
+              <span style="font-size:18px;font-weight:900;color:var(--emerald-light);">${toArabicNum(_recordMax(u, _bestScore(p)))}</span>
+            </div>`
+          ).join('');
         });
-        // ضمان نقطة نفسك
-        scoresMap[pk] = { name: _myFinalName, score: _trueScore, roundId: _currentRoundId };
-        _renderScores(scoresMap);
       });
     };
-    setTimeout(_refresh, 1500);
-    setTimeout(_refresh, 4000);
-    setTimeout(_refresh, 8000);
+    // إعادة عرض ٣ مرات: ١ثانية، ٣ثواني، ٦ثواني — عشان نلاقي كل اللاعيبة رفعوا finalScore
+    setTimeout(() => _refreshResults(1), 1000);
+    setTimeout(() => _refreshResults(2), 3000);
+    setTimeout(() => _refreshResults(3), 6000);
   }
 }
 
@@ -9446,7 +9195,7 @@ function _rebuildMultiQuestions(room) {
       }
       questions = questions.sort(() => Math.random() - 0.5).slice(0, qCount);
     }
-  } catch (e) { console.warn('[_rebuildMultiQuestions]', e); } finally {
+  } catch (e) {} finally {
     state.level = _savedLevel;
     reviewChallengeMode = _savedMode;
   }
@@ -9459,8 +9208,6 @@ function multiPlayAgain() {
 
   // غير المضيف: يفضل في النتايج ويستنى المضيف — ما يرجعش لقاعة الانتظار
   if (!multiState.isHost) {
-    clearInterval(multiState.questionTimer);
-    clearTimeout(multiState.answerTimer);
     const btn = document.getElementById('multiPlayAgainBtn');
     if (btn) {
       btn.textContent = '⏳ في انتظار المضيف...';
@@ -9478,7 +9225,7 @@ function multiPlayAgain() {
   }
 
   // المضيف: نفس الإعدادات + أسئلة جديدة + تصفير النقاط — وتبدأ الجولة فورًا أوتوماتيك
-  const room = _getRoomData(multiState.roomCode);
+  const room = _getRoomData(multiState.roomCode) || window._multiRoomCache;
   if (!room) { showMultiScreen(); return; }
   showToast('🔄 جولة جديدة بأسئلة جديدة...');
 
@@ -9488,61 +9235,40 @@ function multiPlayAgain() {
   } // وإلا نسيب الأسئلة القديمة كـ fallback
   multiState.totalQ = multiState.questions.length;
 
-  const _now = Date.now();
-  room.phase     = 'playing';
-  room.startedAt = _now;
-  room.roundId   = _now; // ★ مصدر الحقيقة لكل اللاعبين
-  room.currentQ  = 0;
+  room.phase = 'playing';            // ★ تبدأ فورًا بدل الرجوع لقاعة الانتظار
+  room.startedAt = Date.now();
+  room.currentQ = 0;
   room.questions = multiState.questions;
-  room.totalQ    = multiState.totalQ;
+  room.totalQ = multiState.totalQ;
   Object.keys(room.players || {}).forEach(u => {
-    room.players[u].score    = 0;
+    room.players[u].score = 0;
     room.players[u].answered = false;
-    room.players[u].done     = false;
-    room.players[u].roundId  = _now;
+    room.players[u].done = false;
   });
   window._multiRoomCache = room;
-  // ★ للـ offline fallback فقط
-  if (typeof window.fbMulti === 'undefined') {
-    _setRoomData(multiState.roomCode, room);
-  }
-
-  window._lockedScores    = {};
-  window._prevMultiScores = {};
+  _setRoomData(multiState.roomCode, room);
 
   if (typeof window.fbMulti !== 'undefined') {
-    // ★ امسح finalScores أولاً بـ remove (مش null) عشان يُضمن المسح الفوري
-    if (typeof window.fbMulti.removeFinalScores === 'function') {
-      window.fbMulti.removeFinalScores(multiState.roomCode).catch(() => {});
-    }
     const compressQ = (q) => {
-      // ★ يتعامل مع الأسئلة الموسّعة (surah/ayah/blank) والمضغوطة (s/a/b)
-      const o = {
-        s: q.surah || q.s || '',
-        a: q.ayah  || q.a || '',
-        b: q.blank !== undefined ? q.blank : (q.b || ''),
-        w: (q.wrong || q.w || []).slice(0, 3),
-        t: q.qtype || q.t || 'blank',
-      };
-      if (q.ayahNum || q.n) o.n = q.ayahNum || q.n;
+      const o = { s: q.surah || '', a: q.ayah || '', b: q.blank || '', w: (q.wrong || []).slice(0, 3), t: q.qtype || 'blank' };
+      if (q.ayahNum) o.n = q.ayahNum;
       return o;
     };
     window.fbMulti.updateRoom(multiState.roomCode, {
       phase: 'playing',
-      startedAt: _now,
+      startedAt: room.startedAt,
       currentQ: 0,
       questions: multiState.questions.map(compressQ),
       totalQ: multiState.totalQ,
-      finalScores: null,
-      roundId: _now, // ★ نفس الـ timestamp
+      finalScores: null, // ★ مسح نتائج الجولة السابقة
     }).catch(() => {});
     Object.keys(room.players || {}).forEach(pk => {
-      window.fbMulti.updatePlayer(multiState.roomCode, pk, { score: 0, answered: false, done: false, finalScore: null, finalName: null, roundId: _now }).catch(() => {});
+      window.fbMulti.updatePlayer(multiState.roomCode, pk, { score: 0, answered: false, done: false, finalScore: 0, finalName: null }).catch(() => {});
     });
   }
 
   // المضيف يدخل اللعبة الجديدة فورًا
-  _startMultiGame(_now);
+  _startMultiGame();
 }
 
 window.multiPlayAgain = multiPlayAgain;
@@ -9557,7 +9283,7 @@ function multiLeaveRoom() {
   // فمفيش داعي نحفظها تاني هنا — كده مستحيل تتكرر ومستحيل تضيع لو خرج في النص.
   multiState._scoreSavedThisRound = true;
   if (typeof window.fbMulti !== 'undefined' && code) {
-    window.fbMulti.removePlayer(code, pk).catch(() => {});
+    window.fbMulti.removePlayer(code, pk);
     // لو الـ host خرج يحدّث phase لـ closed أولاً عشان اللاعبين يعرفوا، ثم يمسح الغرفة
     const room = window._multiRoomCache;
     if (room && room.hostUser === (currentUser && currentUser.username)) {
@@ -9571,60 +9297,10 @@ function multiLeaveRoom() {
       _setRoomData(code, room);
     }
   }
-  window._multiRoomCache  = null;
-  multiState.roomCode     = null;
-  multiState.phase        = 'lobby';
-  multiState.playerKey    = null;
-  multiState.playerName   = null;
-  multiState.isHost       = false;
-  multiState.questions    = [];
-  multiState.qIndex       = 0;
-  multiState.myScore      = 0;
-  multiState._peakScore   = 0;
-  multiState._roundId     = 0;
-  multiState._startedAt   = 0;
-  multiState._scoreSavedThisRound = false;
-}
-
-// ★★ helper مركزي لبدء جولة جديدة لغير المضيف — مصدر واحد لكل الحالات
-function _beginNewRound(roundId) {
-  const _rid = roundId || Date.now();
-  clearTimeout(multiState.answerTimer);
-  clearInterval(multiState.questionTimer);
-  multiState.phase                = 'playing';
-  multiState.myScore              = 0;
-  multiState._peakScore           = 0;
-  multiState.qIndex               = 0;
-  multiState.timeLeft             = multiState.qTime || 15;
-  multiState._scoreSavedThisRound = false;
-  multiState._startedAt           = _rid;
-  multiState._roundId             = _rid;
-  window._lockedScores            = {};
-  window._prevMultiScores         = {};
-  // ★ امسح علامة requestRematch عشان ما تفضلش في Firebase
-  if (typeof window.fbMulti !== 'undefined' && multiState.roomCode) {
-    const _pk = multiState.playerKey || multiState.playerName;
-    if (_pk) window.fbMulti.updatePlayer(multiState.roomCode, _pk, { requestRematch: null }).catch(() => {});
-  }
-  // صفّر نقاط الـ cache المحلي فوراً
-  if (window._multiRoomCache && window._multiRoomCache.players) {
-    Object.keys(window._multiRoomCache.players).forEach(u => {
-      if (window._multiRoomCache.players[u]) {
-        window._multiRoomCache.players[u].score    = 0;
-        window._multiRoomCache.players[u].answered = false;
-        window._multiRoomCache.players[u].done     = false;
-      }
-    });
-  }
-  // UI reset
-  document.getElementById('multiResults').style.display   = 'none';
-  document.getElementById('multiWaiting').style.display   = 'none';
-  document.getElementById('multiGameArea').style.display  = 'block';
-  document.getElementById('multiLiveScores').innerHTML    = '';
-  document.getElementById('multiMyScore').textContent     = toArabicNum(0);
-  const _qt = document.getElementById('multiQTotal');
-  if (_qt) _qt.textContent = toArabicNum(multiState.totalQ);
-  _renderMultiQuestion();
+  window._multiRoomCache = null;
+  multiState.roomCode = null;
+  multiState.phase = 'lobby';
+  // ★ المتصل هو اللي يقرر يروح فين (الرئيسية أو إعدادات الغرفة)
 }
 
 function _startPolling() {
@@ -9670,7 +9346,7 @@ function _startPolling() {
       }
       // توسيع الأسئلة المضغوطة لو جاية من Firebase
       if (room.questions && room.questions.length > 0 && room.questions[0].s !== undefined) {
-        room.questions = room.questions.map(window._expandMultiQ).filter(Boolean);
+        room.questions = room.questions.map(window._expandMultiQ);
       }
       // لو المضيف أغلق الغرفة أثناء اللعب
       if (room.phase === 'closed') {
@@ -9688,20 +9364,6 @@ function _startPolling() {
       if (room.hostOffline && !multiState.isHost) {
         // المضيف خرج مؤقتاً — استمر في المراقبة بدون رسائل
       }
-      // ★ لو roundId الغرفة تغيّر (جولة جديدة) → صفّر نقاط اللاعبين في room قبل كتابة الـ cache
-      {
-        const _inRid  = room.roundId || room.startedAt || 0;
-        const _oldRid = (window._multiRoomCache && (window._multiRoomCache.roundId || window._multiRoomCache.startedAt)) || 0;
-        if (_inRid && _oldRid && _inRid !== _oldRid && room.players) {
-          Object.keys(room.players).forEach(u => {
-            if (room.players[u] && room.players[u].roundId !== _inRid) {
-              room.players[u].score    = 0;
-              room.players[u].answered = false;
-              room.players[u].done     = false;
-            }
-          });
-        }
-      }
       window._multiRoomCache = room;
       // Keep alive — كل ٣٠ ثانية بس عشان ما نسبّبش rate limiting
       const pk = multiState.playerKey || multiState.playerName;
@@ -9709,27 +9371,56 @@ function _startPolling() {
         const now = Date.now();
         if (!window._lastKeepAlive || now - window._lastKeepAlive > 30000) {
           window._lastKeepAlive = now;
-          window.fbMulti.updatePlayer(multiState.roomCode, pk, { lastSeen: now }).catch(() => {});
+          window.fbMulti.updatePlayer(multiState.roomCode, pk, { lastSeen: now });
         }
       }
       if (multiState.phase === 'waiting') {
+        // لو الـ host بدأ اللعبة
         if (room.phase === 'playing' && !multiState.isHost) {
+          multiState.phase = 'playing';
+          multiState.myScore = 0;
+          multiState._peakScore = 0;
+          multiState.qIndex = 0;
+          multiState._scoreSavedThisRound = false;
+          multiState._startedAt = room.startedAt || Date.now();
+          window._lockedScores = {};
+          window._prevMultiScores = {};
           const _expFn = window._expandMultiQ || (q => q);
-          multiState.questions = (room.questions || []).map(_expFn).filter(Boolean);
-          multiState.totalQ    = room.totalQ || (room.questions ? room.questions.length : 0);
-          multiState.qTime     = room.qTime || 15;
-          _beginNewRound(room.roundId || room.startedAt);
+          multiState.questions = (room.questions || []).map(_expFn);
+          multiState.totalQ = room.totalQ || (room.questions ? room.questions.length : 0);
+          multiState.qTime = room.qTime || 15;
+          document.getElementById('multiMyScore').textContent = toArabicNum(0);
+          // ★ إخفاء النتايج القديمة وتصفير النقاط اللحظية
+          document.getElementById('multiResults').style.display  = 'none';
+          document.getElementById('multiLiveScores').innerHTML   = '';
+          document.getElementById('multiWaiting').style.display  = 'none';
+          document.getElementById('multiGameArea').style.display = 'block';
+          document.getElementById('multiQTotal').textContent = toArabicNum(multiState.totalQ);
+          _renderMultiQuestion();
         } else {
           _updateWaitingUI();
         }
       } else if (multiState.phase === 'results' && room.phase === 'playing') {
+        // ★ المضيف بدأ جولة جديدة والباقيين في النتايج — ابدأ الجولة الجديدة
+        multiState.myScore = 0;
+        multiState._peakScore = 0;
+        multiState.qIndex = 0;
+        multiState._scoreSavedThisRound = false;
+        multiState._startedAt = room.startedAt || Date.now();
+        window._lockedScores = {};
+        window._prevMultiScores = {};
         const _expFn2 = window._expandMultiQ || (q => q);
-        multiState.questions = (room.questions || []).map(_expFn2).filter(Boolean);
-        multiState.totalQ    = room.totalQ || (room.questions ? room.questions.length : 0);
-        multiState.qTime     = room.qTime || 15;
-        const _btn2 = document.getElementById('multiPlayAgainBtn');
-        if (_btn2) { _btn2.textContent = '🔄 مرة تانية'; _btn2.disabled = false; _btn2.style.opacity = '1'; _btn2.style.cursor = 'pointer'; }
-        _beginNewRound(room.roundId || room.startedAt);
+        multiState.questions = (room.questions || []).map(_expFn2);
+        multiState.totalQ = room.totalQ || (room.questions ? room.questions.length : 0);
+        multiState.qTime = room.qTime || 15;
+        document.getElementById('multiMyScore').textContent = toArabicNum(0);
+        document.getElementById('multiResults').style.display  = 'none';
+        document.getElementById('multiLiveScores').innerHTML   = '';
+        document.getElementById('multiWaiting').style.display  = 'none';
+        document.getElementById('multiGameArea').style.display = 'block';
+        document.getElementById('multiQTotal').textContent = toArabicNum(multiState.totalQ);
+        multiState.phase = 'playing';
+        _renderMultiQuestion();
       } else if (multiState.phase === 'playing') {
         _updateMultiLiveScores();
         // ★ لو الغرفة انتهت (finished) → اعرض النتائج فوراً
@@ -9745,13 +9436,24 @@ function _startPolling() {
         if (!multiState.isHost && multiState._startedAt > 0 && _serverStarted > multiState._startedAt && room.phase === 'playing') {
           clearTimeout(multiState.answerTimer);
           clearInterval(multiState.questionTimer);
+          multiState._startedAt = _serverStarted;
+          multiState.phase = 'playing';
+          multiState.myScore = 0;
+          multiState._peakScore = 0;
+          multiState.qIndex = 0;
+          multiState._scoreSavedThisRound = false;
+          window._prevMultiScores = {};
+          window._lockedScores = {};
           if (room.questions && room.questions.length) {
-            multiState.questions = room.questions.map(window._expandMultiQ || (q => q)).filter(Boolean);
-            multiState.totalQ    = room.totalQ || room.questions.length;
+            multiState.questions = room.questions.map(window._expandMultiQ || (q => q));
+            multiState.totalQ = room.totalQ || room.questions.length;
           }
           multiState.qTime = room.qTime || multiState.qTime || 15;
+          document.getElementById('multiResults').style.display = 'none';
+          document.getElementById('multiMyScore').textContent = toArabicNum(0);
+          const _qt2 = document.getElementById('multiQTotal'); if (_qt2) _qt2.textContent = toArabicNum(multiState.totalQ);
           showToast('🔄 جولة جديدة — يلا!');
-          _beginNewRound(room.roundId || _serverStarted);
+          _renderMultiQuestion();
           return;
         }
         // sync السؤال — لو currentQ في Firebase أكبر من اللي عندنا محلياً انتقل فوراً
@@ -9761,7 +9463,7 @@ function _startPolling() {
           clearInterval(multiState.questionTimer);
           multiState.qIndex = serverQ;
           const pk2 = multiState.playerKey || multiState.playerName;
-          window.fbMulti.updatePlayer(multiState.roomCode, pk2, { answered: false }).catch(() => {});
+          window.fbMulti.updatePlayer(multiState.roomCode, pk2, { answered: false });
           if (multiState.qIndex >= multiState.totalQ) {
             _showMultiResults();
           } else {
@@ -9769,18 +9471,32 @@ function _startPolling() {
           }
         }
       } else if (multiState.phase === 'results') {
+        // ★ "مرة تانية" أوتوماتيك: المضيف بدأ جولة جديدة → ادخل اللعبة فوراً
         if (room.phase === 'playing' && !multiState.isHost) {
           clearTimeout(multiState.answerTimer);
           clearInterval(multiState.questionTimer);
+          multiState.phase = 'playing';
+          multiState.myScore = 0;
+          multiState._peakScore = 0;
+          multiState.qIndex = 0;
+          multiState._scoreSavedThisRound = false;
+          window._prevMultiScores = {};
+          // ★ رست زرار «مرة تانية»
+          const _btn = document.getElementById('multiPlayAgainBtn');
+          if (_btn) { _btn.textContent = '🔄 مرة تانية'; _btn.disabled = false; _btn.style.opacity = '1'; _btn.style.cursor = 'pointer'; }
+          // خذ الأسئلة من Firebase (الجديدة)
           if (room.questions && room.questions.length) {
-            multiState.questions = room.questions.map(window._expandMultiQ || (q => q)).filter(Boolean);
-            multiState.totalQ    = room.totalQ || room.questions.length;
+            multiState.questions = room.questions.map(window._expandMultiQ || (q => q));
+            multiState.totalQ = room.totalQ || room.questions.length;
           }
           multiState.qTime = room.qTime || multiState.qTime || 15;
-          const _btn3 = document.getElementById('multiPlayAgainBtn');
-          if (_btn3) { _btn3.textContent = '🔄 مرة تانية'; _btn3.disabled = false; _btn3.style.opacity = '1'; _btn3.style.cursor = 'pointer'; }
+          document.getElementById('multiResults').style.display = 'none';
+          document.getElementById('multiWaiting').style.display = 'none';
+          document.getElementById('multiGameArea').style.display = 'block';
+          document.getElementById('multiMyScore').textContent = toArabicNum(0);
+          const _qt = document.getElementById('multiQTotal'); if (_qt) _qt.textContent = toArabicNum(multiState.totalQ);
           showToast('🔄 جولة جديدة — يلا!');
-          _beginNewRound(room.roundId || room.startedAt);
+          _renderMultiQuestion();
         } else if (room.phase === 'waiting') {
           // (احتياطي) المضيف رجّع الغرفة لـ waiting بنفس الإعدادات → رجّع اللاعب لقاعة الانتظار
           multiState.phase = 'waiting';
@@ -9788,7 +9504,7 @@ function _startPolling() {
           multiState.qIndex = 0;
           multiState._scoreSavedThisRound = false;
           if (room.questions && room.questions.length) {
-            multiState.questions = (room.questions || []).map(window._expandMultiQ).filter(Boolean);
+            multiState.questions = (room.questions || []).map(window._expandMultiQ);
             multiState.totalQ = room.totalQ || room.questions.length;
           }
           document.getElementById('multiResults').style.display = 'none';
@@ -10173,9 +9889,6 @@ window.addEventListener('pagehide', function(e) {
   if (!ms.isHost) {
     const playerUrl = dbUrl + '/nour_rooms/' + code + '/players/' + pk + '.json';
     navigator.sendBeacon(playerUrl, new Blob(['null'], { type: 'application/json' }));
-    // ★ نظّف الحالة عشان لو الصفحة اترجعت من bfcache ما تحاولش تكمل
-    ms.roomCode = null;
-    ms.phase    = 'lobby';
   }
   // ★ المضيف ما نمسحش الغرفة عند pagehide — فقط عند multiLeaveRoom صريح
 });
