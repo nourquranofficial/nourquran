@@ -3453,24 +3453,17 @@ function doLogin() {
   if (!user || !pass) { showLoginErr('أدخل الإيميل وكلمة المرور'); return; }
   if (!user.includes('@')) { showLoginErr('أدخل إيميلك (example@gmail.com)'); return; }
 
-  // ★ منع الضغط المزدوج فقط (بدون تغيير النص)
   const _loginBtn = document.querySelector('#loginForm .login-btn');
-  if (_loginBtn) { _loginBtn.disabled = true; }
   showLoginErr('');
 
-  // ★ Safety timeout: لو الدخول علّق أكتر من 10 ثواني — ارجع الزرار
-  const _loginTimeout = setTimeout(() => {
-    if (_loginBtn) { _loginBtn.disabled = false; }
-  }, 10000);
+  // ★ Safety timeout فقط — مش بنعطّل الزرار خالص
+  const _loginTimeout = setTimeout(() => {}, 1);
 
   // ── دخول فوري: أخفي اللوجين فوراً لو الباسورد صح محلياً ──
   const users = getUsers();
   const localData = users[user];
 
-  const _restoreBtn = () => {
-    clearTimeout(_loginTimeout);
-    if (_loginBtn) { _loginBtn.disabled = false; }
-  };
+  const _restoreBtn = () => { clearTimeout(_loginTimeout); };
 
   // ★ دايماً نمر على fbLogin عشان يتحقق من bypassAuth (المصدر الحقيقي للباسورد)
   // الـ local check بيتعمل جوّا fbLogin لو مفيش إنترنت
@@ -3587,12 +3580,9 @@ function doRegister() {
   if (pass.length < 4) { showLoginErr('كلمة المرور يجب أن تكون ٤ أحرف على الأقل'); return; }
   if (pass !== pass2) { showLoginErr('كلمتا المرور غير متطابقتين'); return; }
 
-  // ★ منع الضغط المزدوج فقط
   showLoginErr('');
   const _regBtn = document.querySelector('#registerForm .login-btn');
-  if (_regBtn) { _regBtn.disabled = true; }
-  // ★ Safety timeout
-  const _regTimeout = setTimeout(() => { if (_regBtn) { _regBtn.disabled = false; } }, 10000);
+  const _regTimeout = setTimeout(() => {}, 1);
 
   currentUser = null;
   window.currentUser = null;
