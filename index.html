@@ -1421,7 +1421,32 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
 
   window.fbLogout = function() { signOut(auth).catch(() => {}); };
 
-  // جلب/حفظ بيانات المستخدم من Firebase DB
+  // ★★ مراقبة تغيير الباسورد — يطرد الأجهزة التانية فوراً لما الباسورد يتغيّر ★★
+  let _passUnsub = null;
+  window.fbWatchPassChange = function(username) {
+    // null = وقّف المراقبة (عند logout)
+    if (_passUnsub) { try { _passUnsub(); } catch(e) {} _passUnsub = null; }
+    if (!username) return;
+
+    const _key = dataKey(username);
+    let _firstCall = true;
+
+    _passUnsub = onValue(ref(db, 'users/' + _key + '/bypassAuth'), (snap) => {
+      if (_firstCall) { _firstCall = false; return; } // أول call دايماً ignore
+      if (!snap.exists()) return;
+      const bpa = snap.val();
+      // لو changedAt أحدث من وقت دخولنا → طرد
+      if (bpa && bpa.changedAt && bpa.changedAt > (window._loginTime || 0)) {
+        console.warn('🔐 الباسورد اتغيّر — جاري الخروج');
+        if (typeof doLogout === 'function') doLogout();
+        else if (typeof window.fbLogout === 'function') {
+          window.fbLogout();
+          try { localStorage.removeItem('nour_last_user'); } catch(e) {}
+          location.reload();
+        }
+      }
+    }, () => {}); // ignore errors — network issues shouldn't log out user
+  };
   window.fbGetUserData = function(username, onResult) {
     const key = dataKey(username);
     get(ref(db, 'users/' + key + '/data'))
@@ -3316,120 +3341,93 @@ window.togglePw = togglePw;
 })();
 
 function doLogin() {
-  if (window._loginInProgress) return; // ★ منع double-submit
+  if (window._loginInProgress) return;
   window._loginInProgress = true;
   window._loggedOut = false;
   window._cancelBgAuth = false;
-  // ★ reset _authDone عشان onAuthStateChanged يشتغل بعد logout ثم login تاني
   if (typeof window._resetAuthDone === 'function') window._resetAuthDone();
+
   const user = document.getElementById('loginUser').value.trim().toLowerCase();
   const pass = document.getElementById('loginPass').value;
   if (!user || !pass) { window._loginInProgress = false; showLoginErr('أدخل الإيميل وكلمة المرور'); return; }
   if (!user.includes('@')) { window._loginInProgress = false; showLoginErr('أدخل إيميلك (example@gmail.com)'); return; }
 
-  // ── دخول فوري: أخفي اللوجين فوراً لو الباسورد صح محلياً ──
   const users = getUsers();
   const localData = users[user];
 
-  // ★ دايماً نمر على fbLogin عشان يتحقق من bypassAuth (المصدر الحقيقي للباسورد)
-  // لو الباسورد اتغيّر من جهاز تاني — bypassAuth هو اللي يحدّد مش localStorage
-  if (typeof window.fbLogin === 'function') {
-    showLoginErr('⏳ جاري التحقق...');
+  // ── دالة الدخول النهائي ────────────────────────────────────
+  const _enterApp = (fbData) => {
+    if (window._loggedOut) { window._loginInProgress = false; return; }
+    window._loginInProgress = false;
+    // ★ سجّل وقت الدخول وابدأ مراقبة تغيير الباسورد
+    window._loginTime = Date.now() + 120000; // +2 دقيقة هامش أمان
+    if (typeof window.fbWatchPassChange === 'function') window.fbWatchPassChange(user);
+    const lData = localData || {};
+    const merged = {
+      totalScore:   Math.max((fbData && fbData.totalScore)   || 0, lData.totalScore   || 0),
+      totalGames:   Math.max((fbData && fbData.totalGames)   || 0, lData.totalGames   || 0),
+      totalHasanat: Math.max((fbData && fbData.totalHasanat) || 0, lData.totalHasanat || 0),
+      streak:       Math.max((fbData && fbData.streak)       || 0, lData.streak       || 0),
+      lastPlay:     (fbData && fbData.lastPlay) || lData.lastPlay || null,
+      name:         (typeof window._getStoredName === 'function' ? window._getStoredName(user) : null)
+                    || (fbData && fbData.name && !fbData.name.includes('@') ? fbData.name : null)
+                    || lData.name || user.split('@')[0],
+      email: user,
+    };
+    try {
+      const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
+      _lu[user] = { ...(_lu[user] || {}), ...merged, password: btoa(pass) };
+      localStorage.setItem('nour_users', JSON.stringify(_lu));
+      localStorage.setItem('nour_last_user', user);
+    } catch(e) {}
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    const _lsEl = document.getElementById('loginScreen');
+    if (_lsEl) _lsEl.classList.add('hide');
+    window.scrollTo(0, 0);
+    loginSuccess(merged.name || user, merged);
+    if (typeof window.fbSaveUser === 'function' && merged.totalScore > 0) {
+      window.fbSaveUser(user, Object.assign({}, merged, { isGuest: false }));
+    }
+  };
 
+  const _showErr = (msg) => {
+    window._loginInProgress = false;
+    showLoginErr(msg || 'الإيميل أو كلمة المرور خاطئة');
+  };
+
+  // ── fbLogin ────────────────────────────────────────────────
+  if (typeof window.fbLogin === 'function') {
     window.fbLogin(user, pass,
       () => {
+        // ★ تحقق صح — اجلب البيانات وادخّل
         if (typeof window._markAuthDone === 'function') window._markAuthDone();
-        // ★ blur أي input نشط عشان الـ keyboard يقفل على الموبايل
-        if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
-        const _finishFresh = (realName, fbData, fbNameOverride) => {
-          if (window._loggedOut) return; // لو خرج أثناء التحميل
-          window._loginInProgress = false;
-          const lData = users[user] || {};
-          const merged = {
-            totalScore:   Math.max((fbData && fbData.totalScore)   || 0, lData.totalScore   || 0),
-            totalGames:   Math.max((fbData && fbData.totalGames)   || 0, lData.totalGames   || 0),
-            totalHasanat: Math.max((fbData && fbData.totalHasanat) || 0, lData.totalHasanat || 0),
-            streak:       Math.max((fbData && fbData.streak)       || 0, lData.streak       || 0),
-            lastPlay:     (fbData && fbData.lastPlay) || lData.lastPlay || null,
-            // ★ الاسم: المسار المستقل أولاً، ثم localStorage، ثم data
-            name: (typeof window._getStoredName === 'function' ? window._getStoredName(user) : null) || fbNameOverride || lData.name || (fbData && fbData.name) || '',
-            email: user,
-          };
-          try {
-            const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
-            _lu[user] = { ...(_lu[user]||{}), ...merged, password: btoa(pass) };
-            localStorage.setItem('nour_users', JSON.stringify(_lu));
-            localStorage.setItem('nour_last_user', user);
-          } catch(e) {}
-          // ★ استنى الـ keyboard يقفل
-          setTimeout(() => {
-            const _lsEl = document.getElementById('loginScreen');
-            if (_lsEl) { _lsEl.classList.add('hide'); }
-            window.scrollTo(0, 0);
-            loginSuccess(realName || user, merged);
-          }, 400);
-          if (typeof window.fbSaveUser === 'function' && merged.totalScore > 0) {
-            window.fbSaveUser(user, Object.assign({}, merged, {isGuest: false}));
-          }
-        };
-        // اقرأ البيانات + الاسم المستقل
-        const _key = typeof window._dataKey === 'function' ? window._dataKey(user) : user;
-        const _readName = typeof window.fbGetName === 'function'
-          ? new Promise(res => window.fbGetName(user, res))
-          : Promise.resolve(null);
-        const _readLbName = new Promise(res => {
-          const _lk = typeof window._dataKey === 'function' ? window._dataKey(user) : user;
-          get(ref(db, 'leaderboard/' + _lk + '/name')).then(s => res(s.exists() && typeof s.val()==='string' && !s.val().includes('@') ? s.val() : null)).catch(() => res(null));
-        });
         if (typeof window.fbGetAccount === 'function') {
-          Promise.all([
-            new Promise(res => window.fbGetAccount(user, (rn, fd) => res([rn, fd]))),
-            _readName,
-            _readLbName,
-          ]).then(([[realName, fbData], fbName, lbName]) => _finishFresh(realName || user, fbData, fbName || lbName))
-            .catch(() => _finishFresh(user, localData, null));
+          window.fbGetAccount(user, (_, fbData) => _enterApp(fbData));
         } else if (typeof window.fbGetUserData === 'function') {
-          Promise.all([
-            new Promise(res => window.fbGetUserData(user, res)),
-            _readName,
-          ]).then(([fbData, fbName]) => _finishFresh(user, fbData, fbName))
-            .catch(() => _finishFresh(user, localData, null));
+          window.fbGetUserData(user, (fbData) => _enterApp(fbData));
         } else {
-          _finishFresh(user, localData, null);
+          _enterApp(null);
         }
       },
       (errMsg) => {
-        window._loginInProgress = false;
+        // ★ Firebase فشل — fallback لـ localStorage لو الباسورد صح محلياً
         currentUser = null; window.currentUser = null;
-        const _lsR = document.getElementById('loginScreen'); if(_lsR){_lsR.classList.remove('hide');_lsR.style.display='';_lsR.style.pointerEvents='';}
-        // ★ Fallback محلي: لو Firebase فشل وفيه باسورد محلي صح
-        const _lFresh = getUsers()[user];
-        if (!window._loggedOut && _lFresh && _lFresh.password === btoa(pass)) {
-          // ★ أضف الاسم من المصادر المتاحة قبل الدخول
-          const _storedName = (typeof window._getStoredName === 'function' ? window._getStoredName(user) : null)
-                           || _lFresh.name
-                           || (user && user.includes('@') ? user.split('@')[0] : user);
-          const _enriched = { ..._lFresh, name: _storedName, email: user };
+        const _fresh = getUsers()[user];
+        if (!window._loggedOut && _fresh && _fresh.password === btoa(pass)) {
           if (typeof window._markAuthDone === 'function') window._markAuthDone();
-          document.getElementById('loginScreen').classList.add('hide');
-          loginSuccess(user, _enriched);
+          _enterApp(_fresh);
           return;
         }
-        showLoginErr(errMsg || 'الإيميل أو كلمة المرور خاطئة');
+        _showErr(errMsg);
       }
     );
     return;
   }
 
-  // Fallback لو Firebase مش متاح خالص
-  if (!localData || !localData.password) { window._loginInProgress = false; showLoginErr('الحساب غير موجود'); return; }
-  if (localData.password !== btoa(pass)) { window._loginInProgress = false; showLoginErr('كلمة المرور خطأ — حاول مجدداً'); return; }
-  const _offlineName = (typeof window._getStoredName === 'function' ? window._getStoredName(user) : null)
-                    || localData.name
-                    || (user && user.includes('@') ? user.split('@')[0] : user);
-  window._loginInProgress = false;
-  document.getElementById('loginScreen').classList.add('hide');
-  loginSuccess(user, { ...localData, name: _offlineName, email: user });
+  // ── Offline fallback ───────────────────────────────────────
+  if (!localData || !localData.password) { _showErr('الحساب غير موجود'); return; }
+  if (localData.password !== btoa(pass)) { _showErr('كلمة المرور خطأ — حاول مجدداً'); return; }
+  _enterApp(localData);
 }
 
 function doRegister() {
