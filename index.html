@@ -6911,14 +6911,14 @@ function handleResult(isRight, e) {
     state.sessionHasanat += hasanat;
 
     // ★★ بنك فوري — النقطة تترفع لحظتها حتى لو خرج قبل النهاية
-    if (!state.isReviewMode && !currentUser.isGuest) {
+    if (!currentUser.isGuest) {
       currentUser.totalScore   = (currentUser.totalScore   || 0) + pts;
       currentUser.totalHasanat = (currentUser.totalHasanat || 0) + pts;
       window.currentUser = currentUser;
       if (typeof window.fbIncrementScore === 'function') {
         window.fbIncrementScore(currentUser.username, pts, pts, 0);
       }
-    } else if (!state.isReviewMode && currentUser.isGuest) {
+    } else {
       currentUser.totalScore   = (currentUser.totalScore   || 0) + pts;
       currentUser.totalHasanat = (currentUser.totalHasanat || 0) + pts;
       window.currentUser = currentUser;
