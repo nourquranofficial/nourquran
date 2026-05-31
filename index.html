@@ -4332,6 +4332,11 @@ function doLogout() {
     _lsOut.style.cssText = '';
     _lsOut.classList.remove('hide');
   }
+  // ★ reset الزرارين عشان يشتغلوا من أول وجديد
+  const _lb = document.querySelector('#loginForm .login-btn');
+  const _rb = document.querySelector('#registerForm .login-btn');
+  if (_lb) { _lb.disabled = false; _lb.textContent = 'دخول ✨'; }
+  if (_rb) { _rb.disabled = false; _rb.textContent = 'إنشاء الحساب 🌟'; }
   setTimeout(() => { window._isLoggingOut = false; }, 1500);
 }
 
