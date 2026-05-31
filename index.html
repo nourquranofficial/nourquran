@@ -1850,7 +1850,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
             }
           } catch(e) {}
           if (typeof window.fbSaveUser === 'function' && window.currentUser.totalScore > 0) {
-            window.fbSaveUser(username, { totalScore: window.currentUser.totalScore, totalHasanat: window.currentUser.totalHasanat, totalGames: window.currentUser.totalGames, isGuest: false, name: (window.currentUser && window.currentUser.name) || '' });
+            window.fbSaveUser(username, { totalScore: window.currentUser.totalScore, totalHasanat: window.currentUser.totalHasanat, totalGames: window.currentUser.totalGames, isGuest: (window.currentUser && window.currentUser.isGuest) || false, name: (window.currentUser && window.currentUser.name) || '' });
           }
           if (typeof updateHomeStats === 'function') updateHomeStats();
         }
@@ -1870,7 +1870,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         }).then(() => {
           // تحديث لوحة الشرف بعد الـ fallback برضو
           if (typeof window.fbSaveUser === 'function' && newScore > 0) {
-            window.fbSaveUser(username, { totalScore: newScore, totalHasanat: newHasanat, totalGames: newGames, isGuest: false, name: (window.currentUser && window.currentUser.name) || '' });
+            window.fbSaveUser(username, { totalScore: newScore, totalHasanat: newHasanat, totalGames: newGames, isGuest: (window.currentUser && window.currentUser.isGuest) || false, name: (window.currentUser && window.currentUser.name) || '' });
           }
         }).catch(() => {});
       }).catch(() => {});
@@ -1966,7 +1966,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
           // ★ كتابة فورية في الـ leaderboard حتى لو النقاط صفر عشان الاسم يظهر
           try {
             if (typeof window.fbSaveFullUserData === 'function') window.fbSaveFullUserData(realUsername, merged);
-            if (typeof window.fbSaveUser === 'function') window.fbSaveUser(realUsername, Object.assign({}, merged, {isGuest: false}));
+            if (typeof window.fbSaveUser === 'function') window.fbSaveUser(realUsername, Object.assign({}, merged, {isGuest: !!(merged && merged.isGuest)}));
           } catch(e) {}
         } else {
           setTimeout(doIt, 30);
@@ -3420,7 +3420,7 @@ function doLogin() {
           }, 400);
           // ★ كتابة فورية عشان الاسم يظهر في الـ leaderboard
           if (typeof window.fbSaveUser === 'function') {
-            window.fbSaveUser(user, Object.assign({}, merged, {isGuest: false}));
+            window.fbSaveUser(user, Object.assign({}, merged, {isGuest: !!(merged && merged.isGuest)}));
           }
         };
         // اقرأ البيانات + الاسم المستقل
@@ -3453,16 +3453,7 @@ function doLogin() {
         // ★ Fallback محلي: بس لو Firebase مش متاح (مش لو رفض الباسورد)
         const _lFresh = getUsers()[user];
         const _fbReject = errMsg && (errMsg.includes('خاطئة') || errMsg.includes('denied') || errMsg.includes('wrong'));
-        if (!window._loggedOut && !_fbReject && _lFresh && _lFresh.password === btoa(pass)) {
-          // ★ أضف الاسم من المصادر المتاحة قبل الدخول
-          const _storedName = (typeof window._getStoredName === 'function' ? window._getStoredName(user) : null)
-                           || _lFresh.name
-                           || (user && user.includes('@') ? user.split('@')[0] : user);
-          const _enriched = { ..._lFresh, name: _storedName, email: user };
-          document.getElementById('loginScreen').classList.add('hide');
-          loginSuccess(user, _enriched);
-          return;
-        }
+        // ★ لا fallback محلي - Firebase هو المصدر الوحيد للباسورد دايماً
         showLoginErr(errMsg || 'الإيميل أو كلمة المرور خاطئة');
       }
     );
@@ -3614,19 +3605,19 @@ function closeForgotPassModal() {
   }
 }
 function _sendForgotEmail() {
-  const email    = (document.getElementById('forgotEmailInput').value || '').trim().toLowerCase();
+  let email     = (document.getElementById('forgotEmailInput').value || '').trim().toLowerCase();
   const newPass  = (document.getElementById('forgotNewPass').value || '').trim();
   const confPass = (document.getElementById('forgotConfirmPass').value || '').trim();
   const errEl    = document.getElementById('forgotPassErr');
 
   // ★ لو الإيميل فاضي خذه من currentUser
-  const _finalEmail = email || (window.currentUser && window.currentUser.username) || '';
-  if (!_finalEmail || !_finalEmail.includes('@')) { errEl.textContent = '⚠️ اكتب إيميلك الصح'; errEl.style.color='#FF9E9E'; return; }
-  if (_finalEmail !== email) { email = _finalEmail; }
+  if (!email && window.currentUser && window.currentUser.username)
+    email = window.currentUser.username;
+  if (!email || !email.includes('@')) { errEl.textContent = '⚠️ اكتب إيميلك الصح'; errEl.style.color='#FF9E9E'; return; }
   if (!newPass || newPass.length < 4) { errEl.textContent = '⚠️ الباسورد لازم ٤ أحرف على الأقل'; errEl.style.color='#FF9E9E'; return; }
   if (newPass !== confPass) { errEl.textContent = '⚠️ الباسورد مش متطابق'; errEl.style.color='#FF9E9E'; return; }
 
-  // ★ خطوة ١: احفظ محلياً فوراً
+  // ★ ١. احفظ محلياً فوراً
   try {
     const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
     if (!_lu[email]) _lu[email] = {};
@@ -3638,28 +3629,22 @@ function _sendForgotEmail() {
     localStorage.setItem('nour_last_user', email);
   } catch(e) {}
 
-  // ★ أغلق الـ keyboard من كل inputs الـ modal
-  ['forgotEmailInput','forgotNewPass','forgotConfirmPass'].forEach(function(id){
-    var el = document.getElementById(id); if(el) el.blur();
+  // ★ ٢. اكتب bypassAuth في Firebase مع retry (المصدر الحقيقي للباسورد)
+  const _key2    = typeof dataKey === 'function' ? dataKey(email) : email.replace(/[.#$\/\[\]]/g,'_').toLowerCase();
+  const _newHash = btoa(newPass + '__nr');
+  const _bypassRef = ref(db, 'users/' + _key2 + '/bypassAuth');
+  const _changedAt = Date.now();
+  const _doWrite = (attempt) => {
+    set(_bypassRef, { email: email, passHash: _newHash, updatedAt: _changedAt, changedAt: _changedAt })
+      .catch(() => { if (attempt < 5) setTimeout(() => _doWrite(attempt + 1), 600 * attempt); });
+  };
+  _doWrite(1);
+
+  // ★ ٣. أغلق الـ keyboard
+  ['forgotEmailInput','forgotNewPass','forgotConfirmPass'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.blur();
   });
   if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
-
-  // ★ كتابة bypassAuth مباشرة في Firebase (مضمونة مع retry)
-  try {
-    const _key2 = typeof dataKey === 'function' ? dataKey(email) : email.replace(/[.#$\/\[\]]/g,'_').toLowerCase();
-    const _newHash = btoa(newPass + '__nr');
-    const _bypassRef = ref(db, 'users/' + _key2 + '/bypassAuth');
-    const _doWrite = (attempt) => {
-      set(_bypassRef, { email: email, passHash: _newHash, updatedAt: Date.now(), changedAt: Date.now() })
-        .catch(() => { if (attempt < 4) setTimeout(() => _doWrite(attempt+1), 500*attempt); });
-    };
-    _doWrite(1);
-  } catch(e) {
-    if (typeof window.fbForgotPasswordLogin === 'function') {
-      window.fbForgotPasswordLogin(email, newPass, () => {}, () => {});
-    }
-  }
-
   // ★ أغلق الـ modal أولاً — مهم جداً على iOS قبل أي animation
   const _fpm = document.getElementById('forgotPassModal');
   if (_fpm) {
@@ -9674,7 +9659,7 @@ function _stopPolling() {
     <div id="forgotPassErr" style="color:#FF9E9E;font-size:13px;text-align:center;min-height:18px;margin-bottom:10px;"></div>
     <div style="display:flex;gap:8px;">
       <button onclick="closeForgotPassModal()" style="flex:1;padding:12px;background:rgba(255,254,249,0.05);border:1px solid rgba(201,151,58,0.2);border-radius:12px;color:rgba(245,217,139,0.6);font-family:'Cairo',sans-serif;font-size:14px;font-weight:600;cursor:pointer;">إلغاء</button>
-      <button onclick="_sendForgotEmail()" style="flex:2;padding:12px;background:linear-gradient(135deg,#C9973A,#E8C46A);border:none;border-radius:12px;font-family:'Cairo',sans-serif;font-size:14px;font-weight:900;color:#1a1208;cursor:pointer;">تأكيد وحفظ الباسورد ✅</button>
+      <button onclick="_sendForgotEmail()" ontouchend="event.preventDefault();_sendForgotEmail();" style="flex:2;padding:12px;background:linear-gradient(135deg,#C9973A,#E8C46A);border:none;border-radius:12px;font-family:'Cairo',sans-serif;font-size:14px;font-weight:900;color:#1a1208;cursor:pointer;touch-action:manipulation;">تأكيد وحفظ الباسورد ✅</button>
     </div>
   </div>
 </div>
