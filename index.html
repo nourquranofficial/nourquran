@@ -1252,8 +1252,9 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
           localStorage.setItem('nour_users', JSON.stringify(_u));
         } catch(e) {}
         // ★ اكتب bypassAuth من أول لحظة عشان كل الأجهزة تعرف الباسورد
+        const _regTs = Date.now();
         const _bpa = set(ref(db, 'users/' + key + '/bypassAuth'), {
-          email, passHash: btoa(padPass(password)), updatedAt: Date.now(),
+          email, passHash: btoa(padPass(password)), updatedAt: _regTs, changedAt: _regTs,
         }).catch(() => {});
         const _prof = set(ref(db, 'users/' + key + '/profile'), {
           email, createdAt: Date.now()
@@ -1309,8 +1310,9 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         signInWithEmailAndPassword(auth, fbEmail, padPass(password))
           .then(() => {
             // ★ اكتب bypassAuth للمرة الأولى عشان كل الأجهزة تعرف الباسورد الصح
+            const _firstTs = Date.now();
             set(ref(db, 'users/' + _key + '/bypassAuth'), {
-              email, passHash: btoa(padPass(password)), updatedAt: Date.now(),
+              email, passHash: btoa(padPass(password)), updatedAt: _firstTs, changedAt: _firstTs,
             }).catch(() => {});
             try {
               const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
@@ -1365,12 +1367,15 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     const _key      = dataKey(email);
     const _passHash = btoa(padPass(newPass));
 
-    const _writeBypass = () => Promise.race([
-      set(ref(db, 'users/' + _key + '/bypassAuth'), {
-        email, passHash: _passHash, updatedAt: Date.now(),
-      }),
-      new Promise((_, rej) => setTimeout(() => rej('timeout'), 6000)),
-    ]);
+    const _writeBypass = () => {
+      const _ts = Date.now();
+      return Promise.race([
+        set(ref(db, 'users/' + _key + '/bypassAuth'), {
+          email, passHash: _passHash, updatedAt: _ts, changedAt: _ts,
+        }),
+        new Promise((_, rej) => setTimeout(() => rej('timeout'), 6000)),
+      ]);
+    };
 
     // ★ خطوة ١: لو في أي session (حتى anonymous) → اكتب مباشرة
     if (auth.currentUser) {
@@ -1682,7 +1687,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         const days7 = Object.keys(merged).sort().reverse().slice(0, 7);
         const trimmed = {};
         days7.forEach(d => { trimmed[d] = merged[d]; });
-        localStorage.setItem(localKey, JSON.stringify(trimmed));
+        try { localStorage.setItem(localKey, JSON.stringify(trimmed)); } catch(e) {}
       }
 
       // ── تقدم المراجعة ──
@@ -1704,7 +1709,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
             merged[surah] = fb;
           }
         });
-        localStorage.setItem(localKey, JSON.stringify(merged));
+        try { localStorage.setItem(localKey, JSON.stringify(merged)); } catch(e) {}
         // لو Firebase أحدث → ارفع المدمج للسيرفر
         set(ref(db, 'users/' + key + '/revprog'), merged).catch(() => {});
       }
@@ -1721,7 +1726,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
           if ((fbSurah[s] || 0) > (localSurah[s] || 0)) merged[s] = fbSurah[s];
           else merged[s] = localSurah[s] || 0;
         });
-        localStorage.setItem(localKey, JSON.stringify(merged));
+        try { localStorage.setItem(localKey, JSON.stringify(merged)); } catch(e) {}
         set(ref(db, 'users/' + key + '/surahprog'), merged).catch(() => {});
       }
 
@@ -1734,7 +1739,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
           try { localMem = JSON.parse(localStorage.getItem(localKey) || '[]'); } catch {}
           // دمج: union بين الاتنين
           const merged = [...new Set([...localMem, ...fbMem])];
-          localStorage.setItem(localKey, JSON.stringify(merged));
+          try { localStorage.setItem(localKey, JSON.stringify(merged)); } catch(e) {}
           // أعد تحميل قائمة المحفوظات لو موجودة
           if (window.currentUser && window.currentUser.username === username) {
             if (typeof window.memorizedSurahs !== 'undefined') window.memorizedSurahs = merged;
@@ -1772,6 +1777,11 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         updatedAt:    Date.now(),
       };
     }).then((result) => {
+      if (!result.committed) {
+        // Transaction aborted (null return) — retry once after delay
+        setTimeout(() => window.fbIncrementScore && window.fbIncrementScore(username, scoreAdd, hasanatAdd, gamesAdd), 1000);
+        return;
+      }
       if (result.committed && result.snapshot.exists()) {
         const newData = result.snapshot.val();
         if (window.currentUser && window.currentUser.username === username) {
@@ -1796,24 +1806,20 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         }
       }
     }).catch(() => {
-      // fallback لو transaction فشل
-      get(dataRef).then(snap => {
-        const curr = snap.exists() ? snap.val() : {};
-        const newScore   = (curr.totalScore   || 0) + (scoreAdd   || 0);
-        const newHasanat = (curr.totalHasanat || 0) + (hasanatAdd || 0);
-        const newGames   = (curr.totalGames   || 0) + (gamesAdd   || 0);
-        update(dataRef, {
-          totalScore:   newScore,
-          totalGames:   newGames,
-          totalHasanat: newHasanat,
-          updatedAt:    Date.now(),
-        }).then(() => {
-          // تحديث لوحة الشرف بعد الـ fallback برضو
-          if (typeof window.fbSaveUser === 'function' && newScore > 0) {
-            window.fbSaveUser(username, { totalScore: newScore, totalHasanat: newHasanat, totalGames: newGames, isGuest: false, name: (window.currentUser && window.currentUser.name) || '' });
+      // fallback: transaction فشل — نحاول مرة تانية بعد delay
+      setTimeout(() => {
+        runTransaction(dataRef, (curr) => {
+          if (curr === null) return { totalScore: scoreAdd||0, totalGames: gamesAdd||0, totalHasanat: hasanatAdd||0, streak:0, lastPlay:null, updatedAt: Date.now() };
+          return { ...curr, totalScore: (curr.totalScore||0)+(scoreAdd||0), totalGames: (curr.totalGames||0)+(gamesAdd||0), totalHasanat: (curr.totalHasanat||0)+(hasanatAdd||0), updatedAt: Date.now() };
+        }).then(result => {
+          if (result.committed && result.snapshot.exists()) {
+            const nd = result.snapshot.val();
+            if (typeof window.fbSaveUser === 'function' && nd.totalScore > 0) {
+              window.fbSaveUser(username, { totalScore: nd.totalScore, totalHasanat: nd.totalHasanat, totalGames: nd.totalGames, isGuest: false, name: (window.currentUser && window.currentUser.name) || '' });
+            }
           }
         }).catch(() => {});
-      }).catch(() => {});
+      }, 2000);
     });
   };
 
@@ -3292,7 +3298,7 @@ window.togglePw = togglePw;
       // نحتفظ بس بالحسابات التي مفتاحها إيميل (يحتوي @)
       if (k.includes('@')) clean[k] = v;
     });
-    localStorage.setItem('nour_users', JSON.stringify(clean));
+    try { localStorage.setItem('nour_users', JSON.stringify(clean)); } catch(e) {}
     // لو الحساب المحفوظ قديم (بدون @) امسحه
     const last = localStorage.getItem('nour_last_user');
     if (last && !last.includes('@')) {
@@ -3305,6 +3311,8 @@ window.togglePw = togglePw;
 function doLogin() {
   window._loggedOut = false;
   window._cancelBgAuth = false;
+  // ★ reset _authDone عشان onAuthStateChanged يشتغل بعد logout ثم login تاني
+  if (typeof window._resetAuthDone === 'function') window._resetAuthDone();
   const user = document.getElementById('loginUser').value.trim().toLowerCase();
   const pass = document.getElementById('loginPass').value;
   if (!user || !pass) { showLoginErr('أدخل الإيميل وكلمة المرور'); return; }
@@ -3368,12 +3376,14 @@ function doLogin() {
             new Promise(res => window.fbGetAccount(user, (rn, fd) => res([rn, fd]))),
             _readName,
             _readLbName,
-          ]).then(([[realName, fbData], fbName, lbName]) => _finishFresh(realName || user, fbData, fbName || lbName));
+          ]).then(([[realName, fbData], fbName, lbName]) => _finishFresh(realName || user, fbData, fbName || lbName))
+            .catch(() => _finishFresh(user, localData, null));
         } else if (typeof window.fbGetUserData === 'function') {
           Promise.all([
             new Promise(res => window.fbGetUserData(user, res)),
             _readName,
-          ]).then(([fbData, fbName]) => _finishFresh(user, fbData, fbName));
+          ]).then(([fbData, fbName]) => _finishFresh(user, fbData, fbName))
+            .catch(() => _finishFresh(user, localData, null));
         } else {
           _finishFresh(user, localData, null);
         }
@@ -3389,6 +3399,7 @@ function doLogin() {
                            || _lFresh.name
                            || (user && user.includes('@') ? user.split('@')[0] : user);
           const _enriched = { ..._lFresh, name: _storedName, email: user };
+          if (typeof window._markAuthDone === 'function') window._markAuthDone();
           document.getElementById('loginScreen').classList.add('hide');
           loginSuccess(user, _enriched);
           return;
@@ -3423,6 +3434,8 @@ function doRegister() {
 
   // ★ إظهار loading
   showLoginErr('⏳ جاري إنشاء الحساب...');
+  // ★ reset _authDone عشان onAuthStateChanged يشتغل بعد التسجيل
+  if (typeof window._resetAuthDone === 'function') window._resetAuthDone();
   const _regBtn = document.querySelector('#registerForm .login-btn');
   if (_regBtn) { _regBtn.disabled = true; _regBtn.textContent = '⏳ جاري...'; }
 
@@ -3552,7 +3565,7 @@ function _sendForgotEmail() {
   try {
     const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
     if (!_lu[email]) _lu[email] = {};
-    _lu[email].password = btoa(newPass);
+    _lu[email].password = btoa(unescape(encodeURIComponent(newPass)));
     _lu[email].email    = email;
     const _n = localStorage.getItem('nour_name_' + email) || _lu[email].name;
     if (_n) _lu[email].name = _n;
@@ -3661,7 +3674,7 @@ window._sendForgotEmail = _sendForgotEmail;
           try {
             const _u = JSON.parse(localStorage.getItem('nour_users') || '{}');
             if (!_u[email]) _u[email] = {};
-            _u[email].password = btoa(pending.newPass);
+            _u[email].password = btoa(unescape(encodeURIComponent(pending.newPass)));
             localStorage.setItem('nour_users', JSON.stringify(_u));
           } catch(e) {}
           showToast && showToast('✅ تم تغيير كلمة المرور ودخلت أوتوماتيك!');
@@ -4007,6 +4020,9 @@ function doLogout() {
   if (typeof window.fbUnwatchName === 'function') window.fbUnwatchName();
   if (typeof window.fbUnwatchMistakes === 'function') window.fbUnwatchMistakes();
   if (typeof window.fbUnwatchUserData === 'function') window.fbUnwatchUserData();
+  // ★ وقف مراقبة تغيير الباسورد عشان ما يطردش بعد الخروج
+  if (typeof window.fbWatchPassChange === 'function') window.fbWatchPassChange(null);
+  window._loginTime = 0;
   saveCurrentUser();
   try { clearTimeout(window._autoLoginFallbackTimer); } catch(e) {}
   currentUser = null;
@@ -4474,7 +4490,7 @@ function loadMemorizedSurahs() {
 
 function saveMemorizedSurahs() {
   if (!currentUser || currentUser.isGuest) return;
-  localStorage.setItem('nour_memorized_' + currentUser.username, JSON.stringify(memorizedSurahs));
+  try { localStorage.setItem('nour_memorized_' + currentUser.username, JSON.stringify(memorizedSurahs)); } catch(e) {}
   // ★ sync على Firebase
   if (typeof window.fbSaveMemorized === 'function') {
     window.fbSaveMemorized(currentUser.username, memorizedSurahs);
@@ -5976,7 +5992,7 @@ function saveSurahProgress(surahName, nextIndex) {
   let data = {};
   try { data = JSON.parse(localStorage.getItem(key) || '{}'); } catch {}
   data[surahName] = nextIndex;
-  localStorage.setItem(key, JSON.stringify(data));
+  try { localStorage.setItem(key, JSON.stringify(data)); } catch(e) {}
   // ★ sync على Firebase
   if (typeof window.fbSaveSurahProg === 'function') {
     window.fbSaveSurahProg(currentUser.username, data);
@@ -6415,7 +6431,7 @@ function renderQuestion() {
 }
 
 function renderMCQ(q) {
-  const choices = shuffle([q.blank, ...q.wrong]);
+  const choices = shuffle([q.blank, ...(q.wrong || [])]);
   const wrap = document.getElementById('mcqWrap');
   const isAyahChoice = q.qtype === 'next' || q.qtype === 'prev' || q.qtype === 'similar' || q.qtype === 'firstword' || q.qtype === 'reverse';
   const isNumChoice = q.qtype === 'num';
@@ -6483,7 +6499,7 @@ function showListenChoices() {
   const q = state.questions[state.qIndex];
   safeHTML('ayahText', q.ayah.replace(q.blank, '<span class="blank"></span>'));
   document.getElementById('listenBtn').style.display = 'none';
-  const choices = shuffle([q.blank, ...q.wrong]);
+  const choices = shuffle([q.blank, ...(q.wrong || [])]);
   const wrap = document.getElementById('listenChoices');
   // ★ شيلنا أزرار الصوت من الاختيارات — اللاعب بيختار من النص بس
   choices.forEach(ch => {
@@ -6642,7 +6658,7 @@ function _saveReviewPos(surahName, pos, total) {
     inProgress: true,
     lastPlay: Date.now()
   };
-  localStorage.setItem(key, JSON.stringify(d));
+  try { localStorage.setItem(key, JSON.stringify(d)); } catch(e) {}
   if (typeof window.fbSaveRevProg === 'function') window.fbSaveRevProg(currentUser.username, d);
 }
 
@@ -6938,7 +6954,7 @@ function saveMistake(q, chosen) {
   const keys = Object.keys(all).sort().reverse().slice(0,7);
   const trimmed = {};
   keys.forEach(k => trimmed[k] = all[k]);
-  localStorage.setItem(key, JSON.stringify(trimmed));
+  try { localStorage.setItem(key, JSON.stringify(trimmed)); } catch(e) {}
   // ★ sync على Firebase (مسجلين فقط)
   if (!currentUser.isGuest && typeof window.fbSaveMistakes === 'function') {
     window.fbSaveMistakes(currentUser.username, trimmed);
@@ -7012,7 +7028,7 @@ function deleteMistakeItem(ayahKey, dayKey) {
   if (!all[dayKey]) return;
   all[dayKey] = all[dayKey].filter(m => (m.ayah + '|' + m.blank) !== ayahKey);
   if (all[dayKey].length === 0) delete all[dayKey];
-  localStorage.setItem(key, JSON.stringify(all));
+  try { localStorage.setItem(key, JSON.stringify(all)); } catch(e) {}
   showMistakesScreen();
   showToast('🗑️ تم مسح الغلطة');
 }
@@ -7032,7 +7048,7 @@ function saveMistakeForLater(ayahKey, dayKey) {
   const exists = saved.some(s => (s.ayah + '|' + s.blank) === ayahKey);
   if (!exists) {
     saved.push({...m, savedAt: Date.now()});
-    localStorage.setItem(savedKey, JSON.stringify(saved));
+    try { localStorage.setItem(savedKey, JSON.stringify(saved)); } catch(e) {}
     showToast('✅ تم حفظها للمراجعة لاحقاً');
   } else {
     showToast('📌 محفوظة بالفعل');
@@ -7196,7 +7212,7 @@ function markSurahReviewStarted(surahName, total) {
     inProgress: true,
     lastPlay: Date.now()
   };
-  localStorage.setItem(key, JSON.stringify(d));
+  try { localStorage.setItem(key, JSON.stringify(d)); } catch(e) {}
   // ★ sync على Firebase
   if (typeof window.fbSaveRevProg === 'function') {
     window.fbSaveRevProg(currentUser.username, d);
@@ -7215,7 +7231,7 @@ function saveSurahReviewProgress(surahName, correct, total) {
   const streak = perfect ? (prev.streak||0)+1 : prev.streak||0;
   // ★ خلّصنا السورة للآخر → الشريط مكتمل (done=total) ومكان الوقوف يتصفّر
   d[surahName] = { done: total, total, streak, pos: 0, lastPlay: Date.now(), inProgress: !finished };
-  localStorage.setItem(key, JSON.stringify(d));
+  try { localStorage.setItem(key, JSON.stringify(d)); } catch(e) {}
   // ★ sync على Firebase
   if (typeof window.fbSaveRevProg === 'function') {
     window.fbSaveRevProg(currentUser.username, d);
@@ -7265,7 +7281,7 @@ function resetSurahProgress(surahName) {
   try { d = JSON.parse(localStorage.getItem(key) || '{}'); } catch {}
   // ★ فضّي السورة تمامًا (تقدّم + مكان وقوف + شريط أخضر) ترجع زي سورة جديدة
   delete d[surahName];
-  localStorage.setItem(key, JSON.stringify(d));
+  try { localStorage.setItem(key, JSON.stringify(d)); } catch(e) {}
   // ★ sync على Firebase
   if (typeof window.fbSaveRevProg === 'function') {
     window.fbSaveRevProg(currentUser.username, d);
@@ -8374,8 +8390,8 @@ function multiCreateRoom() {
     if (typeof window.fbMulti !== 'undefined') {
       const _doCreate = () => {
         const compressQ = (q) => {
-          const obj = { s: q.surah||'', a: q.ayah||'', b: q.blank||'', w: (q.wrong||[]).slice(0,3), t: q.qtype||'blank' };
-          if (q.ayahNum) obj.n = q.ayahNum;
+          const obj = { s: q.surah||q.s||'', a: q.ayah||q.a||'', b: (q.blank!==undefined?q.blank:(q.b||'')), w: (q.wrong||q.w||[]).slice(0,3), t: q.qtype||q.t||'blank' };
+          if (q.ayahNum||q.n) obj.n = q.ayahNum||q.n;
           return obj;
         };
         const rawRoom = { ...room, questions: questions.map(compressQ) };
@@ -8408,11 +8424,18 @@ function multiCreateRoom() {
 function _bounceFromJoin(msg) {
   _stopPolling();
   clearInterval(multiState.questionTimer);
-  window._multiRoomCache = null;
-  multiState.roomCode = null;
-  multiState.phase = 'lobby';
+  clearTimeout(multiState.answerTimer);
+  window._multiRoomCache  = null;
+  multiState.roomCode     = null;
+  multiState.phase        = 'lobby';
+  multiState.playerKey    = null;
+  multiState.playerName   = null;
+  multiState.isHost       = false;
+  multiState.questions    = [];
+  multiState.myScore      = 0;
+  multiState._roundId     = 0;
   showToast(msg, 3000);
-  showMultiScreen(); // رجوع للوبي
+  showMultiScreen();
 }
 
 function multiJoinRoom() {
@@ -8437,7 +8460,8 @@ function multiJoinRoom() {
   // التحقق + التسجيل في الخلفية
   const validateAndRegister = (room) => {
     if (!room) { _bounceFromJoin('⚠️ الغرفة مش موجودة — تأكد من الكود'); return; }
-    if (room.phase === 'playing') { _bounceFromJoin('⚠️ اللعبة بدأت بالفعل، استنى الجولة الجاية'); return; }
+    if (room.phase === 'playing')  { _bounceFromJoin('⚠️ اللعبة بدأت بالفعل، استنى الجولة الجاية'); return; }
+    if (room.phase === 'finished' || room.phase === 'closed') { _bounceFromJoin('⚠️ الغرفة انتهت — اطلب من المضيف يفتح غرفة جديدة'); return; }
     const players = room.players || {};
     const maxPl = room.maxPlayers || 4;
     if (!players[playerKey] && Object.keys(players).length >= maxPl) {
@@ -8583,8 +8607,8 @@ function multiStartGame() {
   window._multiRoomCache = room;
   if (typeof window.fbMulti !== 'undefined') {
     const compressQ = (q) => {
-      const obj = { s: q.surah||'', a: q.ayah||'', b: q.blank||'', w: (q.wrong||[]).slice(0,3), t: q.qtype||'blank' };
-      if (q.ayahNum) obj.n = q.ayahNum;
+      const obj = { s: q.surah||q.s||'', a: q.ayah||q.a||'', b: (q.blank!==undefined?q.blank:(q.b||'')), w: (q.wrong||q.w||[]).slice(0,3), t: q.qtype||q.t||'blank' };
+      if (q.ayahNum||q.n) obj.n = q.ayahNum||q.n;
       return obj;
     };
     window.fbMulti.updateRoom(multiState.roomCode, {
@@ -8645,7 +8669,7 @@ function _renderMultiQuestion() {
   clearInterval(multiState.questionTimer);
 
   document.getElementById('multiQNum').textContent = toArabicNum(multiState.qIndex + 1);
-  document.getElementById('multiProgressFill').style.width = ((multiState.qIndex / multiState.totalQ) * 100) + '%';
+  document.getElementById('multiProgressFill').style.width = (multiState.totalQ > 0 ? ((multiState.qIndex / multiState.totalQ) * 100) : 0) + '%';
   document.getElementById('multiMyScore').textContent = toArabicNum(multiState.myScore);
   document.getElementById('multiSurahLbl').textContent = 'سورة ' + q.surah;
 
@@ -8670,11 +8694,18 @@ function _renderMultiQuestion() {
   const ayahDisplay = q.qtype === 'next' ? q.ayah :
                       q.qtype === 'prev' ? q.ayah :
                       q.qtype === 'num'  ? q.ayah :
-                      q.ayah.includes(q.blank) ? q.ayah.replace(q.blank, blankHTML) : q.ayah + ' ' + blankHTML;
+                      (q.ayah && q.blank && q.ayah.includes(q.blank)) ? q.ayah.replace(q.blank, blankHTML) : ((q.ayah || '') + ' ' + blankHTML);
   document.getElementById('multiAyahText').innerHTML = ayahDisplay;
 
   // الخيارات
-  const choices = [...new Set([q.blank, ...q.wrong])].sort(() => Math.random()-0.5).slice(0, 4);
+  const choices = [...new Set([q.blank, ...(q.wrong || [])])].sort(() => Math.random()-0.5).slice(0, 4);
+  if (choices.length < 2) {
+    // سؤال بدون خيارات كافية — تجاوزه
+    multiState.qIndex++;
+    if (multiState.qIndex >= multiState.totalQ) { _showMultiResults(); return; }
+    _renderMultiQuestion();
+    return;
+  }
   const wrap = document.getElementById('multiChoicesWrap');
   wrap.innerHTML = '';
   const isAyah = q.qtype === 'next' || q.qtype === 'prev' || q.qtype === 'similar' || q.qtype === 'firstword' || q.qtype === 'reverse';
@@ -9223,8 +9254,15 @@ function multiPlayAgain() {
       window.fbMulti.removeFinalScores(multiState.roomCode).catch(() => {});
     }
     const compressQ = (q) => {
-      const o = { s: q.surah || '', a: q.ayah || '', b: q.blank || '', w: (q.wrong || []).slice(0, 3), t: q.qtype || 'blank' };
-      if (q.ayahNum) o.n = q.ayahNum;
+      // ★ يتعامل مع الأسئلة الموسّعة (surah/ayah/blank) والمضغوطة (s/a/b)
+      const o = {
+        s: q.surah || q.s || '',
+        a: q.ayah  || q.a || '',
+        b: q.blank !== undefined ? q.blank : (q.b || ''),
+        w: (q.wrong || q.w || []).slice(0, 3),
+        t: q.qtype || q.t || 'blank',
+      };
+      if (q.ayahNum || q.n) o.n = q.ayahNum || q.n;
       return o;
     };
     window.fbMulti.updateRoom(multiState.roomCode, {
