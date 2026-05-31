@@ -3348,17 +3348,23 @@ function doLogin() {
   if (typeof window._resetAuthDone === 'function') window._resetAuthDone();
 
   const user = document.getElementById('loginUser').value.trim().toLowerCase();
-  const pass = document.getElementById('loginPass').value;
+  const pass = document.getElementById('loginPass').value.trim(); // ★ trim عشان spaces لا تكسر المقارنة
   if (!user || !pass) { window._loginInProgress = false; showLoginErr('أدخل الإيميل وكلمة المرور'); return; }
   if (!user.includes('@')) { window._loginInProgress = false; showLoginErr('أدخل إيميلك (example@gmail.com)'); return; }
+
+  // ★ عطّل الزرار وأظهر spinner عشان المستخدم يعرف إن في شيء بيحصل
+  const _btn = document.querySelector('#loginForm .login-btn') || document.querySelector('.login-btn[onclick*="doLogin"]');
+  if (_btn) { _btn.disabled = true; _btn.textContent = '⏳ ...'; }
+  const _resetBtn = () => { if (_btn) { _btn.disabled = false; _btn.textContent = 'دخول 🌟'; } };
 
   const users = getUsers();
   const localData = users[user];
 
   // ── دالة الدخول النهائي ────────────────────────────────────
   const _enterApp = (fbData) => {
-    if (window._loggedOut) { window._loginInProgress = false; return; }
+    if (window._loggedOut) { window._loginInProgress = false; _resetBtn(); return; }
     window._loginInProgress = false;
+    _resetBtn();
     // ★ سجّل وقت الدخول وابدأ مراقبة تغيير الباسورد
     window._loginTime = Date.now() + 120000; // +2 دقيقة هامش أمان
     if (typeof window.fbWatchPassChange === 'function') window.fbWatchPassChange(user);
@@ -3392,14 +3398,28 @@ function doLogin() {
 
   const _showErr = (msg) => {
     window._loginInProgress = false;
+    _resetBtn();
     showLoginErr(msg || 'الإيميل أو كلمة المرور خاطئة');
   };
 
   // ── fbLogin ────────────────────────────────────────────────
   if (typeof window.fbLogin === 'function') {
+    // ★ timeout 12 ثانية — لو Firebase مش رد خلال كده نفلّش للـ offline
+    const _loginTimeout = setTimeout(() => {
+      if (!window._loginInProgress) return; // خلص بالفعل
+      // حاول الـ offline fallback
+      const _fresh = getUsers()[user];
+      if (_fresh && _fresh.password === btoa(pass)) {
+        _enterApp(_fresh);
+      } else {
+        _showErr('انتهت مهلة الاتصال — تأكد من الإنترنت وحاول تاني');
+      }
+    }, 12000);
+    const _clearLoginTimeout = () => clearTimeout(_loginTimeout);
+
     window.fbLogin(user, pass,
       () => {
-        // ★ تحقق صح — اجلب البيانات وادخّل
+        _clearLoginTimeout();
         if (typeof window._markAuthDone === 'function') window._markAuthDone();
         if (typeof window.fbGetAccount === 'function') {
           window.fbGetAccount(user, (_, fbData) => _enterApp(fbData));
@@ -3410,7 +3430,7 @@ function doLogin() {
         }
       },
       (errMsg) => {
-        // ★ Firebase فشل — fallback لـ localStorage لو الباسورد صح محلياً
+        _clearLoginTimeout();
         currentUser = null; window.currentUser = null;
         const _fresh = getUsers()[user];
         if (!window._loggedOut && _fresh && _fresh.password === btoa(pass)) {
@@ -3754,16 +3774,60 @@ window.doConfirmReset = doConfirmReset;
 
 // ★ رجوع سريع من وضع الضيف لحساب اللاعب المحفوظ بدوسة واحدة
 function _switchBackToSaved() {
-  window._loginInProgress = false; // ★ مش دخول عادي — ما نحتاجش guard
+  window._loginInProgress = false;
   try {
     const lastUser = localStorage.getItem('nour_last_user');
     if (!lastUser) { doLogout(); return; }
     const users = JSON.parse(localStorage.getItem('nour_users') || '{}');
     const data  = users[lastUser];
     if (!data) { doLogout(); return; }
-    // أعد الدخول مباشرة للحساب المحفوظ (نفس مسار auto-login)
-    loginSuccess(lastUser, data, false);
-    showToast('✅ رجعت لحساب: ' + (data.name || lastUser));
+
+    // ★ لو عندنا باسورد محفوظ، نمر على fbLogin عشان bypassAuth يتحقق
+    const savedPass = data.password ? (() => { try { return atob(data.password); } catch(e) { return null; } })() : null;
+    if (savedPass && typeof window.fbLogin === 'function') {
+      window._loginInProgress = true;
+      window._loggedOut = false;
+      if (typeof window._resetAuthDone === 'function') window._resetAuthDone();
+      window.fbLogin(lastUser, savedPass,
+        () => {
+          window._loginInProgress = false;
+          window._loginTime = Date.now() + 120000;
+          if (typeof window.fbWatchPassChange === 'function') window.fbWatchPassChange(lastUser);
+          if (typeof window._markAuthDone === 'function') window._markAuthDone();
+          // جلب أحدث البيانات
+          if (typeof window.fbGetAccount === 'function') {
+            window.fbGetAccount(lastUser, (_, fbData) => {
+              const merged = fbData ? {
+                ...data,
+                totalScore:   Math.max(data.totalScore||0, fbData.totalScore||0),
+                totalGames:   Math.max(data.totalGames||0, fbData.totalGames||0),
+                totalHasanat: Math.max(data.totalHasanat||0, fbData.totalHasanat||0),
+                name: (!data.name || data.name.includes('@')) && fbData.name ? fbData.name : (data.name || lastUser.split('@')[0]),
+              } : data;
+              loginSuccess(lastUser, merged, false);
+              showToast('✅ رجعت لحساب: ' + (merged.name || lastUser));
+            });
+          } else {
+            loginSuccess(lastUser, data, false);
+            showToast('✅ رجعت لحساب: ' + (data.name || lastUser));
+          }
+        },
+        () => {
+          // Firebase فشل — ادخّل بالبيانات المحلية
+          window._loginInProgress = false;
+          window._loginTime = Date.now() + 120000;
+          if (typeof window.fbWatchPassChange === 'function') window.fbWatchPassChange(lastUser);
+          loginSuccess(lastUser, data, false);
+          showToast('✅ رجعت لحساب: ' + (data.name || lastUser));
+        }
+      );
+    } else {
+      // مفيش باسورد محفوظ — ادخّل مباشرة
+      window._loginTime = Date.now() + 120000;
+      if (typeof window.fbWatchPassChange === 'function') window.fbWatchPassChange(lastUser);
+      loginSuccess(lastUser, data, false);
+      showToast('✅ رجعت لحساب: ' + (data.name || lastUser));
+    }
   } catch (e) {
     doLogout();
   }
