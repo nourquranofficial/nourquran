@@ -2318,7 +2318,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     // ترتيب تنازلي حسب الحسنات (مع احترام مفتاح ظهور الضيوف)
     const _showGuests = window.SHOW_GUESTS_IN_RANKING !== false;
     const list = Object.entries(data || {})
-      .filter(([k, d]) => d && d.name &&
+      .filter(([k, d]) => d && d.name && (d.totalHasanat || 0) > 0 &&
         (_showGuests || (!d.isGuest && !String(k).startsWith('guest__'))))
       .sort(([, a], [, b]) => (b.totalHasanat || 0) - (a.totalHasanat || 0));
 
