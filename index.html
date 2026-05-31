@@ -1151,7 +1151,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
   import { getDatabase, ref, set, remove, onValue, get, update, onDisconnect, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
-  import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword, reauthenticateWithCredential, EmailAuthProvider } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+  import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyDmIxeupIlrYv8I3tvz_euIgolr5uUFx2M",
@@ -1420,90 +1420,64 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     });
   };
 
-  // ★ تغيير كلمة المرور — reauthenticate حقيقي + updatePassword + force logout كل الأجهزة
-  window.fbChangePassword = function(email, oldPass, newPass, onSuccess, onError) {
-    const _key      = dataKey(email);
-    const _passHash = safe_btoa(padPass(newPass));
-    const _ts       = Date.now();
-
-    const _writeBypass = () => Promise.race([
-      set(ref(db, 'users/' + _key + '/bypassAuth'), {
-        email,
-        passHash: _passHash,
-        passEnc:  safe_btoa(newPass),
-        updatedAt: _ts,
-        changedAt: _ts,   // ★ هذا هو اللي بيجبر كل الأجهزة على logout
-      }),
-      new Promise((_, rej) => setTimeout(() => rej('timeout'), 8000)),
-    ]);
-
-    const _saveLocal = () => {
-      try {
-        const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
-        if (!_lu[email]) _lu[email] = {};
-        _lu[email].password = safe_btoa(newPass);
-        localStorage.setItem('nour_users', JSON.stringify(_lu));
-      } catch(e) {}
-    };
-
-    // ★ خطوة ١: sign in بالباسورد القديم عشان نعمل reauthenticate
-    const _fbEmail = toFbEmail(email);
-    signInWithEmailAndPassword(auth, _fbEmail, padPass(oldPass))
-      .then((cred) => {
-        // ★ خطوة ٢: reauthenticate صريح (يضمن recent-login)
-        const credential = EmailAuthProvider.credential(_fbEmail, padPass(oldPass));
-        return reauthenticateWithCredential(cred.user, credential)
-          .catch(() => cred); // لو فشل نكمل بالـ user الموجود
-      })
-      .then((result) => {
-        const user = result.user || result;
-        // ★ خطوة ٣: updatePassword على Firebase Auth فعلياً
-        return updatePassword(user, padPass(newPass));
-      })
-      .then(() => {
-        // ★ خطوة ٤: اكتب changedAt في Firebase DB → يجبر كل الأجهزة على logout
-        _saveLocal();
-        window._loginTime = _ts + 15000; // الجهاز الحالي ما يتطردش (١٥ ثانية grace)
-        return _writeBypass();
-      })
-      .then(() => onSuccess('firebase'))
-      .catch((err) => {
-        const code = (err && err.code) || '';
-        if (code === 'auth/wrong-password' || code === 'auth/invalid-credential' || code === 'auth/invalid-login-credentials') {
-          onError('wrong-pass');
-        } else if (code === 'auth/too-many-requests') {
-          onError('too-many');
-        } else if (code === 'auth/network-request-failed') {
-          onError('network');
-        } else {
-          onError(code || 'unknown');
-        }
-      });
-  };
-
-  // ★ legacy alias (للكود القديم اللي بيستدعي fbForgotPasswordLogin)
+  // ★ تغيير كلمة المرور — يحفظ في Firebase DB ويدخّل فوراً
   window.fbForgotPasswordLogin = function(email, newPass, onSuccess, onError) {
     const _key      = dataKey(email);
     const _passHash = safe_btoa(padPass(newPass));
+
     const _writeBypass = () => Promise.race([
       set(ref(db, 'users/' + _key + '/bypassAuth'), {
         email, passHash: _passHash, passEnc: safe_btoa(newPass), updatedAt: Date.now(), changedAt: Date.now(),
       }),
       new Promise((_, rej) => setTimeout(() => rej('timeout'), 6000)),
     ]);
-    const _lu = (() => { try { return JSON.parse(localStorage.getItem('nour_users') || '{}'); } catch(e) { return {}; } })();
-    const _oldRaw = _lu[email] && _lu[email].password
-      ? (() => { try { return safe_atob(_lu[email].password); } catch(e) { return null; } })()
-      : null;
-    if (_oldRaw) {
-      signInWithEmailAndPassword(auth, toFbEmail(email), padPass(_oldRaw))
-        .then(() => updatePassword(auth.currentUser, padPass(newPass)).catch(() => {}))
-        .then(() => _writeBypass())
-        .then(() => onSuccess('firebase'))
-        .catch(() => { _writeBypass().then(() => onSuccess('bypass')).catch(() => onSuccess('local')); });
-    } else {
-      _writeBypass().then(() => onSuccess('bypass')).catch(() => onSuccess('local'));
+
+    // ★ خطوة ١: لو في أي session → اكتب bypass مباشرة
+    // (updatePassword يحتاج recent login — مش موثوق هنا، بنعتمد على bypassAuth للتزامن)
+    if (auth.currentUser) {
+      _writeBypass()
+        .then(() => onSuccess('bypass'))
+        .catch(() => onSuccess('local'));
+      return;
     }
+
+    // ★ خطوة ٢: جرّب الباسورد الجديد في Firebase Auth
+    signInWithEmailAndPassword(auth, toFbEmail(email), padPass(newPass))
+      .then(() => {
+        _writeBypass().catch(() => {});
+        onSuccess('firebase');
+      })
+      .catch(() => {
+        // ★ خطوة ٣: جرّب الباسورد القديم من localStorage
+        const _lu = (() => { try { return JSON.parse(localStorage.getItem('nour_users') || '{}'); } catch(e) { return {}; } })();
+        const _oldRaw = _lu[email] && _lu[email].password
+          ? (() => { try { return safe_atob(_lu[email].password); } catch(e) { return null; } })()
+          : null;
+
+        const _tryOldPass = _oldRaw
+          ? signInWithEmailAndPassword(auth, toFbEmail(email), padPass(_oldRaw))
+          : Promise.reject('no-old');
+
+        _tryOldPass
+          .then(() => {
+            // ★ دخل بالباسورد القديم — حدّث Firebase Auth بالجديد فوراً
+            return updatePassword(auth.currentUser, padPass(newPass))
+              .catch(() => {}); // لو فشل updatePassword نكمل على طول
+          })
+          .then(() => _writeBypass())
+          .then(() => onSuccess('firebase'))
+          .catch(() => {
+            // ★ خطوة ٤: anonymous fallback (لو مفعّل)
+            if (window._cancelBgAuth) { onSuccess('local'); return; }
+            signInAnonymously(auth)
+              .then(() => _writeBypass())
+              .then(() => onSuccess('bypass'))
+              .catch(() => {
+                // ★ خطوة ٥: حفظ محلي فقط — بيشتغل على نفس الجهاز
+                onSuccess('local');
+              });
+          });
+      });
   };
 
   window.fbLogout = function() { signOut(auth).catch(() => {}); };
@@ -2803,7 +2777,6 @@ function _callWhenReady(fn, args) {
         <span style="font-size:13px;color:var(--gold);" id="userLevelDisplay">المستوى ١</span>
         <span class="user-logout" onclick="resetScore()" style="color:rgba(255,120,100,0.5);" title="تصفير النقاط">🔄</span>
         <span class="user-logout" onclick="doDeleteAccount()" style="color:rgba(255,80,80,0.45);font-size:11px;" title="حذف الحساب نهائياً">🗑️</span>
-        <button onclick="openChangePassModal()" ontouchend="event.preventDefault();openChangePassModal();" style="background:none;border:none;font-size:13px;color:rgba(201,151,58,0.55);cursor:pointer;font-family:'Cairo',sans-serif;padding:6px 10px;border-radius:8px;touch-action:manipulation;-webkit-tap-highlight-color:transparent;" title="تغيير كلمة المرور">🔑</button>
         <button onclick="doLogout()" ontouchend="event.preventDefault();doLogout();" style="background:none;border:none;font-size:13px;color:rgba(245,217,139,0.55);cursor:pointer;font-family:'Cairo',sans-serif;padding:6px 10px;border-radius:8px;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">خروج ↩</button>
       </div>
     </div>
@@ -9008,16 +8981,9 @@ function _startMultiGame() {
   multiState._roundId = Date.now();
   window._lockedScores = {};
   window._prevMultiScores = {};
-  // ★ مسح finalScores بعد تأخير (5 ثواني) عشان اللاعبين يشوفوا نتيجة الجولة السابقة أول
+  // ★ مسح finalScores من الجولة السابقة عشان النتايج الجديدة تكون صح
   if (typeof window.fbMulti !== 'undefined' && multiState.roomCode) {
-    const _codeSnap = multiState.roomCode;
-    const _roundSnap = multiState._roundId;
-    setTimeout(() => {
-      // تأكد إن الغرفة لسه نفسها والجولة الجديدة بدأت فعلاً
-      if (multiState.roomCode === _codeSnap && multiState._roundId === _roundSnap && multiState.phase === 'playing') {
-        window.fbMulti.updateRoom(_codeSnap, { finalScores: null }).catch(() => {});
-      }
-    }, 5000);
+    window.fbMulti.updateRoom(multiState.roomCode, { finalScores: null }).catch(() => {});
   }
   // ★ تصفير scores في الـ cache المحلي عشان multiLiveScores تبدأ من ٠ فوراً
   if (window._multiRoomCache && window._multiRoomCache.players) {
@@ -9509,22 +9475,6 @@ function _showMultiResults() {
   document.getElementById('multiWinnerName').textContent  = '';
   document.getElementById('multiWinnerMsg').textContent   = '';
 
-  // ★ زرار مرة تانية: المضيف يبدأ — الباقيين ينتظروا
-  const _againBtn = document.getElementById('multiPlayAgainBtn');
-  if (_againBtn) {
-    if (multiState.isHost) {
-      _againBtn.textContent = '🔄 مرة تانية';
-      _againBtn.disabled = false;
-      _againBtn.style.opacity = '1';
-      _againBtn.style.cursor = 'pointer';
-    } else {
-      _againBtn.textContent = '⏳ في انتظار المضيف...';
-      _againBtn.disabled = true;
-      _againBtn.style.opacity = '0.6';
-      _againBtn.style.cursor = 'default';
-    }
-  }
-
   const medals    = ['🥇','🥈','🥉','🎖️'];
   const _bestScore = (p) => Math.max(
     (p && typeof p.finalScore === 'number') ? p.finalScore : 0,
@@ -9533,66 +9483,60 @@ function _showMultiResults() {
   const _bestName  = (p) => (p && (p.finalName || p.name)) || 'لاعب';
 
   // ★ دالة عرض النتايج من Firebase — نفس النتيجة لكل اللاعبين
-  let _rendered = false;
-
-  const _doRender = (fs, playersData) => {
+  // ★ النظام النهائي للنتايج — finalScores المصدر الوحيد
+  const _showUnified = () => {
     const _resEl = document.getElementById('multiResults');
     if (!_resEl || _resEl.style.display === 'none') return;
 
-    const pl = {};
-    // ١. finalScores أولاً (الأدق) — بنشيل أي فلتر score > 0
-    if (fs) Object.entries(fs).forEach(([fpk, fd]) => {
-      if (fd && fd.name) pl[fpk] = { score: fd.score || 0, name: fd.name };
-    });
-    // ٢. لاعبين مش في finalScores — خذهم من players بغض النظر عن النقطة
-    if (playersData) Object.entries(playersData).forEach(([fpk, pd]) => {
-      if (!pd || pl[fpk]) return;
-      if (pd.name) pl[fpk] = { score: pd.score || 0, name: pd.name };
-    });
-    // ٣. ضمان نقطة اللاعب الحالي صح دايماً
-    if (pk) {
-      pl[pk] = {
-        score: Math.max((pl[pk] && pl[pk].score) || 0, _trueScore),
-        name:  (pl[pk] && pl[pk].name) || multiState.playerName ||
-               (currentUser && (currentUser.name || currentUser.username)) || 'أنت',
-      };
-    }
-    const sorted = Object.entries(pl)
-      .filter(([, p]) => p && p.name)
-      .sort((a, b) => (b[1].score || 0) - (a[1].score || 0));
+    const _doRender = (fs, playersData) => {
+      if (!_resEl || _resEl.style.display === 'none') return;
+      const pl = {};
+      // ١. finalScores أولاً (الأدق)
+      if (fs) Object.entries(fs).forEach(([fpk, fd]) => {
+        if (fd) pl[fpk] = { score: fd.score || 0, name: fd.name || 'لاعب' };
+      });
+      // ٢. لاعبين مش كتبوا في finalScores — خذ من players
+      if (playersData) Object.entries(playersData).forEach(([fpk, pd]) => {
+        if (!pd || pl[fpk]) return;
+        if ((pd.score || 0) > 0)
+          pl[fpk] = { score: pd.score, name: pd.name || 'لاعب' };
+      });
+      // ٣. ضمان نقطة اللاعب الحالي صح دايماً
+      if (pk) {
+        pl[pk] = {
+          score: Math.max((pl[pk] && pl[pk].score) || 0, _trueScore),
+          name:  (pl[pk] && pl[pk].name) || multiState.playerName ||
+                 (currentUser && (currentUser.name || currentUser.username)) || 'أنت',
+        };
+      }
+      const sorted = Object.entries(pl)
+        .filter(([, p]) => p && p.name)
+        .sort((a, b) => (b[1].score || 0) - (a[1].score || 0));
+      if (!sorted.length) return;
+      const winner   = sorted[0];
+      const isWinner = winner[0] === pk;
+      const tEl = document.getElementById('multiTrophyEmoji');
+      const nEl = document.getElementById('multiWinnerName');
+      const mEl = document.getElementById('multiWinnerMsg');
+      const sEl = document.getElementById('multiFinalScores');
+      if (tEl) tEl.textContent = isWinner ? '🏆' : '🎉';
+      if (nEl) nEl.textContent = winner[1].name;
+      if (mEl) mEl.textContent = isWinner
+        ? 'أنت الفائز! بارك الله فيك 🌟'
+        : 'الفائز بالتحدي — بالتوفيق المرة الجاية!';
+      if (sEl) sEl.innerHTML = sorted.map(([u, p], i) =>
+        `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;
+          background:rgba(255,254,249,${i===0?'0.07':'0.03'});border-radius:12px;
+          margin-bottom:6px;border:1px solid rgba(201,151,58,${i===0?'0.3':'0.1'});">
+          <span style="font-size:22px;">${medals[i]||'👤'}</span>
+          <span style="flex:1;font-size:15px;color:${i===0?'var(--gold)':'var(--cream)'};">
+            ${p.name}${u===pk?' (أنت)':''}</span>
+          <span style="font-size:18px;font-weight:900;color:var(--emerald-light);">
+            ${toArabicNum(p.score)}</span>
+        </div>`
+      ).join('');
+    };
 
-    // لو مفيش بيانات خالص — انتظر المحاولة الجاية
-    if (!sorted.length) return;
-
-    // ★ أول render ناجح يوقف المحاولات التانية
-    _rendered = true;
-
-    const winner   = sorted[0];
-    const isWinner = winner[0] === pk;
-    const tEl = document.getElementById('multiTrophyEmoji');
-    const nEl = document.getElementById('multiWinnerName');
-    const mEl = document.getElementById('multiWinnerMsg');
-    const sEl = document.getElementById('multiFinalScores');
-    if (tEl) tEl.textContent = isWinner ? '🏆' : '🎉';
-    if (nEl) nEl.textContent = winner[1].name;
-    if (mEl) mEl.textContent = isWinner
-      ? 'أنت الفائز! بارك الله فيك 🌟'
-      : 'الفائز بالتحدي — بالتوفيق المرة الجاية!';
-    if (sEl) sEl.innerHTML = sorted.map(([u, p], i) =>
-      `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;
-        background:rgba(255,254,249,${i===0?'0.07':'0.03'});border-radius:12px;
-        margin-bottom:6px;border:1px solid rgba(201,151,58,${i===0?'0.3':'0.1'});">
-        <span style="font-size:22px;">${medals[i]||'👤'}</span>
-        <span style="flex:1;font-size:15px;color:${i===0?'var(--gold)':'var(--cream)'};">
-          ${p.name}${u===pk?' (أنت)':''}</span>
-        <span style="font-size:18px;font-weight:900;color:var(--emerald-light);">
-          ${toArabicNum(p.score)}</span>
-      </div>`
-    ).join('');
-  };
-
-  const _fetchAndRender = () => {
-    if (_rendered) return;
     if (typeof window.fbMulti !== 'undefined' && multiState.roomCode) {
       window.fbMulti.getFinalScores(multiState.roomCode, (fs) => {
         window.fbMulti.getRoom(multiState.roomCode, (room) => {
@@ -9604,30 +9548,9 @@ function _showMultiResults() {
     }
   };
 
-  // ★ محاولات متعددة: 800ms، 2s، 4s، 7s — تضمن العرض حتى لو Firebase بطيء
-  setTimeout(_fetchAndRender, 800);
-  setTimeout(_fetchAndRender, 2000);
-  setTimeout(_fetchAndRender, 4000);
-  setTimeout(() => {
-    if (!_rendered) {
-      // ★ آخر محاولة — لو لسه ما ظهرش، اعرض اللاعب الحالي على الأقل
-      _doRender(null, window._multiRoomCache && window._multiRoomCache.players);
-      if (!_rendered && pk) {
-        const sEl = document.getElementById('multiFinalScores');
-        const tEl = document.getElementById('multiTrophyEmoji');
-        const nEl = document.getElementById('multiWinnerName');
-        const mEl = document.getElementById('multiWinnerMsg');
-        if (sEl) sEl.innerHTML = `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(255,254,249,0.07);border-radius:12px;border:1px solid rgba(201,151,58,0.3);">
-          <span style="font-size:22px;">🥇</span>
-          <span style="flex:1;font-size:15px;color:var(--gold);">${multiState.playerName || 'أنت'}</span>
-          <span style="font-size:18px;font-weight:900;color:var(--emerald-light);">${toArabicNum(_trueScore)}</span>
-        </div>`;
-        if (tEl) tEl.textContent = '🎉';
-        if (nEl) nEl.textContent = multiState.playerName || 'أنت';
-        if (mEl) mEl.textContent = 'انتهت الجولة!';
-      }
-    }
-  }, 7000);
+  // جيب النتايج بعد 800ms وبعد 3 ثواني للمتأخرين
+  setTimeout(_showUnified, 800);
+  setTimeout(_showUnified, 3000);
 }
 
 // يعيد بناء أسئلة جديدة بنفس إعدادات الغرفة (نفس السورة/العدد/المستوى)
@@ -9671,26 +9594,14 @@ function multiPlayAgain() {
     return;
   }
 
-  // ★ فقط المضيف يقدر يبدأ جولة جديدة — الباقيين ينتظروا
-  if (!multiState.isHost) {
-    const btn = document.getElementById('multiPlayAgainBtn');
-    if (btn) {
-      btn.textContent = '⏳ في انتظار المضيف...';
-      btn.disabled = true;
-      btn.style.opacity = '0.6';
-      // رجّع الزرار بعد 4 ثواني لو المضيف ما بدأش
-      setTimeout(() => {
-        if (btn && btn.disabled) {
-          btn.textContent = '⏳ في انتظار المضيف...';
-          btn.disabled = true;
-        }
-      }, 4000);
-    }
-    showToast('⏳ المضيف هيبدأ الجولة الجديدة...');
-    return;
+  // ★ إخفاء النتايج القديمة فوراً لكل من ضغط الزرار
+  const _resEl = document.getElementById('multiResults');
+  if (_resEl) {
+    _resEl.innerHTML = '<div style="text-align:center;padding:40px 20px;color:rgba(245,217,139,0.5);font-family:Cairo,sans-serif;font-size:15px;">⏳ جاري تحضير الجولة الجديدة...</div>';
   }
 
-  // ★ المضيف فقط يبدأ من هنا
+  // ★ أي لاعب يقدر يبدأ — الأول اللي بيدوس بيكتب على Firebase
+  // الباقيين بيشوفوا phase=playing من الـ listener ويبدأوا تلقائي
   const btn = document.getElementById('multiPlayAgainBtn');
   if (btn) { btn.textContent = '⏳ جاري...'; btn.disabled = true; }
   showToast('🔄 جولة جديدة بأسئلة جديدة...');
@@ -9698,20 +9609,18 @@ function multiPlayAgain() {
   const newQs = _rebuildMultiQuestions(room);
   if (newQs && newQs.length >= 3) {
     multiState.questions = newQs;
-  }
+  } // وإلا نسيب الأسئلة القديمة كـ fallback
   multiState.totalQ = multiState.questions.length;
 
-  room.phase = 'playing';
+  room.phase = 'playing';            // ★ تبدأ فورًا بدل الرجوع لقاعة الانتظار
   room.startedAt = Date.now();
   room.currentQ = 0;
   room.questions = multiState.questions;
   room.totalQ = multiState.totalQ;
   Object.keys(room.players || {}).forEach(u => {
-    if (room.players[u]) {
-      room.players[u].score = 0;
-      room.players[u].answered = false;
-      room.players[u].done = false;
-    }
+    room.players[u].score = 0;
+    room.players[u].answered = false;
+    room.players[u].done = false;
   });
   window._multiRoomCache = room;
   _setRoomData(multiState.roomCode, room);
@@ -9734,7 +9643,7 @@ function multiPlayAgain() {
     });
   }
 
-  // ★ المضيف يدخل اللعبة الجديدة فوراً
+  // المضيف يدخل اللعبة الجديدة فورًا
   _startMultiGame();
 }
 
@@ -10009,46 +9918,6 @@ function _stopPolling() {
 </script>
 
 <!-- ===== CONFIRM MODAL ===== -->
-
-<!-- ★ مودال تغيير كلمة المرور الحقيقي -->
-<div id="changePassModal" style="display:none;position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.82);align-items:center;justify-content:center;">
-  <div style="background:linear-gradient(160deg,#1e1508,#12100a);border:1px solid rgba(201,151,58,0.35);border-radius:20px;padding:28px 24px;max-width:360px;width:92%;box-shadow:0 8px 40px rgba(0,0,0,0.7);">
-    <div style="text-align:center;margin-bottom:18px;">
-      <div style="font-size:34px;margin-bottom:4px;">🔑</div>
-      <div style="font-size:17px;font-weight:700;color:var(--gold);font-family:'Cairo',sans-serif;">تغيير كلمة المرور</div>
-      <div style="font-size:11px;color:rgba(245,217,139,0.4);margin-top:4px;">التغيير هيطبّق على كل أجهزتك</div>
-    </div>
-    <div class="login-field">
-      <label>كلمة المرور الحالية</label>
-      <div class="pw-wrap">
-        <input type="password" id="cpOldPass" autocomplete="current-password" placeholder="••••••••"
-          style="width:100%;background:rgba(255,254,249,0.04);border:1.5px solid rgba(201,151,58,0.2);border-radius:14px;padding:12px 16px 12px 40px;font-family:'Cairo',sans-serif;font-size:15px;color:var(--cream);direction:rtl;outline:none;">
-        <button type="button" class="pw-eye" onclick="togglePw('cpOldPass',this)">👁</button>
-      </div>
-    </div>
-    <div class="login-field">
-      <label>كلمة المرور الجديدة</label>
-      <div class="pw-wrap">
-        <input type="password" id="cpNewPass" autocomplete="new-password" placeholder="٤ أحرف على الأقل"
-          style="width:100%;background:rgba(255,254,249,0.04);border:1.5px solid rgba(201,151,58,0.2);border-radius:14px;padding:12px 16px 12px 40px;font-family:'Cairo',sans-serif;font-size:15px;color:var(--cream);direction:rtl;outline:none;">
-        <button type="button" class="pw-eye" onclick="togglePw('cpNewPass',this)">👁</button>
-      </div>
-    </div>
-    <div class="login-field" style="margin-bottom:6px;">
-      <label>تأكيد كلمة المرور الجديدة</label>
-      <div class="pw-wrap">
-        <input type="password" id="cpConfirmPass" autocomplete="new-password" placeholder="أعد كتابة الباسورد الجديد"
-          style="width:100%;background:rgba(255,254,249,0.04);border:1.5px solid rgba(201,151,58,0.2);border-radius:14px;padding:12px 16px 12px 40px;font-family:'Cairo',sans-serif;font-size:15px;color:var(--cream);direction:rtl;outline:none;">
-        <button type="button" class="pw-eye" onclick="togglePw('cpConfirmPass',this)">👁</button>
-      </div>
-    </div>
-    <div id="cpErr" style="color:#FF9E9E;font-size:13px;text-align:center;min-height:18px;margin-bottom:10px;"></div>
-    <div style="display:flex;gap:8px;">
-      <button onclick="closeChangePassModal()" style="flex:1;padding:12px;background:rgba(255,254,249,0.05);border:1px solid rgba(201,151,58,0.2);border-radius:12px;color:rgba(245,217,139,0.6);font-family:'Cairo',sans-serif;font-size:14px;font-weight:600;cursor:pointer;">إلغاء</button>
-      <button id="cpSubmitBtn" onclick="doChangePassword()" ontouchend="event.preventDefault();doChangePassword();" style="flex:2;padding:12px;background:linear-gradient(135deg,#C9973A,#E8C46A);border:none;border-radius:12px;font-family:'Cairo',sans-serif;font-size:14px;font-weight:900;color:#1a1208;cursor:pointer;touch-action:manipulation;">حفظ وتطبيق ✅</button>
-    </div>
-  </div>
-</div>
 
 
 <div id="confirmModal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.7);align-items:center;justify-content:center;">
