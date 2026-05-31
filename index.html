@@ -1151,7 +1151,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
   import { getDatabase, ref, set, remove, onValue, get, update, onDisconnect, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
-  import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+  import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword, reauthenticateWithCredential, EmailAuthProvider } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyDmIxeupIlrYv8I3tvz_euIgolr5uUFx2M",
@@ -1432,8 +1432,24 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       new Promise((_, rej) => setTimeout(() => rej('timeout'), 6000)),
     ]);
 
-    // ★ خطوة ١: لو في أي session → اكتب bypass مباشرة
-    // (updatePassword يحتاج recent login — مش موثوق هنا، بنعتمد على bypassAuth للتزامن)
+    // ★ خطوة ١: لو في أي session → reauthenticate بالباسورد القديم وحدّث Firebase Auth
+    if (auth.currentUser && !auth.currentUser.isAnonymous) {
+      const _lu0 = (() => { try { return JSON.parse(localStorage.getItem('nour_users') || '{}'); } catch(e) { return {}; } })();
+      const _oldRaw0 = _lu0[email] && _lu0[email].password
+        ? (() => { try { return safe_atob(_lu0[email].password); } catch(e) { return null; } })()
+        : null;
+      const _doReauth = _oldRaw0
+        ? reauthenticateWithCredential(auth.currentUser, EmailAuthProvider.credential(toFbEmail(email), padPass(_oldRaw0)))
+        : Promise.reject('no-old');
+      _doReauth
+        .then(() => updatePassword(auth.currentUser, padPass(newPass)))
+        .catch(() => {}) // لو reauth فشل — بنكمل بـ bypassAuth على الأقل
+        .then(() => _writeBypass())
+        .then(() => onSuccess('bypass'))
+        .catch(() => onSuccess('local'));
+      return;
+    }
+    // anonymous session — اكتب bypass بس
     if (auth.currentUser) {
       _writeBypass()
         .then(() => onSuccess('bypass'))
