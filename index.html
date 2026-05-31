@@ -1215,6 +1215,40 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   function toFbEmail(email) { return email.trim().toLowerCase(); }
   function padPass(p) { return p + '__nr'; }
 
+  // ★★ btoa/atob آمنة تدعم Unicode (عربي، emoji، أي حروف) ★★
+  // btoa الأصلية بتفشل مع أي حرف خارج Latin1 — الحل: نحوّل لـ UTF-8 أولاً
+  function safe_btoa(str) {
+    try {
+      // محاولة سريعة للـ ASCII العادي
+      return btoa(str);
+    } catch(e) {
+      // Unicode → percent-encode → atob-safe string
+      return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g,
+        (_, p1) => String.fromCharCode(parseInt(p1, 16))));
+    }
+  }
+  function safe_atob(str) {
+    if (!str) return '';
+    try {
+      const decoded = atob(str);
+      // جرّب نرجعه من UTF-8 (مخزّن بـ safe_btoa الجديدة)
+      try {
+        const result = decodeURIComponent(decoded.split('').map(
+          c => '%' + c.charCodeAt(0).toString(16).padStart(2, '0')
+        ).join(''));
+        // لو النتيجة كلها printable characters → ده هو الباسورد الحقيقي
+        return result;
+      } catch(e2) {
+        // ASCII عادي مخزّن بـ btoa القديمة — رجّعه مباشرة
+        return decoded;
+      }
+    } catch(e) {
+      return str; // fallback: مش base64 خالص
+    }
+  }
+  window.safe_btoa = safe_btoa;
+  window.safe_atob = safe_atob;
+
   // ★ إعادة تعيين كلمة المرور
   window.fbResetPassword = function(email, onSuccess, onError) {
     sendPasswordResetEmail(auth, email.trim().toLowerCase(), {
@@ -1257,12 +1291,12 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         try {
           const _u = JSON.parse(localStorage.getItem('nour_users') || '{}');
           if (!_u[email]) _u[email] = {};
-          _u[email].password = btoa(password);
+          _u[email].password = safe_btoa(password);
           localStorage.setItem('nour_users', JSON.stringify(_u));
         } catch(e) {}
         // ★ اكتب bypassAuth من أول لحظة عشان كل الأجهزة تعرف الباسورد
         const _bpa = set(ref(db, 'users/' + key + '/bypassAuth'), {
-          email, passHash: btoa(padPass(password)), updatedAt: Date.now(),
+          email, passHash: safe_btoa(padPass(password)), updatedAt: Date.now(), changedAt: 0,
         }).catch(() => {});
         const _prof = set(ref(db, 'users/' + key + '/profile'), {
           email, createdAt: Date.now()
@@ -1293,12 +1327,12 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     get(ref(db, 'users/' + _key + '/bypassAuth')).then((snap) => {
       if (snap.exists()) {
         const bpa = snap.val();
-        if (bpa && bpa.passHash === btoa(padPass(password))) {
+        if (bpa && bpa.passHash === safe_btoa(padPass(password))) {
           // ★ الباسورد صح — حدّث localStorage فوراً
           try {
             const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
             if (!_lu[email]) _lu[email] = {};
-            _lu[email].password = btoa(password);
+            _lu[email].password = safe_btoa(password);
             _lu[email].email = email;
             localStorage.setItem('nour_users', JSON.stringify(_lu));
           } catch(e) {}
@@ -1319,12 +1353,12 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
           .then(() => {
             // ★ اكتب bypassAuth للمرة الأولى عشان كل الأجهزة تعرف الباسورد الصح
             set(ref(db, 'users/' + _key + '/bypassAuth'), {
-              email, passHash: btoa(padPass(password)), updatedAt: Date.now(),
+              email, passHash: safe_btoa(padPass(password)), updatedAt: Date.now(), changedAt: 0,
             }).catch(() => {});
             try {
               const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
               if (!_lu[email]) _lu[email] = {};
-              _lu[email].password = btoa(password);
+              _lu[email].password = safe_btoa(password);
               localStorage.setItem('nour_users', JSON.stringify(_lu));
             } catch(e) {}
             onSuccess();
@@ -1333,7 +1367,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
             if (e.code === 'auth/too-many-requests') {
               try {
                 const users = JSON.parse(localStorage.getItem('nour_users') || '{}');
-                if (users[email] && users[email].password === btoa(password)) { onSuccess(); return; }
+                if (users[email] && users[email].password === safe_btoa(password)) { onSuccess(); return; }
               } catch(ex) {}
               onError('الحساب محجوب مؤقتاً من Firebase، حاول بعد قليل');
             } else if (e.code === 'auth/user-not-found') {
@@ -1350,21 +1384,36 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
           });
       }
     }).catch(() => {
-      // Firebase مش متاح — جرّب Firebase Auth مباشرة
+      // Firebase مش متاح — جرّب محلياً أولاً ثم Firebase Auth
+      try {
+        const _localUsers = JSON.parse(localStorage.getItem('nour_users') || '{}');
+        const _lu = _localUsers[email];
+        if (_lu && _lu.password === safe_btoa(password)) {
+          onSuccess(); return; // ✅ offline fallback من localStorage
+        }
+      } catch(e) {}
       signInWithEmailAndPassword(auth, fbEmail, padPass(password))
         .then(() => onSuccess())
-        .catch((e) => onError('الإيميل أو كلمة المرور خاطئة'));
+        .catch((e) => {
+          if (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential' || e.code === 'auth/invalid-login-credentials') {
+            onError('الإيميل أو كلمة المرور خاطئة');
+          } else if (e.code === 'auth/network-request-failed') {
+            onError('في مشكلة في الإنترنت — اتأكد من اتصالك');
+          } else {
+            onError('الإيميل أو كلمة المرور خاطئة');
+          }
+        });
     });
   };
 
   // ★ تغيير كلمة المرور — يحفظ في Firebase DB ويدخّل فوراً
   window.fbForgotPasswordLogin = function(email, newPass, onSuccess, onError) {
     const _key      = dataKey(email);
-    const _passHash = btoa(padPass(newPass));
+    const _passHash = safe_btoa(padPass(newPass));
 
     const _writeBypass = () => Promise.race([
       set(ref(db, 'users/' + _key + '/bypassAuth'), {
-        email, passHash: _passHash, updatedAt: Date.now(),
+        email, passHash: _passHash, updatedAt: Date.now(), changedAt: Date.now(),
       }),
       new Promise((_, rej) => setTimeout(() => rej('timeout'), 6000)),
     ]);
@@ -1387,7 +1436,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         // ★ خطوة ٣: جرّب الباسورد القديم من localStorage
         const _lu = (() => { try { return JSON.parse(localStorage.getItem('nour_users') || '{}'); } catch(e) { return {}; } })();
         const _oldRaw = _lu[email] && _lu[email].password
-          ? (() => { try { return atob(_lu[email].password); } catch(e) { return null; } })()
+          ? (() => { try { return safe_atob(_lu[email].password); } catch(e) { return null; } })()
           : null;
 
         const _tryOldPass = _oldRaw
@@ -1591,17 +1640,41 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     if (_passUnsub) { _passUnsub(); _passUnsub = null; }
     if (!username) return;
     const key = dataKey(username);
-    _passUnsub = onValue(ref(db, 'users/' + key + '/bypassAuth/changedAt'), (snap) => {
+    // ★ نراقب الـ bypassAuth كله مش بس changedAt — عشان نتحقق من الباسورد كمان
+    _passUnsub = onValue(ref(db, 'users/' + key + '/bypassAuth'), (snap) => {
       if (!snap.exists()) return;
-      const changedAt = snap.val();
+      const bpa = snap.val();
+      if (!bpa) return;
+
+      const changedAt = bpa.changedAt || 0;
       const loginTime = window._loginTime || 0;
-      // لو الباسورد اتغير بعد ما دخلت → اطرد من كل الأجهزة
-      if (changedAt > loginTime + 5000) { // 5 ثواني margin
+
+      // ★ طريقة ١: changedAt أحدث من وقت الدخول = باسورد اتغير على جهاز تاني
+      if (changedAt > loginTime + 5000) {
         showToast('🔐 تم تغيير كلمة المرور — سجّل دخول مجدداً');
         setTimeout(() => {
           if (typeof doLogout === 'function') doLogout();
         }, 2000);
+        return;
       }
+
+      // ★ طريقة ٢: الباسورد المحفوظ محلياً مش متطابق مع Firebase (جهاز كان offline)
+      try {
+        const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
+        const _localPassRaw = _lu[username] && _lu[username].password
+          ? (() => { try { return safe_atob(_lu[username].password); } catch(e) { return null; } })()
+          : null;
+        if (_localPassRaw && bpa.passHash) {
+          const _localHash = safe_btoa(_localPassRaw + '__nr');
+          if (_localHash !== bpa.passHash) {
+            // ★ الباسورد المحلي مختلف عن Firebase — لازم يدخل بالباسورد الجديد
+            showToast('🔐 كلمة المرور تغيّرت — سجّل دخول مجدداً');
+            setTimeout(() => {
+              if (typeof doLogout === 'function') doLogout();
+            }, 2000);
+          }
+        }
+      } catch(e) {}
     });
   };
   window.fbUnwatchPassChange = function() {
@@ -1909,6 +1982,9 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       window._pendingAutoLogin = null;
       clearTimeout(window._autoLoginFallbackTimer);
       if (window.currentUser) window.currentUser._pendingVerify = false;
+    } else if (window.currentUser && !window.currentUser._pendingVerify) {
+      // ★ الـ fallback timer سبقنا وعمل loginSuccess — نكمل بدون تدخل
+      // فقط نحدّث _authDone عشان نمنع double login
     }
 
     const emailKey0 = (user.email || '').replace(/@.*$/, '');
@@ -3289,14 +3365,14 @@ let currentUser = null;
     currentUser = { username: lastUser, isGuest: false, ...(data || {}), _pendingVerify: true };
     window.currentUser = currentUser;
 
-    // Fallback: لو Firebase ما جاش خلال ثانيتين → اعتمد على المحلي
+    // Fallback: لو Firebase ما جاش خلال ٤ ثواني → اعتمد على المحلي
     window._autoLoginFallbackTimer = setTimeout(() => {
       if (window.currentUser && window.currentUser._pendingVerify) {
         window.currentUser._pendingVerify = false;
         currentUser = window.currentUser;
         if (typeof loginSuccess === 'function') loginSuccess(lastUser, data);
       }
-    }, 2000);
+    }, 4000);
 
   } catch(e) {}
 })();
@@ -3377,14 +3453,22 @@ function doLogin() {
   if (!user || !pass) { showLoginErr('أدخل الإيميل وكلمة المرور'); return; }
   if (!user.includes('@')) { showLoginErr('أدخل إيميلك (example@gmail.com)'); return; }
 
+  // ★ منع الضغط المزدوج + إظهار loading
+  const _loginBtn = document.querySelector('#loginForm .login-btn');
+  if (_loginBtn) { _loginBtn.disabled = true; _loginBtn.textContent = '⏳ جاري الدخول...'; }
+  showLoginErr('');
+
   // ── دخول فوري: أخفي اللوجين فوراً لو الباسورد صح محلياً ──
   const users = getUsers();
   const localData = users[user];
 
+  const _restoreBtn = () => {
+    if (_loginBtn) { _loginBtn.disabled = false; _loginBtn.textContent = 'دخول ✨'; }
+  };
+
   // ★ دايماً نمر على fbLogin عشان يتحقق من bypassAuth (المصدر الحقيقي للباسورد)
   // الـ local check بيتعمل جوّا fbLogin لو مفيش إنترنت
   if (typeof window.fbLogin === 'function') {
-    
 
     // ★ دايماً نتحقق من Firebase أولاً عشان تغيير الباسورد يسري على كل الأجهزة
     window.fbLogin(user, pass,
@@ -3393,7 +3477,7 @@ function doLogin() {
         // ★ blur أي input نشط عشان الـ keyboard يقفل على الموبايل
         if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
         const _finishFresh = (realName, fbData, fbNameOverride) => {
-          if (window._loggedOut) return; // لو خرج أثناء التحميل
+          if (window._loggedOut) { _restoreBtn(); return; }
           const lData = users[user] || {};
           const merged = {
             totalScore:   Math.max((fbData && fbData.totalScore)   || 0, lData.totalScore   || 0),
@@ -3407,15 +3491,20 @@ function doLogin() {
           };
           try {
             const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
-            _lu[user] = { ...(_lu[user]||{}), ...merged, password: btoa(pass) };
+            _lu[user] = { ...(_lu[user]||{}), ...merged, password: safe_btoa(pass) };
             localStorage.setItem('nour_users', JSON.stringify(_lu));
             localStorage.setItem('nour_last_user', user);
           } catch(e) {}
           // ★ استنى الـ keyboard يقفل
           setTimeout(() => {
+            _restoreBtn();
             const _lsEl = document.getElementById('loginScreen');
             if (_lsEl) { _lsEl.classList.add('hide'); }
             window.scrollTo(0, 0);
+            // ★ إعادة تعيين _fromAuth عشان loginSuccess ما يتعطلش
+            if (window.currentUser && window.currentUser.username !== user) {
+              window.currentUser = null; currentUser = null;
+            }
             loginSuccess(realName || user, merged);
           }, 400);
           // ★ كتابة فورية عشان الاسم يظهر في الـ leaderboard
@@ -3424,7 +3513,6 @@ function doLogin() {
           }
         };
         // اقرأ البيانات + الاسم المستقل
-        const _key = typeof window._dataKey === 'function' ? window._dataKey(user) : user;
         const _readName = typeof window.fbGetName === 'function'
           ? new Promise(res => window.fbGetName(user, res))
           : Promise.resolve(null);
@@ -3448,13 +3536,14 @@ function doLogin() {
         }
       },
       (errMsg) => {
+        _restoreBtn();
         currentUser = null; window.currentUser = null;
         const _lsR = document.getElementById('loginScreen'); if(_lsR){_lsR.classList.remove('hide');_lsR.style.display='';_lsR.style.pointerEvents='';}
         // ★ Fallback محلي: بس لو Firebase مش متاح (مش لو رفض الباسورد)
         const _lFresh = getUsers()[user];
         const _fbReject = errMsg && (errMsg.includes('خاطئة') || errMsg.includes('denied') || errMsg.includes('wrong'));
         // ★ Offline fallback: بس لو Firebase مش وصّل خالص (مش لو رفض الباسورد)
-        if (!window._loggedOut && !_fbReject && _lFresh && _lFresh.password === btoa(pass)) {
+        if (!window._loggedOut && !_fbReject && _lFresh && _lFresh.password === safe_btoa(pass)) {
           const _storedName = (typeof window._getStoredName === 'function' ? window._getStoredName(user) : null)
                            || _lFresh.name
                            || (user && user.includes('@') ? user.split('@')[0] : user);
@@ -3470,8 +3559,9 @@ function doLogin() {
   }
 
   // Fallback لو Firebase مش متاح خالص
+  _restoreBtn();
   if (!localData || !localData.password) { showLoginErr('الحساب غير موجود'); return; }
-  if (localData.password !== btoa(pass)) { showLoginErr('كلمة المرور خاطئة'); return; }
+  if (localData.password !== safe_btoa(pass)) { showLoginErr('كلمة المرور خاطئة'); return; }
   const _offlineName = (typeof window._getStoredName === 'function' ? window._getStoredName(user) : null)
                     || localData.name
                     || (user && user.includes('@') ? user.split('@')[0] : user);
@@ -3514,7 +3604,7 @@ function doRegister() {
       if (!_lu[email]) _lu[email] = {};
       _lu[email].name = name;
       _lu[email].email = email;
-      _lu[email].password = btoa(pass); // ★ تأكيد حفظ الباسورد
+      _lu[email].password = safe_btoa(pass); // ★ تأكيد حفظ الباسورد
       localStorage.setItem('nour_users', JSON.stringify(_lu));
       localStorage.setItem('nour_last_user', email);
     } catch(e) {}
@@ -3630,7 +3720,7 @@ function _sendForgotEmail() {
   try {
     const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
     if (!_lu[email]) _lu[email] = {};
-    _lu[email].password = btoa(newPass);
+    _lu[email].password = safe_btoa(newPass);
     _lu[email].email    = email;
     const _n = localStorage.getItem('nour_name_' + email) || _lu[email].name;
     if (_n) _lu[email].name = _n;
@@ -3638,18 +3728,19 @@ function _sendForgotEmail() {
     localStorage.setItem('nour_last_user', email);
   } catch(e) {}
 
-  // ★ ٢. اكتب bypassAuth في Firebase مع retry (المصدر الحقيقي للباسورد)
+  // ★ ٢. حضّر مرجع Firebase (الكتابة الأولى بتتم في الـ overlay مع مؤشر المزامنة)
   const _key2    = typeof dataKey === 'function' ? dataKey(email) : email.replace(/[.#$\/\[\]]/g,'_').toLowerCase();
-  const _newHash = btoa(newPass + '__nr');
+  const _newHash = safe_btoa(newPass + '__nr');
   const _bypassRef = ref(db, 'users/' + _key2 + '/bypassAuth');
   const _changedAt = Date.now();
   // ★ نحدّث _loginTime عشان الجهاز الحالي ما يتطردش بواسطة fbWatchPassChange
-  window._loginTime = _changedAt + 60000;
+  window._loginTime = _changedAt + 10000;
+  // retry من المحاولة ٢ — المحاولة ١ بتتم في الـ overlay أدناه
   const _doWrite = (attempt) => {
     set(_bypassRef, { email: email, passHash: _newHash, updatedAt: _changedAt, changedAt: _changedAt })
-      .catch(() => { if (attempt < 5) setTimeout(() => _doWrite(attempt + 1), 600 * attempt); });
+      .catch(() => { if (attempt < 5) setTimeout(() => _doWrite(attempt + 1), 800 * attempt); });
   };
-  _doWrite(1);
+  setTimeout(() => _doWrite(2), 5000); // retry بعد 5 ثواني لو الكتابة الأولى فشلت
 
   // ★ ٣. أغلق الـ keyboard
   ['forgotEmailInput','forgotNewPass','forgotConfirmPass'].forEach(id => {
@@ -3665,19 +3756,152 @@ function _sendForgotEmail() {
   }
   window.scrollTo(0, 0);
 
-  // ★ animation في عنصر مؤقت منفصل تماماً عن الـ modal
+  // ★ animation احترافية مع مؤشر مزامنة Firebase
   const _overlay = document.createElement('div');
-  _overlay.style.cssText = 'position:fixed;inset:0;z-index:5000;display:flex;align-items:center;justify-content:center;pointer-events:none;';
-  _overlay.innerHTML =
-    '<div style="background:linear-gradient(160deg,#1e1508,#12100a);border:1px solid rgba(201,151,58,0.4);border-radius:20px;padding:32px 40px;text-align:center;pointer-events:none;box-shadow:0 8px 40px rgba(0,0,0,0.7);">' +
-    '<div style="font-size:64px;margin-bottom:12px;animation:popIn .4s ease;pointer-events:none;">✅</div>' +
-    '<div style="font-size:18px;font-weight:900;color:#C9973A;font-family:Cairo,sans-serif;pointer-events:none;">تم تغيير كلمة المرور</div>' +
-    '<div style="font-size:12px;color:rgba(245,217,139,0.5);margin-top:6px;font-family:Cairo,sans-serif;pointer-events:none;">تم الحفظ بنجاح 🤍</div>' +
-    '</div>';
+  _overlay.id = '_passChangeOverlay';
+  _overlay.style.cssText = 'position:fixed;inset:0;z-index:5000;display:flex;align-items:center;justify-content:center;background:rgba(26,18,8,0.75);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);pointer-events:all;';
+
+  _overlay.innerHTML = `
+  <style>
+    @keyframes _checkDraw {
+      0%   { stroke-dashoffset: 60; opacity:0; }
+      30%  { opacity:1; }
+      100% { stroke-dashoffset: 0; }
+    }
+    @keyframes _circlePop {
+      0%   { transform:scale(0.4); opacity:0; }
+      60%  { transform:scale(1.1); }
+      80%  { transform:scale(0.95); }
+      100% { transform:scale(1); opacity:1; }
+    }
+    @keyframes _fadeSlideUp {
+      from { opacity:0; transform:translateY(10px); }
+      to   { opacity:1; transform:translateY(0); }
+    }
+    @keyframes _syncSpin {
+      from { transform:rotate(0deg); }
+      to   { transform:rotate(360deg); }
+    }
+    @keyframes _syncDone {
+      0%   { transform:scale(0.5); opacity:0; }
+      70%  { transform:scale(1.2); }
+      100% { transform:scale(1); opacity:1; }
+    }
+    @keyframes _overlayFadeOut {
+      from { opacity:1; }
+      to   { opacity:0; }
+    }
+  </style>
+  <div id="_passChangeCard" style="
+    background:linear-gradient(160deg,#1e1508 0%,#12100a 60%,#0e1810 100%);
+    border:1px solid rgba(201,151,58,0.35);
+    border-radius:24px;
+    padding:40px 48px;
+    text-align:center;
+    box-shadow:0 16px 60px rgba(0,0,0,0.8), 0 0 0 1px rgba(201,151,58,0.1);
+    min-width:280px;
+    max-width:320px;
+    position:relative;
+    overflow:hidden;
+  ">
+    <!-- وهج خلفي -->
+    <div style="position:absolute;top:-40px;left:50%;transform:translateX(-50%);width:200px;height:200px;border-radius:50%;background:radial-gradient(circle,rgba(27,107,74,0.18) 0%,transparent 70%);pointer-events:none;"></div>
+
+    <!-- علامة الصح المتحركة -->
+    <div style="animation:_circlePop .5s cubic-bezier(.34,1.56,.64,1) both;margin-bottom:20px;display:inline-block;">
+      <svg width="80" height="80" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="40" cy="40" r="36" fill="rgba(27,107,74,0.25)" stroke="rgba(46,175,120,0.6)" stroke-width="2"/>
+        <circle cx="40" cy="40" r="36" fill="none" stroke="#2EAF78" stroke-width="2.5" stroke-dasharray="226" stroke-dashoffset="0" opacity="0.3"/>
+        <polyline
+          points="24,41 35,53 57,28"
+          fill="none"
+          stroke="#2EAF78"
+          stroke-width="5"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-dasharray="60"
+          stroke-dashoffset="60"
+          style="animation:_checkDraw .5s .3s cubic-bezier(.4,0,.2,1) forwards;"
+        />
+      </svg>
+    </div>
+
+    <!-- النص الرئيسي -->
+    <div style="animation:_fadeSlideUp .4s .5s both;">
+      <div style="font-size:19px;font-weight:900;color:#C9973A;font-family:Cairo,sans-serif;margin-bottom:6px;">تم تغيير كلمة المرور</div>
+      <div style="font-size:13px;color:rgba(245,217,139,0.55);font-family:Cairo,sans-serif;">كلمة المرور الجديدة محفوظة</div>
+    </div>
+
+    <!-- شريط المزامنة -->
+    <div id="_syncStatusBar" style="animation:_fadeSlideUp .4s .7s both;margin-top:20px;background:rgba(255,254,249,0.04);border-radius:12px;padding:10px 14px;display:flex;align-items:center;gap:10px;justify-content:center;border:1px solid rgba(201,151,58,0.12);">
+      <div id="_syncIcon" style="width:18px;height:18px;flex-shrink:0;">
+        <svg id="_syncSpinner" width="18" height="18" viewBox="0 0 18 18" style="animation:_syncSpin .8s linear infinite;">
+          <circle cx="9" cy="9" r="7" fill="none" stroke="rgba(201,151,58,0.25)" stroke-width="2"/>
+          <path d="M9 2 A7 7 0 0 1 16 9" fill="none" stroke="#C9973A" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div id="_syncText" style="font-size:12px;color:rgba(245,217,139,0.6);font-family:Cairo,sans-serif;">جاري المزامنة على كل الأجهزة...</div>
+    </div>
+  </div>`;
+
   document.body.appendChild(_overlay);
+
+  // ★ جرب اكتب Firebase وحدّث الـ UI بناءً على النتيجة
+  const _updateSyncUI = (success) => {
+    const iconEl = document.getElementById('_syncIcon');
+    const textEl = document.getElementById('_syncText');
+    const barEl  = document.getElementById('_syncStatusBar');
+    if (!iconEl || !textEl) return;
+    if (success) {
+      iconEl.innerHTML = `<svg width="18" height="18" viewBox="0 0 18 18" style="animation:_syncDone .35s cubic-bezier(.34,1.56,.64,1) both;">
+        <circle cx="9" cy="9" r="8" fill="rgba(27,107,74,0.3)" stroke="#2EAF78" stroke-width="1.5"/>
+        <polyline points="5,9 8,12 13,6" fill="none" stroke="#2EAF78" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>`;
+      textEl.textContent = '✓ تمت المزامنة على كل أجهزتك';
+      textEl.style.color = 'rgba(125,255,201,0.8)';
+      if (barEl) barEl.style.borderColor = 'rgba(46,175,120,0.25)';
+    } else {
+      iconEl.innerHTML = `<span style="font-size:15px;">📵</span>`;
+      textEl.textContent = 'محفوظ محلياً — سيتزامن عند الاتصال';
+      textEl.style.color = 'rgba(245,217,139,0.45)';
+    }
+  };
+
+  // حاول تكتب Firebase مباشرة وتحدّث الـ UI
+  const _fbWritePromise = set(_bypassRef, { email: email, passHash: _newHash, updatedAt: _changedAt, changedAt: _changedAt });
+  Promise.race([
+    _fbWritePromise.then(() => true).catch(() => false),
+    new Promise(res => setTimeout(() => res(null), 4000)), // timeout 4 ثواني
+  ]).then((result) => {
+    if (result === true) {
+      _updateSyncUI(true);
+    } else if (result === false) {
+      _updateSyncUI(false);
+    } else {
+      // timeout — لسه بيحاول
+      _updateSyncUI(false);
+      // لو نجح بعدين — خليه يتحدث لو الـ overlay لسه موجود
+      _fbWritePromise.then(() => _updateSyncUI(true)).catch(() => {});
+    }
+  });
+
+  // أخفِ الـ overlay بعد 3 ثواني مع fade out
   setTimeout(() => {
-    if (_overlay.parentNode) _overlay.parentNode.removeChild(_overlay);
-  }, 1500);
+    const ov = document.getElementById('_passChangeOverlay');
+    if (ov) {
+      ov.style.animation = '_overlayFadeOut .4s ease forwards';
+      setTimeout(() => { if (ov.parentNode) ov.parentNode.removeChild(ov); }, 400);
+    }
+  }, 3000);
+
+  // إغلاق بالضغط بعد ما تظهر
+  setTimeout(() => {
+    const ov = document.getElementById('_passChangeOverlay');
+    if (ov) ov.onclick = () => {
+      ov.style.animation = '_overlayFadeOut .3s ease forwards';
+      setTimeout(() => { if (ov.parentNode) ov.parentNode.removeChild(ov); }, 300);
+    };
+  }, 800);
 }
 
 window.doForgotPassword = doForgotPassword;
@@ -3734,7 +3958,7 @@ window._sendForgotEmail = _sendForgotEmail;
           try {
             const _u = JSON.parse(localStorage.getItem('nour_users') || '{}');
             if (!_u[email]) _u[email] = {};
-            _u[email].password = btoa(pending.newPass);
+            _u[email].password = safe_btoa(pending.newPass);
             localStorage.setItem('nour_users', JSON.stringify(_u));
           } catch(e) {}
           showToast && showToast('✅ تم تغيير كلمة المرور ودخلت أوتوماتيك!');
@@ -3780,8 +4004,20 @@ function doConfirmReset() {
       try {
         const _u = JSON.parse(localStorage.getItem('nour_users') || '{}');
         if (!_u[userEmail]) _u[userEmail] = {};
-        _u[userEmail].password = btoa(pass);
+        _u[userEmail].password = safe_btoa(pass);
         localStorage.setItem('nour_users', JSON.stringify(_u));
+      } catch(e) {}
+      // ★ اكتب bypassAuth في Firebase مع changedAt عشان كل الأجهزة تتطرد وتتحدث
+      try {
+        const _rKey = typeof dataKey === 'function' ? dataKey(userEmail) : userEmail.replace(/[.#$\/\[\]]/g,'_').toLowerCase();
+        const _rHash = safe_btoa(pass + '__nr');
+        const _rTs = Date.now();
+        window._loginTime = _rTs + 10000; // الجهاز الحالي ما يتطردش (٩ ثواني grace)
+        if (typeof set === 'function' && typeof ref === 'function' && typeof db !== 'undefined') {
+          set(ref(db, 'users/' + _rKey + '/bypassAuth'), {
+            email: userEmail, passHash: _rHash, updatedAt: _rTs, changedAt: _rTs,
+          }).catch(() => {});
+        }
       } catch(e) {}
       // أغلق الشاشة
       const modal = document.getElementById('resetPassModal');
@@ -3850,8 +4086,9 @@ function loginSuccess(username, data, isGuest=false) {
     _finishLogin(username, isGuest);
     return;
   }
-  // لو في مستخدم آخر logged in فعلاً — لا تستبدله
-  if (window.currentUser && window.currentUser.username !== username && !window.currentUser._fromAuth && !window._registering) return;
+  // لو في مستخدم آخر logged in فعلاً ومش pending verify — لا تستبدله
+  if (window.currentUser && window.currentUser.username !== username
+      && !window.currentUser._pendingVerify && !window._registering) return;
   currentUser = { username, isGuest, ...(data || {}) };
   window.currentUser = currentUser;
   _finishLogin(username, isGuest);
