@@ -2451,12 +2451,24 @@ window._loginInProgress = false;
 
     const toA = n => String(Math.round(n || 0)).replace(/\d/g, d => '٠١٢٣٤٥٦٧٨٩'[d]);
 
-    // ترتيب تنازلي حسب الحسنات (مع احترام مفتاح ظهور الضيوف)
+    // ترتيب تنازلي حسب الحسنات → الجلسات → النقاط (tiebreakers مستقرة)
     const _showGuests = window.SHOW_GUESTS_IN_RANKING !== false;
     const list = Object.entries(data || {})
       .filter(([k, d]) => d && (d.totalHasanat || 0) > 0 &&
         (_showGuests || (!d.isGuest && !String(k).startsWith('guest__'))))
-      .sort(([, a], [, b]) => (b.totalHasanat || 0) - (a.totalHasanat || 0));
+      .sort(([ka, a], [kb, b]) => {
+        // 1. الحسنات (الأهم)
+        const dh = (b.totalHasanat || 0) - (a.totalHasanat || 0);
+        if (dh !== 0) return dh;
+        // 2. عدد الجلسات (لمن لديهم نفس الحسنات)
+        const dg = (b.totalGames || 0) - (a.totalGames || 0);
+        if (dg !== 0) return dg;
+        // 3. النقاط
+        const ds = (b.totalScore || 0) - (a.totalScore || 0);
+        if (ds !== 0) return ds;
+        // 4. الأقدم في التسجيل (مستقر)
+        return String(ka).localeCompare(String(kb));
+      });
 
     window._lbAllList = list;
 
@@ -4027,7 +4039,7 @@ function editDisplayName() {
     overlay.innerHTML =
       '<div style="background:linear-gradient(160deg,#1e1508,#12100a);border:1px solid rgba(201,151,58,0.4);border-radius:18px;padding:24px 20px;width:100%;max-width:320px;text-align:center;">' +
         '<div style="font-size:14px;color:var(--gold);font-family:Cairo,sans-serif;font-weight:700;margin-bottom:14px;">✏️ تعديل الاسم</div>' +
-        '<input id="_nameEditInput" type="text" maxlength="30" placeholder="اكتب اسمك هنا"' +
+        '<input id="_nameEditInput" type="text" maxlength="30" placeholder="اكتب اسمك هنا" autocomplete="off" autocorrect="off" spellcheck="false" name="nour_name_edit"' +
         ' style="width:100%;background:rgba(201,151,58,0.1);border:1.5px solid rgba(201,151,58,0.4);border-radius:12px;padding:10px 14px;font-family:Cairo,sans-serif;font-size:15px;color:var(--gold);direction:rtl;outline:none;text-align:right;box-sizing:border-box;">' +
         '<div style="display:flex;gap:8px;margin-top:12px;">' +
           '<button onclick="_cancelNameEdit()" style="flex:1;padding:10px;background:rgba(255,254,249,0.05);border:1px solid rgba(201,151,58,0.2);border-radius:10px;color:rgba(245,217,139,0.5);font-family:Cairo,sans-serif;font-size:14px;cursor:pointer;">إلغاء</button>' +
