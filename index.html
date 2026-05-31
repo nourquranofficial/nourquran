@@ -1322,9 +1322,22 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     const fbEmail = toFbEmail(email);
     const _key    = dataKey(email);
 
+    // ★ timeout 5 ثواني — لو Firebase ما ردّش نرجع للـ local fallback
+    let _fbLoginDone = false;
+    const _fbLoginTimeout = setTimeout(() => {
+      if (_fbLoginDone) return;
+      _fbLoginDone = true;
+      try {
+        const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
+        if (_lu[email] && _lu[email].password === safe_btoa(password)) { onSuccess(); return; }
+      } catch(e) {}
+      onError('انتهت مهلة الاتصال بالخادم — تأكد من الإنترنت وحاول مرة ثانية');
+    }, 5000);
+
     // ★ المنطق: bypassAuth هي المصدر الحقيقي للباسورد لو موجودة
     //   لو مش موجودة → Firebase Auth هو المصدر
     get(ref(db, 'users/' + _key + '/bypassAuth')).then((snap) => {
+      if (_fbLoginDone) return; _fbLoginDone = true; clearTimeout(_fbLoginTimeout);
       if (snap.exists()) {
         const bpa = snap.val();
         if (bpa && bpa.passHash === safe_btoa(padPass(password))) {
@@ -1384,6 +1397,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
           });
       }
     }).catch(() => {
+      if (_fbLoginDone) return; _fbLoginDone = true; clearTimeout(_fbLoginTimeout);
       // Firebase مش متاح — جرّب محلياً أولاً ثم Firebase Auth
       try {
         const _localUsers = JSON.parse(localStorage.getItem('nour_users') || '{}');
