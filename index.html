@@ -3342,124 +3342,88 @@ function doLogin() {
   if (typeof window._resetAuthDone === 'function') window._resetAuthDone();
 
   const user = document.getElementById('loginUser').value.trim().toLowerCase();
-  const pass = document.getElementById('loginPass').value.trim(); // ★ trim عشان spaces لا تكسر المقارنة
+  const pass = document.getElementById('loginPass').value.trim();
   if (!user || !pass) { window._loginInProgress = false; showLoginErr('أدخل الإيميل وكلمة المرور'); return; }
   if (!user.includes('@')) { window._loginInProgress = false; showLoginErr('أدخل إيميلك (example@gmail.com)'); return; }
 
-  // ★ عطّل الزرار وأظهر spinner عشان المستخدم يعرف إن في شيء بيحصل
-  const _btn = document.querySelector('#loginForm .login-btn') || document.querySelector('.login-btn[onclick*="doLogin"]');
-  if (_btn) { _btn.disabled = true; _btn.textContent = '...'; }
-  const _resetBtn = () => { if (_btn) { _btn.disabled = false; _btn.textContent = 'دخول 🌟'; } };
+  const localData = getUsers()[user];
 
-  const users = getUsers();
-  const localData = users[user];
-
-  // ── دالة الدخول النهائي ────────────────────────────────────
-  const _enterApp = (fbData) => {
-    if (window._loggedOut) { window._loginInProgress = false; _resetBtn(); return; }
+  // ── دالة الدخول ──────────────────────────────────────────────
+  const _enter = (data) => {
+    if (window._loggedOut) { window._loginInProgress = false; return; }
     window._loginInProgress = false;
-    _resetBtn();
-    // ★ سجّل وقت الدخول الفعلي
     window._loginTime = Date.now();
-    if (typeof window.fbWatchPassChange === 'function') window.fbWatchPassChange(user);
-    const lData = localData || {};
+    const d = data || {};
     const merged = {
-      totalScore:   Math.max((fbData && fbData.totalScore)   || 0, lData.totalScore   || 0),
-      totalGames:   Math.max((fbData && fbData.totalGames)   || 0, lData.totalGames   || 0),
-      totalHasanat: Math.max((fbData && fbData.totalHasanat) || 0, lData.totalHasanat || 0),
-      streak:       Math.max((fbData && fbData.streak)       || 0, lData.streak       || 0),
-      lastPlay:     (fbData && fbData.lastPlay) || lData.lastPlay || null,
-      name:         (typeof window._getStoredName === 'function' ? window._getStoredName(user) : null)
-                    || (fbData && fbData.name && !fbData.name.includes('@') ? fbData.name : null)
-                    || lData.name || user.split('@')[0],
+      totalScore:   d.totalScore   || 0,
+      totalGames:   d.totalGames   || 0,
+      totalHasanat: d.totalHasanat || 0,
+      streak:       d.streak       || 0,
+      lastPlay:     d.lastPlay     || null,
+      name:         (d.name && !d.name.includes('@') ? d.name : null) || user.split('@')[0],
       email: user,
     };
     try {
       const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
-      _lu[user] = { ...(_lu[user] || {}), ...merged, password: btoa(pass) };
+      _lu[user] = { ...(_lu[user]||{}), ...merged, password: btoa(pass) };
       localStorage.setItem('nour_users', JSON.stringify(_lu));
       localStorage.setItem('nour_last_user', user);
     } catch(e) {}
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
-    const _lsEl = document.getElementById('loginScreen');
-    if (_lsEl) _lsEl.classList.add('hide');
+    const s = document.getElementById('loginScreen');
+    if (s) s.classList.add('hide');
     window.scrollTo(0, 0);
-    loginSuccess(merged.name || user, merged);
-    if (typeof window.fbSaveUser === 'function' && merged.totalScore > 0) {
-      window.fbSaveUser(user, Object.assign({}, merged, { isGuest: false }));
-    }
+    loginSuccess(merged.name, merged);
   };
 
-  const _showErr = (msg) => {
-    window._loginInProgress = false;
-    _resetBtn();
-    showLoginErr(msg || 'الإيميل أو كلمة المرور خاطئة');
-  };
-
-  // ── Fast path: لو الباسورد صح محلياً → دخّله فوراً ─────────────
+  // ── 1. باسورد صح محلياً → دخول فوري ─────────────────────────
   if (localData && localData.password === btoa(pass)) {
-    _enterApp(localData);
-    // ★ تحقق Firebase في الخلفية — لو الباسورد اتغيّر من جهاز تاني → نطرده
+    _enter(localData);
+    // تحقق Firebase في الخلفية
     if (typeof window.fbLogin === 'function') {
-      window.fbLogin(user, pass, () => {}, (errMsg) => {
-        if (errMsg && errMsg.includes('خطأ') && window.currentUser && window.currentUser.username === user) {
-          if (typeof doLogout === 'function') doLogout();
-        }
+      window.fbLogin(user, pass, () => {}, (e) => {
+        if (e && e.includes('خطأ') && window.currentUser && window.currentUser.username === user)
+          doLogout();
       });
     }
     return;
   }
 
-  // ── لو فيه حساب محلي بس الباسورد غلط → رفض فوري ────────────
-  if (localData && localData.password && localData.password !== btoa(pass)) {
-    // ★ ممكن الباسورد اتغيّر من جهاز تاني — نتحقق من Firebase
-    if (typeof window.fbLogin === 'function') {
-      const _loginTimeout = setTimeout(() => {
-        if (!window._loginInProgress) return;
-        _showErr('كلمة المرور خطأ — حاول مجدداً');
-      }, 6000);
-      const _clr = () => clearTimeout(_loginTimeout);
-      window.fbLogin(user, pass,
-        () => { _clr(); if (typeof window._markAuthDone === 'function') window._markAuthDone(); if (typeof window.fbGetAccount === 'function') { window.fbGetAccount(user, (_, fbData) => _enterApp(fbData)); } else { _enterApp(null); } },
-        () => { _clr(); _showErr('كلمة المرور خطأ — حاول مجدداً'); }
-      );
-      return;
-    }
-    _showErr('كلمة المرور خطأ — حاول مجدداً');
+  // ── 2. باسورد غلط محلياً وفيه حساب → رسالة فورية ──────────
+  if (localData && localData.password) {
+    window._loginInProgress = false;
+    showLoginErr('كلمة المرور خطأ — حاول مجدداً');
     return;
   }
 
-  // ── Firebase path: مفيش باسورد محلي (جهاز جديد) ──────────────
+  // ── 3. مفيش بيانات محلية (جهاز جديد) → Firebase ──────────
   if (typeof window.fbLogin === 'function') {
-    const _loginTimeout = setTimeout(() => {
+    showLoginErr('...');
+    const _t = setTimeout(() => {
       if (!window._loginInProgress) return;
-      _showErr('مش قادر يتصل بالسيرفر — تأكد من الإنترنت وحاول تاني');
+      window._loginInProgress = false;
+      showLoginErr('تعذّر الاتصال — تأكد من الإنترنت');
     }, 10000);
-    const _clr = () => clearTimeout(_loginTimeout);
-
     window.fbLogin(user, pass,
       () => {
-        _clr();
+        clearTimeout(_t);
         if (typeof window._markAuthDone === 'function') window._markAuthDone();
         if (typeof window.fbGetAccount === 'function') {
-          window.fbGetAccount(user, (_, fbData) => _enterApp(fbData));
-        } else {
-          _enterApp(null);
-        }
+          window.fbGetAccount(user, (_, d) => _enter(d));
+        } else { _enter(null); }
       },
-      (errMsg) => {
-        _clr();
-        currentUser = null; window.currentUser = null;
-        _showErr(errMsg);
+      (e) => {
+        clearTimeout(_t);
+        window._loginInProgress = false;
+        showLoginErr(e || 'كلمة المرور خطأ — حاول مجدداً');
       }
     );
     return;
   }
 
-  // ── Offline: مفيش Firebase ────────────────────────────────────
-  if (!localData || !localData.password) { _showErr('الحساب غير موجود'); return; }
-  if (localData.password !== btoa(pass)) { _showErr('كلمة المرور خطأ — حاول مجدداً'); return; }
-  _enterApp(localData);
+  // ── 4. Offline ────────────────────────────────────────────────
+  window._loginInProgress = false;
+  showLoginErr('الحساب غير موجود على هذا الجهاز');
 }
 
 function doRegister() {
@@ -3655,12 +3619,11 @@ function _sendForgotEmail() {
     }, 1800);
   };
 
-  // ★ كتابة الباسورد في Firebase — أغلق الـ modal فور الكتابة
+  // ★ كتابة الباسورد في Firebase في الخلفية — أظهر الأنيميشن فوراً
   if (typeof window.fbForgotPasswordLogin === 'function') {
-    window.fbForgotPasswordLogin(_email, newPass, () => { _showSuccess(); }, () => { _showSuccess(); });
-  } else {
-    _showSuccess();
+    window.fbForgotPasswordLogin(_email, newPass, () => {}, () => {});
   }
+  _showSuccess();
 }
 
 window.doForgotPassword = doForgotPassword;
