@@ -1,6 +1,6 @@
 # 🌙 نور — الموقع الرسمي لحفظ القرآن الكريم
 
-> **الموقع الرسمي الوحيد:** [https://nourquranofficial.github.io/nour/
+> **الموقع الرسمي الوحيدhttps://nourquranofficial.github.io/nourquran//
 ---
 
 ## ⚠️ تنبيه مهم
