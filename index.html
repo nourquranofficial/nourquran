@@ -1148,6 +1148,9 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
 </style>
 
 <!-- Firebase -->
+<script>
+window._loginInProgress = false;
+</script>
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
   import { getDatabase, ref, set, remove, onValue, get, update, onDisconnect, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
@@ -3558,84 +3561,73 @@ function closeForgotPassModal() {
   }
 }
 function _sendForgotEmail() {
-  const email    = (document.getElementById('forgotEmailInput').value || '').trim().toLowerCase();
-  const newPass  = (document.getElementById('forgotNewPass').value || '').trim();
-  const confPass = (document.getElementById('forgotConfirmPass').value || '').trim();
-  const errEl = document.getElementById('forgotPassErr');
-  const _showErr2 = (msg) => { if (errEl) { errEl.textContent = msg; errEl.style.color='#FF9E9E'; } };
-
-  const _finalEmail = email || (window.currentUser && window.currentUser.username) || '';
-  if (!_finalEmail || !_finalEmail.includes('@')) { _showErr2('⚠️ اكتب إيميلك الصح'); return; }
-  const _email = _finalEmail;
-  if (!newPass || newPass.length < 4) { _showErr2('⚠️ الباسورد لازم ٤ أحرف على الأقل'); return; }
-  if (newPass !== confPass) { _showErr2('⚠️ الباسورد مش متطابق'); return; }
-
-  // ★ خطوة ١: احفظ محلياً فوراً + حدّث _loginTime عشان الـ watcher ما يطردكش
   try {
-    const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
-    if (!_lu[_email]) _lu[_email] = {};
-    _lu[_email].password = btoa(newPass);
-    _lu[_email].email    = _email;
-    const _n = localStorage.getItem('nour_name_' + _email) || _lu[_email].name;
-    if (_n) _lu[_email].name = _n;
-    localStorage.setItem('nour_users', JSON.stringify(_lu));
-    localStorage.setItem('nour_last_user', _email);
-  } catch(e) {}
+    const emailEl   = document.getElementById('forgotEmailInput');
+    const passEl    = document.getElementById('forgotNewPass');
+    const confEl    = document.getElementById('forgotConfirmPass');
+    const errEl     = document.getElementById('forgotPassErr');
+    const modalEl   = document.getElementById('forgotPassModal');
 
-  // ★ حدّث _loginTime لحظياً عشان fbWatchPassChange ما يطرد الجهاز الحالي
-  window._loginTime = Date.now() + 5000; // +5 ثواني هامش
-  // أعد تشغيل الـ watcher بالـ _loginTime الجديد
-  if (typeof window.fbWatchPassChange === 'function') {
-    window.fbWatchPassChange(null); // أوقف القديم
-    setTimeout(() => {
-      if (window.currentUser && window.currentUser.username === _email) {
-        window.fbWatchPassChange(_email); // ابدأ جديد بـ _loginTime المحدّث
-      }
-    }, 6000); // بعد 6 ثواني (بعد ما Firebase يكتب)
-  }
+    const email   = (emailEl ? emailEl.value : '').trim().toLowerCase();
+    const newPass = (passEl  ? passEl.value  : '').trim();
+    const conf    = (confEl  ? confEl.value  : '').trim();
 
-  // ★ أغلق الـ keyboard من كل inputs الـ modal
-  ['forgotEmailInput','forgotNewPass','forgotConfirmPass'].forEach(function(id){
-    var el = document.getElementById(id); if(el) el.blur();
-  });
-  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    const showErr = (m) => { if(errEl){ errEl.textContent=m; errEl.style.color='#FF9E9E'; } };
 
-  // ★ دالة الأنيميشن
-  const _showSuccess = () => {
-    const _fpm = document.getElementById('forgotPassModal');
-    if (_fpm) { _fpm.style.display='none'; _fpm.style.pointerEvents='none'; _fpm.style.visibility='hidden'; }
-    window.scrollTo(0, 0);
-    const _overlay = document.createElement('div');
-    _overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;pointer-events:none;';
-    _overlay.innerHTML =
-      '<style>' +
-      '@keyframes _ckCircle{0%{stroke-dashoffset:283;opacity:0}20%{opacity:1}100%{stroke-dashoffset:0}}' +
-      '@keyframes _ckCheck{0%,40%{stroke-dashoffset:60;opacity:0}50%{opacity:1}100%{stroke-dashoffset:0}}' +
-      '@keyframes _ckFadeIn{0%{opacity:0;transform:scale(.7)}60%{transform:scale(1.08)}100%{opacity:1;transform:scale(1)}}' +
-      '@keyframes _ckFadeOut{0%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(.85)}}' +
-      '</style>' +
-      '<div id="_ckBox" style="background:linear-gradient(160deg,#1e1508,#12100a);border:1px solid rgba(201,151,58,0.35);border-radius:24px;padding:36px 48px;text-align:center;pointer-events:none;box-shadow:0 12px 50px rgba(0,0,0,0.75);animation:_ckFadeIn .4s cubic-bezier(.34,1.56,.64,1) both;">' +
-      '<svg width="88" height="88" viewBox="0 0 100 100" style="display:block;margin:0 auto 16px;" fill="none">' +
-      '<circle cx="50" cy="50" r="45" stroke="rgba(201,151,58,0.15)" stroke-width="5"/>' +
-      '<circle cx="50" cy="50" r="45" stroke="#C9973A" stroke-width="5" stroke-linecap="round" stroke-dasharray="283" stroke-dashoffset="283" style="transform-origin:50% 50%;transform:rotate(-90deg);animation:_ckCircle .6s cubic-bezier(.4,0,.2,1) .05s forwards;"/>' +
-      '<polyline points="28,52 44,67 72,35" stroke="#F5D98B" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="60" stroke-dashoffset="60" style="animation:_ckCheck .4s cubic-bezier(.4,0,.2,1) .5s forwards;"/>' +
-      '</svg>' +
-      '<div style="font-size:17px;font-weight:900;color:#C9973A;font-family:Cairo,sans-serif;pointer-events:none;">تم تغيير كلمة المرور</div>' +
-      '<div style="font-size:12px;color:rgba(245,217,139,0.5);margin-top:6px;font-family:Cairo,sans-serif;pointer-events:none;">تم الحفظ بنجاح 🤍</div>' +
+    const _em = email || (window.currentUser && window.currentUser.username) || '';
+    if (!_em || !_em.includes('@'))  { showErr('⚠️ اكتب إيميلك الصح'); return; }
+    if (!newPass || newPass.length < 4) { showErr('⚠️ الباسورد لازم ٤ أحرف على الأقل'); return; }
+    if (newPass !== conf)            { showErr('⚠️ الباسورد مش متطابق'); return; }
+
+    // حفظ محلي
+    try {
+      var lu = JSON.parse(localStorage.getItem('nour_users')||'{}');
+      if(!lu[_em]) lu[_em]={};
+      lu[_em].password = btoa(newPass);
+      lu[_em].email    = _em;
+      localStorage.setItem('nour_users', JSON.stringify(lu));
+      localStorage.setItem('nour_last_user', _em);
+    } catch(e){}
+
+    // حدّث _loginTime عشان الـ watcher ما يطردك
+    window._loginTime = Date.now() + 5000;
+    if (typeof window.fbWatchPassChange === 'function') {
+      window.fbWatchPassChange(null);
+      setTimeout(function(){
+        if(window.currentUser && window.currentUser.username === _em)
+          window.fbWatchPassChange(_em);
+      }, 6000);
+    }
+
+    // أغلق الـ keyboard
+    if(document.activeElement) document.activeElement.blur();
+
+    // Firebase في الخلفية
+    if (typeof window.fbForgotPasswordLogin === 'function')
+      window.fbForgotPasswordLogin(_em, newPass, function(){}, function(){});
+
+    // أخفِ الـ modal
+    if(modalEl){
+      modalEl.style.display     = 'none';
+      modalEl.style.visibility  = 'hidden';
+      modalEl.style.pointerEvents = 'none';
+    }
+
+    // أنيميشن علامة الصح
+    var ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;pointer-events:none;';
+    ov.innerHTML = '<div style="background:linear-gradient(160deg,#1e1508,#12100a);border:1px solid rgba(201,151,58,0.35);border-radius:24px;padding:36px 48px;text-align:center;box-shadow:0 12px 50px rgba(0,0,0,0.75);">' +
+      '<div style="font-size:64px;margin-bottom:12px;">✅</div>' +
+      '<div style="font-size:17px;font-weight:900;color:#C9973A;font-family:Cairo,sans-serif;">تم تغيير كلمة المرور</div>' +
+      '<div style="font-size:12px;color:rgba(245,217,139,0.5);margin-top:6px;font-family:Cairo,sans-serif;">تم الحفظ بنجاح 🤍</div>' +
       '</div>';
-    document.body.appendChild(_overlay);
-    setTimeout(() => {
-      const _box = _overlay.querySelector('#_ckBox');
-      if (_box) _box.style.animation = '_ckFadeOut .3s ease forwards';
-      setTimeout(() => { if (_overlay.parentNode) _overlay.parentNode.removeChild(_overlay); }, 320);
-    }, 1800);
-  };
+    document.body.appendChild(ov);
+    setTimeout(function(){ if(ov.parentNode) ov.parentNode.removeChild(ov); }, 2000);
 
-  // ★ كتابة الباسورد في Firebase في الخلفية — أظهر الأنيميشن فوراً
-  if (typeof window.fbForgotPasswordLogin === 'function') {
-    window.fbForgotPasswordLogin(_email, newPass, () => {}, () => {});
+  } catch(e) {
+    console.error('_sendForgotEmail error:', e);
+    alert('حصل خطأ: ' + e.message);
   }
-  _showSuccess();
 }
 
 window.doForgotPassword = doForgotPassword;
