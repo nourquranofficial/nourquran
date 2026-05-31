@@ -1575,6 +1575,59 @@ window._loginInProgress = false;
     if (_nameUnsub) { _nameUnsub(); _nameUnsub = null; }
   };
 
+  // ★★ مراقبة النقاط والاسم real-time على كل الأجهزة ★★
+  let _userDataUnsub = null;
+  window.fbWatchUserData = function(username) {
+    if (_userDataUnsub) { try { _userDataUnsub(); } catch(e) {} _userDataUnsub = null; }
+    if (!username) return;
+    const key = dataKey(username);
+    // ★ نسمع users/key/data عشان نعرف أول ما النقاط تتحدّث
+    _userDataUnsub = onValue(ref(db, 'users/' + key + '/data'), (snap) => {
+      if (!snap.exists()) return;
+      const d = snap.val();
+      if (!window.currentUser || window.currentUser.username !== username) return;
+      let changed = false;
+      if ((d.totalScore||0) > (window.currentUser.totalScore||0)) {
+        window.currentUser.totalScore = d.totalScore; changed = true;
+      }
+      if ((d.totalHasanat||0) > (window.currentUser.totalHasanat||0)) {
+        window.currentUser.totalHasanat = d.totalHasanat; changed = true;
+      }
+      if ((d.totalGames||0) > (window.currentUser.totalGames||0)) {
+        window.currentUser.totalGames = d.totalGames; changed = true;
+      }
+      if (changed) {
+        currentUser = window.currentUser;
+        try {
+          const _lu = JSON.parse(localStorage.getItem('nour_users')||'{}');
+          if (_lu[username]) {
+            _lu[username].totalScore   = window.currentUser.totalScore;
+            _lu[username].totalHasanat = window.currentUser.totalHasanat;
+            _lu[username].totalGames   = window.currentUser.totalGames;
+            localStorage.setItem('nour_users', JSON.stringify(_lu));
+          }
+        } catch(e) {}
+        if (typeof updateHomeStats === 'function') updateHomeStats();
+      }
+    }, () => {});
+    // ★ كمان نسمع الاسم من leaderboard
+    onValue(ref(db, 'leaderboard/' + key + '/name'), (snap) => {
+      if (!snap.exists()) return;
+      const fbName = snap.val();
+      if (!fbName || typeof fbName !== 'string' || fbName.includes('@')) return;
+      if (!window.currentUser || window.currentUser.username !== username) return;
+      if (window.currentUser.name === fbName) return;
+      window.currentUser.name = fbName;
+      currentUser = window.currentUser;
+      try { localStorage.setItem('nour_name_' + username, fbName); } catch(e) {}
+      const el = document.getElementById('userNameDisplay');
+      if (el) el.innerHTML = '👤 ' + fbName + ' <button onclick="event.stopPropagation();editDisplayName()" style="background:none;border:none;font-size:13px;cursor:pointer;color:var(--gold);opacity:.7;padding:2px 4px;">✏️</button>';
+    }, () => {});
+  };
+  window.fbUnwatchUserData = function() {
+    if (_userDataUnsub) { try { _userDataUnsub(); } catch(e) {} _userDataUnsub = null; }
+  };
+
   // ★ اقرأ الاسم من localStorage بكل الطرق
   window._getStoredName = function(email) {
     if (!email) return null;
@@ -2117,18 +2170,37 @@ window._loginInProgress = false;
     }
     // transaction: بنقارن الـtimestamp بس ★ دايمًا بناخد الأعلى في النقاط — النقاط مش بتنقص أبدًا
     runTransaction(entryRef, (cur) => {
-      if (cur && (cur.updatedAt || 0) > ts) return cur; // فيه أحدث منه — سيبه
+      // ★ دايماً نأخذ الأعلى في النقاط — مش بنعتمد على timestamp وحده
+      const newScore   = Math.max((cur && cur.totalScore)   || 0, data.totalScore   || 0);
+      const newHasanat = Math.max((cur && cur.totalHasanat) || 0, data.totalHasanat || 0);
+      const newGames   = Math.max((cur && cur.totalGames)   || 0, data.totalGames   || 0);
+      // لو مفيش تغيير → ارجع cur بدون كتابة
+      if (cur && cur.totalScore === newScore && cur.totalHasanat === newHasanat && cur.totalGames === newGames
+          && cur.name === (data.name || cur.name)) return cur;
       return {
-        name:             data.name || (cur && cur.name) || username, // ★ الاسم للعرض وليس الإيميل
-        // ★★ ناخد الأعلى بين القديم والجديد — مستحيل تنقص النقاط حتى لو حصل overwrite خطأ
-        totalHasanat:     Math.max((cur && cur.totalHasanat) || 0, data.totalHasanat || 0),
-        totalScore:       Math.max((cur && cur.totalScore)   || 0, data.totalScore   || 0),
-        totalGames:       Math.max((cur && cur.totalGames)   || 0, data.totalGames   || 0),
+        name:             data.name || (cur && cur.name) || username,
+        totalHasanat:     newHasanat,
+        totalScore:       newScore,
+        totalGames:       newGames,
         isGuest:          isGuest,
         updatedAt:        ts,
         mistakesClearedAt: Math.max((cur && cur.mistakesClearedAt) || 0, data.mistakesClearedAt || 0),
       };
-    }).catch(e => console.error('fbSaveUser error:', e));
+    }).catch(e => {
+      // لو فشل بسبب permissions — جرّب بعد anonymous sign-in
+      if (e && (e.code === 'PERMISSION_DENIED' || String(e).includes('permission'))) {
+        signInAnonymously(auth).then(() => {
+          set(ref(db, LB_PATH + key), {
+            name: data.name || username,
+            totalHasanat: data.totalHasanat || 0,
+            totalScore:   data.totalScore   || 0,
+            totalGames:   data.totalGames   || 0,
+            isGuest:      isGuest,
+            updatedAt:    ts,
+          }).catch(() => {});
+        }).catch(() => {});
+      }
+    });
   };
   // رفع علامة مسح الغلطات فقط (من غير ما نلمس النقط) — تتوحّد عبر الأجهزة
   window.fbMarkMistakesCleared = function(username, isGuest) {
@@ -3352,18 +3424,23 @@ function doLogin() {
   const localData = getUsers()[user];
 
   // ── دالة الدخول ──────────────────────────────────────────────
-  const _enter = (data) => {
+  const _enter = (fbData) => {
     if (window._loggedOut) { window._loginInProgress = false; return; }
     window._loginInProgress = false;
     window._loginTime = Date.now();
-    const d = data || {};
+    const loc = localData || {};
+    const fb  = fbData  || {};
+    // ★ دايماً نأخذ الأعلى بين Firebase والمحلي
     const merged = {
-      totalScore:   d.totalScore   || 0,
-      totalGames:   d.totalGames   || 0,
-      totalHasanat: d.totalHasanat || 0,
-      streak:       d.streak       || 0,
-      lastPlay:     d.lastPlay     || null,
-      name:         (d.name && !d.name.includes('@') ? d.name : null) || user.split('@')[0],
+      totalScore:   Math.max(fb.totalScore   || 0, loc.totalScore   || 0),
+      totalGames:   Math.max(fb.totalGames   || 0, loc.totalGames   || 0),
+      totalHasanat: Math.max(fb.totalHasanat || 0, loc.totalHasanat || 0),
+      streak:       Math.max(fb.streak       || 0, loc.streak       || 0),
+      lastPlay:     fb.lastPlay || loc.lastPlay || null,
+      name: (typeof window._getStoredName === 'function' ? window._getStoredName(user) : null)
+            || (fb.name && !fb.name.includes('@') ? fb.name : null)
+            || (loc.name && !loc.name.includes('@') ? loc.name : null)
+            || user.split('@')[0],
       email: user,
     };
     try {
@@ -3376,57 +3453,66 @@ function doLogin() {
     const s = document.getElementById('loginScreen');
     if (s) s.classList.add('hide');
     window.scrollTo(0, 0);
-    loginSuccess(merged.name, merged);
+    loginSuccess(user, merged);
   };
 
-  // ── 1. باسورد صح محلياً → دخول فوري ─────────────────────────
-  if (localData && localData.password === btoa(pass)) {
-    _enter(localData);
-    // تحقق Firebase في الخلفية
-    if (typeof window.fbLogin === 'function') {
-      window.fbLogin(user, pass, () => {}, (e) => {
-        if (e && e.includes('خطأ') && window.currentUser && window.currentUser.username === user)
-          doLogout();
-      });
-    }
-    return;
-  }
-
-  // ── 2. باسورد غلط محلياً وفيه حساب → رسالة فورية ──────────
-  if (localData && localData.password) {
-    window._loginInProgress = false;
-    showLoginErr('كلمة المرور خطأ — حاول مجدداً');
-    return;
-  }
-
-  // ── 3. مفيش بيانات محلية (جهاز جديد) → Firebase ──────────
+  // ── Firebase هو المصدر الحقيقي للباسورد دايماً ────────────────
+  // الـ localStorage بيستخدم بس عشان يسرّع الدخول لو الباسورد ماتغيرش
   if (typeof window.fbLogin === 'function') {
-    showLoginErr('...');
-    const _t = setTimeout(() => {
-      if (!window._loginInProgress) return;
-      window._loginInProgress = false;
-      showLoginErr('تعذّر الاتصال — تأكد من الإنترنت');
-    }, 10000);
+    // لو الباسورد صح محلياً → ادخّل بعد 400ms لو Firebase ما ردّش
+    const _localOk = localData && localData.password === btoa(pass);
+    let _done = false;
+    const _localFallback = _localOk ? setTimeout(() => {
+      if (_done) return;
+      _done = true;
+      _enter(localData);
+    }, 400) : null;
+
     window.fbLogin(user, pass,
       () => {
-        clearTimeout(_t);
+        clearTimeout(_localFallback);
+        if (_done) {
+          // دخل محلياً بالفعل — حدّث البيانات في الخلفية
+          if (typeof window.fbGetAccount === 'function') {
+            window.fbGetAccount(user, (_, fb) => {
+              if (!fb || !window.currentUser || window.currentUser.username !== user) return;
+              let ch = false;
+              const cu = window.currentUser;
+              if ((fb.totalScore||0) > (cu.totalScore||0))   { cu.totalScore   = fb.totalScore;   ch = true; }
+              if ((fb.totalHasanat||0) > (cu.totalHasanat||0)) { cu.totalHasanat = fb.totalHasanat; ch = true; }
+              if ((fb.totalGames||0) > (cu.totalGames||0))   { cu.totalGames   = fb.totalGames;   ch = true; }
+              if (fb.name && !fb.name.includes('@') && fb.name !== cu.name) { cu.name = fb.name; ch = true; }
+              if (ch) { currentUser = cu; window.currentUser = cu; if (typeof updateHomeStats === 'function') updateHomeStats(); }
+            });
+          }
+          return;
+        }
+        _done = true;
         if (typeof window._markAuthDone === 'function') window._markAuthDone();
         if (typeof window.fbGetAccount === 'function') {
-          window.fbGetAccount(user, (_, d) => _enter(d));
+          window.fbGetAccount(user, (_, fbData) => _enter(fbData));
         } else { _enter(null); }
       },
-      (e) => {
-        clearTimeout(_t);
+      (errMsg) => {
+        clearTimeout(_localFallback);
+        if (_done) {
+          // دخل محلياً لكن Firebase رفض → الباسورد اتغيّر → logout
+          if (errMsg && errMsg.includes('خطأ') && window.currentUser && window.currentUser.username === user)
+            doLogout();
+          return;
+        }
+        _done = true;
         window._loginInProgress = false;
-        showLoginErr(e || 'كلمة المرور خطأ — حاول مجدداً');
+        showLoginErr(errMsg || 'كلمة المرور خطأ — حاول مجدداً');
       }
     );
     return;
   }
 
-  // ── 4. Offline ────────────────────────────────────────────────
-  window._loginInProgress = false;
-  showLoginErr('الحساب غير موجود على هذا الجهاز');
+  // ── Offline: مفيش Firebase ────────────────────────────────────
+  if (!localData || !localData.password) { window._loginInProgress = false; showLoginErr('الحساب غير موجود'); return; }
+  if (localData.password !== btoa(pass))  { window._loginInProgress = false; showLoginErr('كلمة المرور خطأ — حاول مجدداً'); return; }
+  _enter(localData);
 }
 
 function doRegister() {
@@ -4011,9 +4097,11 @@ function _finishLogin(username, isGuest) {
   _el.innerHTML = '👤 ' + _disp + ' <button onclick="event.stopPropagation();editDisplayName()" title="غيّر اسمك للعرض" style="background:none;border:none;font-size:13px;cursor:pointer;color:var(--gold);opacity:.7;padding:2px 4px;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">✏️</button>';
   if (typeof window.fbSignInAnon === 'function' && !isGuest) window.fbSignInAnon();
   if (typeof window.fbWatchName === 'function' && !isGuest && username && !username.includes('ضيف')) window.fbWatchName(username);
-  // ★★ ابدأ مراقبة تغيير الباسورد على كل الأجهزة ★★
+  // ★★ مراقبة النقاط والاسم real-time ★★
+  if (typeof window.fbWatchUserData === 'function' && !isGuest && username && !username.includes('ضيف')) window.fbWatchUserData(username);
+  // ★★ مراقبة تغيير الباسورد ★★
   if (!isGuest && username && !username.includes('ضيف')) {
-    if (!window._loginTime) window._loginTime = Date.now(); // لو مش مضبوط من doLogin
+    if (!window._loginTime) window._loginTime = Date.now();
     if (typeof window.fbWatchPassChange === 'function') window.fbWatchPassChange(username);
   }
   if (!isGuest) {
