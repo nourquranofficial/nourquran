@@ -1306,41 +1306,42 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
           onError('كلمة المرور خطأ — حاول مجدداً');
         }
       } else {
-        // مفيش bypassAuth → Firebase Auth هو المصدر، وبنكتب bypassAuth للمرات الجاية
-        signInWithEmailAndPassword(auth, fbEmail, padPass(password))
-          .then(() => {
-            // ★ اكتب bypassAuth للمرة الأولى عشان كل الأجهزة تعرف الباسورد الصح
-            const _firstTs = Date.now();
-            set(ref(db, 'users/' + _key + '/bypassAuth'), {
-              email, passHash: btoa(padPass(password)), updatedAt: _firstTs, changedAt: _firstTs,
-            }).catch(() => {});
-            try {
-              const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
-              if (!_lu[email]) _lu[email] = {};
-              _lu[email].password = btoa(password);
-              localStorage.setItem('nour_users', JSON.stringify(_lu));
-            } catch(e) {}
-            onSuccess();
-          })
-          .catch((e) => {
-            if (e.code === 'auth/too-many-requests') {
+        // مفيش bypassAuth → جرّب Firebase Auth بالباسورد + __nr ثم بدونه
+        const _tryAuth = (pass1, pass2) => {
+          signInWithEmailAndPassword(auth, fbEmail, pass1)
+            .then(() => {
+              const _ts = Date.now();
+              set(ref(db, 'users/' + _key + '/bypassAuth'), {
+                email, passHash: btoa(padPass(password)), updatedAt: _ts, changedAt: _ts,
+              }).catch(() => {});
               try {
-                const users = JSON.parse(localStorage.getItem('nour_users') || '{}');
-                if (users[email] && users[email].password === btoa(password)) { onSuccess(); return; }
-              } catch(ex) {}
-              onError('الحساب محجوب مؤقتاً من Firebase، حاول بعد قليل');
-            } else if (e.code === 'auth/user-not-found') {
-              onError('الإيميل ده مش مسجّل — أنشئ حساباً جديداً');
-            } else if (e.code === 'auth/operation-not-allowed' || e.code === 'auth/configuration-not-found') {
-              onError('⛔ خدمة الحسابات مش مفعّلة في Firebase (Authentication ← Email/Password ← Enable).');
-            } else if (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential' || e.code === 'auth/invalid-login-credentials') {
-              onError('كلمة المرور خطأ — حاول مجدداً');
-            } else if (e.code === 'auth/network-request-failed') {
-              onError('في مشكلة في الإنترنت — اتأكد من اتصالك');
-            } else {
-              onError('تعذّر الدخول: ' + (e.code || 'خطأ غير معروف'));
-            }
-          });
+                const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
+                if (!_lu[email]) _lu[email] = {};
+                _lu[email].password = btoa(password);
+                localStorage.setItem('nour_users', JSON.stringify(_lu));
+              } catch(e) {}
+              onSuccess();
+            })
+            .catch((e) => {
+              if (pass2) { _tryAuth(pass2, null); return; } // جرّب الباسورد الثانية
+              if (e.code === 'auth/too-many-requests') {
+                try {
+                  const users = JSON.parse(localStorage.getItem('nour_users') || '{}');
+                  if (users[email] && users[email].password === btoa(password)) { onSuccess(); return; }
+                } catch(ex) {}
+                onError('الحساب محجوب مؤقتاً من Firebase، حاول بعد قليل');
+              } else if (e.code === 'auth/user-not-found') {
+                onError('الإيميل ده مش مسجّل — أنشئ حساباً جديداً');
+              } else if (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential' || e.code === 'auth/invalid-login-credentials') {
+                onError('كلمة المرور خطأ — حاول مجدداً');
+              } else if (e.code === 'auth/network-request-failed') {
+                onError('في مشكلة في الإنترنت — اتأكد من اتصالك');
+              } else {
+                onError('تعذّر الدخول: ' + (e.code || 'خطأ غير معروف'));
+              }
+            });
+        };
+        _tryAuth(padPass(password), password); // جرّب مع __nr أولاً، ثم بدونه
       }
     }).catch(() => {
       // Firebase مش متاح — جرّب Firebase Auth مباشرة، ثم localStorage كـ fallback أخير
@@ -3347,7 +3348,7 @@ function doLogin() {
 
   // ★ عطّل الزرار وأظهر spinner عشان المستخدم يعرف إن في شيء بيحصل
   const _btn = document.querySelector('#loginForm .login-btn') || document.querySelector('.login-btn[onclick*="doLogin"]');
-  if (_btn) { _btn.disabled = true; _btn.textContent = '⏳ ...'; }
+  if (_btn) { _btn.disabled = true; _btn.textContent = '...'; }
   const _resetBtn = () => { if (_btn) { _btn.disabled = false; _btn.textContent = 'دخول 🌟'; } };
 
   const users = getUsers();
@@ -3596,20 +3597,20 @@ function _sendForgotEmail() {
   const email    = (document.getElementById('forgotEmailInput').value || '').trim().toLowerCase();
   const newPass  = (document.getElementById('forgotNewPass').value || '').trim();
   const confPass = (document.getElementById('forgotConfirmPass').value || '').trim();
-  const errEl    = document.getElementById('forgotPassErr');
+  const errEl = document.getElementById('forgotPassErr');
+  const _showErr2 = (msg) => { if (errEl) { errEl.textContent = msg; errEl.style.color='#FF9E9E'; } };
 
-  // ★ لو الإيميل فاضي خذه من currentUser
   const _finalEmail = email || (window.currentUser && window.currentUser.username) || '';
-  if (!_finalEmail || !_finalEmail.includes('@')) { errEl.textContent = '⚠️ اكتب إيميلك الصح'; errEl.style.color='#FF9E9E'; return; }
-  const _email = _finalEmail; // ★ استخدم _email من هنا بدل email
-  if (!newPass || newPass.length < 4) { errEl.textContent = '⚠️ الباسورد لازم ٤ أحرف على الأقل'; errEl.style.color='#FF9E9E'; return; }
-  if (newPass !== confPass) { errEl.textContent = '⚠️ الباسورد مش متطابق'; errEl.style.color='#FF9E9E'; return; }
+  if (!_finalEmail || !_finalEmail.includes('@')) { _showErr2('⚠️ اكتب إيميلك الصح'); return; }
+  const _email = _finalEmail;
+  if (!newPass || newPass.length < 4) { _showErr2('⚠️ الباسورد لازم ٤ أحرف على الأقل'); return; }
+  if (newPass !== confPass) { _showErr2('⚠️ الباسورد مش متطابق'); return; }
 
   // ★ خطوة ١: احفظ محلياً فوراً
   try {
     const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
     if (!_lu[_email]) _lu[_email] = {};
-    _lu[_email].password = btoa(unescape(encodeURIComponent(newPass)));
+    _lu[_email].password = btoa(newPass); // ★ نفس encoding المستخدم في doLogin
     _lu[_email].email    = _email;
     const _n = localStorage.getItem('nour_name_' + _email) || _lu[_email].name;
     if (_n) _lu[_email].name = _n;
@@ -3623,45 +3624,43 @@ function _sendForgotEmail() {
   });
   if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
 
-  // كتابة الباسورد في Firebase في الخلفية
+  // ★ دالة الأنيميشن
+  const _showSuccess = () => {
+    const _fpm = document.getElementById('forgotPassModal');
+    if (_fpm) { _fpm.style.display='none'; _fpm.style.pointerEvents='none'; _fpm.style.visibility='hidden'; }
+    window.scrollTo(0, 0);
+    const _overlay = document.createElement('div');
+    _overlay.style.cssText = 'position:fixed;inset:0;z-index:5000;display:flex;align-items:center;justify-content:center;pointer-events:none;';
+    _overlay.innerHTML =
+      '<style>' +
+      '@keyframes _ckCircle{0%{stroke-dashoffset:283;opacity:0}20%{opacity:1}100%{stroke-dashoffset:0}}' +
+      '@keyframes _ckCheck{0%,40%{stroke-dashoffset:60;opacity:0}50%{opacity:1}100%{stroke-dashoffset:0}}' +
+      '@keyframes _ckFadeIn{0%{opacity:0;transform:scale(.7)}60%{transform:scale(1.08)}100%{opacity:1;transform:scale(1)}}' +
+      '@keyframes _ckFadeOut{0%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(.85)}}' +
+      '</style>' +
+      '<div id="_ckBox" style="background:linear-gradient(160deg,#1e1508,#12100a);border:1px solid rgba(201,151,58,0.35);border-radius:24px;padding:36px 48px;text-align:center;pointer-events:none;box-shadow:0 12px 50px rgba(0,0,0,0.75);animation:_ckFadeIn .4s cubic-bezier(.34,1.56,.64,1) both;">' +
+      '<svg width="88" height="88" viewBox="0 0 100 100" style="display:block;margin:0 auto 16px;" fill="none">' +
+      '<circle cx="50" cy="50" r="45" stroke="rgba(201,151,58,0.15)" stroke-width="5"/>' +
+      '<circle cx="50" cy="50" r="45" stroke="#C9973A" stroke-width="5" stroke-linecap="round" stroke-dasharray="283" stroke-dashoffset="283" style="transform-origin:50% 50%;transform:rotate(-90deg);animation:_ckCircle .6s cubic-bezier(.4,0,.2,1) .05s forwards;"/>' +
+      '<polyline points="28,52 44,67 72,35" stroke="#F5D98B" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="60" stroke-dashoffset="60" style="animation:_ckCheck .4s cubic-bezier(.4,0,.2,1) .5s forwards;"/>' +
+      '</svg>' +
+      '<div style="font-size:17px;font-weight:900;color:#C9973A;font-family:Cairo,sans-serif;pointer-events:none;">تم تغيير كلمة المرور</div>' +
+      '<div style="font-size:12px;color:rgba(245,217,139,0.5);margin-top:6px;font-family:Cairo,sans-serif;pointer-events:none;">تم الحفظ بنجاح 🤍</div>' +
+      '</div>';
+    document.body.appendChild(_overlay);
+    setTimeout(() => {
+      const _box = _overlay.querySelector('#_ckBox');
+      if (_box) _box.style.animation = '_ckFadeOut .3s ease forwards';
+      setTimeout(() => { if (_overlay.parentNode) _overlay.parentNode.removeChild(_overlay); }, 320);
+    }, 1800);
+  };
+
+  // ★ كتابة الباسورد في Firebase — أغلق الـ modal فور الكتابة
   if (typeof window.fbForgotPasswordLogin === 'function') {
-    window.fbForgotPasswordLogin(_email, newPass, () => {}, () => {});
+    window.fbForgotPasswordLogin(_email, newPass, () => { _showSuccess(); }, () => { _showSuccess(); });
+  } else {
+    _showSuccess();
   }
-
-  // ★ أغلق الـ modal أولاً — مهم جداً على iOS قبل أي animation
-  const _fpm = document.getElementById('forgotPassModal');
-  if (_fpm) {
-    _fpm.style.display = 'none';
-    _fpm.style.pointerEvents = 'none';
-    _fpm.style.visibility = 'hidden';
-  }
-  window.scrollTo(0, 0);
-
-  // ★ animation في عنصر مؤقت منفصل تماماً عن الـ modal
-  const _overlay = document.createElement('div');
-  _overlay.style.cssText = 'position:fixed;inset:0;z-index:5000;display:flex;align-items:center;justify-content:center;pointer-events:none;';
-  _overlay.innerHTML =
-    '<style>' +
-    '@keyframes _ckCircle{0%{stroke-dashoffset:283;opacity:0}20%{opacity:1}100%{stroke-dashoffset:0}}' +
-    '@keyframes _ckCheck{0%,40%{stroke-dashoffset:60;opacity:0}50%{opacity:1}100%{stroke-dashoffset:0}}' +
-    '@keyframes _ckFadeIn{0%{opacity:0;transform:scale(.7)}60%{transform:scale(1.08)}100%{opacity:1;transform:scale(1)}}' +
-    '@keyframes _ckFadeOut{0%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(.85)}}' +
-    '</style>' +
-    '<div id="_ckBox" style="background:linear-gradient(160deg,#1e1508,#12100a);border:1px solid rgba(201,151,58,0.35);border-radius:24px;padding:36px 48px;text-align:center;pointer-events:none;box-shadow:0 12px 50px rgba(0,0,0,0.75);animation:_ckFadeIn .4s cubic-bezier(.34,1.56,.64,1) both;">' +
-    '<svg width="88" height="88" viewBox="0 0 100 100" style="display:block;margin:0 auto 16px;" fill="none">' +
-    '<circle cx="50" cy="50" r="45" stroke="rgba(201,151,58,0.15)" stroke-width="5"/>' +
-    '<circle cx="50" cy="50" r="45" stroke="#C9973A" stroke-width="5" stroke-linecap="round" stroke-dasharray="283" stroke-dashoffset="283" style="transform-origin:50% 50%;transform:rotate(-90deg);animation:_ckCircle .6s cubic-bezier(.4,0,.2,1) .05s forwards;"/>' +
-    '<polyline points="28,52 44,67 72,35" stroke="#F5D98B" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="60" stroke-dashoffset="60" style="animation:_ckCheck .4s cubic-bezier(.4,0,.2,1) .5s forwards;"/>' +
-    '</svg>' +
-    '<div style="font-size:17px;font-weight:900;color:#C9973A;font-family:Cairo,sans-serif;pointer-events:none;">تم تغيير كلمة المرور</div>' +
-    '<div style="font-size:12px;color:rgba(245,217,139,0.5);margin-top:6px;font-family:Cairo,sans-serif;pointer-events:none;">تم الحفظ بنجاح 🤍</div>' +
-    '</div>';
-  document.body.appendChild(_overlay);
-  setTimeout(() => {
-    const _box = _overlay.querySelector('#_ckBox');
-    if (_box) _box.style.animation = '_ckFadeOut .3s ease forwards';
-    setTimeout(() => { if (_overlay.parentNode) _overlay.parentNode.removeChild(_overlay); }, 320);
-  }, 1800);
 }
 
 window.doForgotPassword = doForgotPassword;
