@@ -3570,17 +3570,29 @@ function _sendForgotEmail() {
   if (!newPass || newPass.length < 4) { _showErr2('⚠️ الباسورد لازم ٤ أحرف على الأقل'); return; }
   if (newPass !== confPass) { _showErr2('⚠️ الباسورد مش متطابق'); return; }
 
-  // ★ خطوة ١: احفظ محلياً فوراً
+  // ★ خطوة ١: احفظ محلياً فوراً + حدّث _loginTime عشان الـ watcher ما يطردكش
   try {
     const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
     if (!_lu[_email]) _lu[_email] = {};
-    _lu[_email].password = btoa(newPass); // ★ نفس encoding المستخدم في doLogin
+    _lu[_email].password = btoa(newPass);
     _lu[_email].email    = _email;
     const _n = localStorage.getItem('nour_name_' + _email) || _lu[_email].name;
     if (_n) _lu[_email].name = _n;
     localStorage.setItem('nour_users', JSON.stringify(_lu));
     localStorage.setItem('nour_last_user', _email);
   } catch(e) {}
+
+  // ★ حدّث _loginTime لحظياً عشان fbWatchPassChange ما يطرد الجهاز الحالي
+  window._loginTime = Date.now() + 5000; // +5 ثواني هامش
+  // أعد تشغيل الـ watcher بالـ _loginTime الجديد
+  if (typeof window.fbWatchPassChange === 'function') {
+    window.fbWatchPassChange(null); // أوقف القديم
+    setTimeout(() => {
+      if (window.currentUser && window.currentUser.username === _email) {
+        window.fbWatchPassChange(_email); // ابدأ جديد بـ _loginTime المحدّث
+      }
+    }, 6000); // بعد 6 ثواني (بعد ما Firebase يكتب)
+  }
 
   // ★ أغلق الـ keyboard من كل inputs الـ modal
   ['forgotEmailInput','forgotNewPass','forgotConfirmPass'].forEach(function(id){
@@ -3594,7 +3606,7 @@ function _sendForgotEmail() {
     if (_fpm) { _fpm.style.display='none'; _fpm.style.pointerEvents='none'; _fpm.style.visibility='hidden'; }
     window.scrollTo(0, 0);
     const _overlay = document.createElement('div');
-    _overlay.style.cssText = 'position:fixed;inset:0;z-index:5000;display:flex;align-items:center;justify-content:center;pointer-events:none;';
+    _overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;pointer-events:none;';
     _overlay.innerHTML =
       '<style>' +
       '@keyframes _ckCircle{0%{stroke-dashoffset:283;opacity:0}20%{opacity:1}100%{stroke-dashoffset:0}}' +
