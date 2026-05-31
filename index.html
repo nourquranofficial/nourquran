@@ -1424,28 +1424,21 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   // ★★ مراقبة تغيير الباسورد — يطرد الأجهزة التانية فوراً لما الباسورد يتغيّر ★★
   let _passUnsub = null;
   window.fbWatchPassChange = function(username) {
-    // null = وقّف المراقبة (عند logout)
     if (_passUnsub) { try { _passUnsub(); } catch(e) {} _passUnsub = null; }
     if (!username) return;
-
     const _key = dataKey(username);
-    let _firstCall = true;
+    const _startTime = window._loginTime || Date.now();
 
     _passUnsub = onValue(ref(db, 'users/' + _key + '/bypassAuth'), (snap) => {
-      if (_firstCall) { _firstCall = false; return; } // أول call دايماً ignore
       if (!snap.exists()) return;
       const bpa = snap.val();
-      // لو changedAt أحدث من وقت دخولنا → طرد
-      if (bpa && bpa.changedAt && bpa.changedAt > (window._loginTime || 0)) {
+      // ★ لو changedAt بعد وقت دخولنا بأكتر من ثانية → الباسورد اتغيّر
+      if (bpa && bpa.changedAt && bpa.changedAt > _startTime + 1000) {
         console.warn('🔐 الباسورد اتغيّر — جاري الخروج');
         if (typeof doLogout === 'function') doLogout();
-        else if (typeof window.fbLogout === 'function') {
-          window.fbLogout();
-          try { localStorage.removeItem('nour_last_user'); } catch(e) {}
-          location.reload();
-        }
+        else { try { localStorage.removeItem('nour_last_user'); } catch(e) {} location.reload(); }
       }
-    }, () => {}); // ignore errors — network issues shouldn't log out user
+    }, () => {});
   };
   window.fbGetUserData = function(username, onResult) {
     const key = dataKey(username);
@@ -3365,8 +3358,8 @@ function doLogin() {
     if (window._loggedOut) { window._loginInProgress = false; _resetBtn(); return; }
     window._loginInProgress = false;
     _resetBtn();
-    // ★ سجّل وقت الدخول وابدأ مراقبة تغيير الباسورد
-    window._loginTime = Date.now() + 120000; // +2 دقيقة هامش أمان
+    // ★ سجّل وقت الدخول الفعلي
+    window._loginTime = Date.now();
     if (typeof window.fbWatchPassChange === 'function') window.fbWatchPassChange(user);
     const lData = localData || {};
     const merged = {
@@ -3402,49 +3395,67 @@ function doLogin() {
     showLoginErr(msg || 'الإيميل أو كلمة المرور خاطئة');
   };
 
-  // ── fbLogin ────────────────────────────────────────────────
+  // ── Fast path: لو الباسورد صح محلياً → دخّله فوراً ─────────────
+  if (localData && localData.password === btoa(pass)) {
+    _enterApp(localData);
+    // ★ تحقق Firebase في الخلفية — لو الباسورد اتغيّر من جهاز تاني → نطرده
+    if (typeof window.fbLogin === 'function') {
+      window.fbLogin(user, pass, () => {}, (errMsg) => {
+        if (errMsg && errMsg.includes('خطأ') && window.currentUser && window.currentUser.username === user) {
+          if (typeof doLogout === 'function') doLogout();
+        }
+      });
+    }
+    return;
+  }
+
+  // ── لو فيه حساب محلي بس الباسورد غلط → رفض فوري ────────────
+  if (localData && localData.password && localData.password !== btoa(pass)) {
+    // ★ ممكن الباسورد اتغيّر من جهاز تاني — نتحقق من Firebase
+    if (typeof window.fbLogin === 'function') {
+      const _loginTimeout = setTimeout(() => {
+        if (!window._loginInProgress) return;
+        _showErr('كلمة المرور خطأ — حاول مجدداً');
+      }, 6000);
+      const _clr = () => clearTimeout(_loginTimeout);
+      window.fbLogin(user, pass,
+        () => { _clr(); if (typeof window._markAuthDone === 'function') window._markAuthDone(); if (typeof window.fbGetAccount === 'function') { window.fbGetAccount(user, (_, fbData) => _enterApp(fbData)); } else { _enterApp(null); } },
+        () => { _clr(); _showErr('كلمة المرور خطأ — حاول مجدداً'); }
+      );
+      return;
+    }
+    _showErr('كلمة المرور خطأ — حاول مجدداً');
+    return;
+  }
+
+  // ── Firebase path: مفيش باسورد محلي (جهاز جديد) ──────────────
   if (typeof window.fbLogin === 'function') {
-    // ★ timeout 12 ثانية — لو Firebase مش رد خلال كده نفلّش للـ offline
     const _loginTimeout = setTimeout(() => {
-      if (!window._loginInProgress) return; // خلص بالفعل
-      // حاول الـ offline fallback
-      const _fresh = getUsers()[user];
-      if (_fresh && _fresh.password === btoa(pass)) {
-        _enterApp(_fresh);
-      } else {
-        _showErr('انتهت مهلة الاتصال — تأكد من الإنترنت وحاول تاني');
-      }
-    }, 12000);
-    const _clearLoginTimeout = () => clearTimeout(_loginTimeout);
+      if (!window._loginInProgress) return;
+      _showErr('مش قادر يتصل بالسيرفر — تأكد من الإنترنت وحاول تاني');
+    }, 10000);
+    const _clr = () => clearTimeout(_loginTimeout);
 
     window.fbLogin(user, pass,
       () => {
-        _clearLoginTimeout();
+        _clr();
         if (typeof window._markAuthDone === 'function') window._markAuthDone();
         if (typeof window.fbGetAccount === 'function') {
           window.fbGetAccount(user, (_, fbData) => _enterApp(fbData));
-        } else if (typeof window.fbGetUserData === 'function') {
-          window.fbGetUserData(user, (fbData) => _enterApp(fbData));
         } else {
           _enterApp(null);
         }
       },
       (errMsg) => {
-        _clearLoginTimeout();
+        _clr();
         currentUser = null; window.currentUser = null;
-        const _fresh = getUsers()[user];
-        if (!window._loggedOut && _fresh && _fresh.password === btoa(pass)) {
-          if (typeof window._markAuthDone === 'function') window._markAuthDone();
-          _enterApp(_fresh);
-          return;
-        }
         _showErr(errMsg);
       }
     );
     return;
   }
 
-  // ── Offline fallback ───────────────────────────────────────
+  // ── Offline: مفيش Firebase ────────────────────────────────────
   if (!localData || !localData.password) { _showErr('الحساب غير موجود'); return; }
   if (localData.password !== btoa(pass)) { _showErr('كلمة المرور خطأ — حاول مجدداً'); return; }
   _enterApp(localData);
@@ -3791,7 +3802,7 @@ function _switchBackToSaved() {
       window.fbLogin(lastUser, savedPass,
         () => {
           window._loginInProgress = false;
-          window._loginTime = Date.now() + 120000;
+          window._loginTime = Date.now();
           if (typeof window.fbWatchPassChange === 'function') window.fbWatchPassChange(lastUser);
           if (typeof window._markAuthDone === 'function') window._markAuthDone();
           // جلب أحدث البيانات
@@ -3815,7 +3826,7 @@ function _switchBackToSaved() {
         () => {
           // Firebase فشل — ادخّل بالبيانات المحلية
           window._loginInProgress = false;
-          window._loginTime = Date.now() + 120000;
+          window._loginTime = Date.now();
           if (typeof window.fbWatchPassChange === 'function') window.fbWatchPassChange(lastUser);
           loginSuccess(lastUser, data, false);
           showToast('✅ رجعت لحساب: ' + (data.name || lastUser));
@@ -3823,7 +3834,7 @@ function _switchBackToSaved() {
       );
     } else {
       // مفيش باسورد محفوظ — ادخّل مباشرة
-      window._loginTime = Date.now() + 120000;
+      window._loginTime = Date.now();
       if (typeof window.fbWatchPassChange === 'function') window.fbWatchPassChange(lastUser);
       loginSuccess(lastUser, data, false);
       showToast('✅ رجعت لحساب: ' + (data.name || lastUser));
@@ -4034,6 +4045,11 @@ function _finishLogin(username, isGuest) {
   _el.innerHTML = '👤 ' + _disp + ' <button onclick="event.stopPropagation();editDisplayName()" title="غيّر اسمك للعرض" style="background:none;border:none;font-size:13px;cursor:pointer;color:var(--gold);opacity:.7;padding:2px 4px;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">✏️</button>';
   if (typeof window.fbSignInAnon === 'function' && !isGuest) window.fbSignInAnon();
   if (typeof window.fbWatchName === 'function' && !isGuest && username && !username.includes('ضيف')) window.fbWatchName(username);
+  // ★★ ابدأ مراقبة تغيير الباسورد على كل الأجهزة ★★
+  if (!isGuest && username && !username.includes('ضيف')) {
+    if (!window._loginTime) window._loginTime = Date.now(); // لو مش مضبوط من doLogin
+    if (typeof window.fbWatchPassChange === 'function') window.fbWatchPassChange(username);
+  }
   if (!isGuest) {
     try { localStorage.setItem('nour_last_user', username); } catch(e) {}
   }
