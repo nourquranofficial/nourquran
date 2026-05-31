@@ -3742,19 +3742,12 @@ function _sendForgotEmail() {
     localStorage.setItem('nour_last_user', email);
   } catch(e) {}
 
-  // ★ ٢. حضّر مرجع Firebase (الكتابة الأولى بتتم في الـ overlay مع مؤشر المزامنة)
-  const _key2    = typeof dataKey === 'function' ? dataKey(email) : email.replace(/[.#$\/\[\]]/g,'_').toLowerCase();
-  const _newHash = safe_btoa(newPass + '__nr');
-  const _bypassRef = ref(db, 'users/' + _key2 + '/bypassAuth');
+  // ★ ٢. اكتب على Firebase عن طريق fbForgotPasswordLogin (جوّا module scope)
   const _changedAt = Date.now();
-  // ★ نحدّث _loginTime عشان الجهاز الحالي ما يتطردش بواسطة fbWatchPassChange
   window._loginTime = _changedAt + 10000;
-  // retry من المحاولة ٢ — المحاولة ١ بتتم في الـ overlay أدناه
-  const _doWrite = (attempt) => {
-    set(_bypassRef, { email: email, passHash: _newHash, updatedAt: _changedAt, changedAt: _changedAt })
-      .catch(() => { if (attempt < 5) setTimeout(() => _doWrite(attempt + 1), 800 * attempt); });
-  };
-  setTimeout(() => _doWrite(2), 5000); // retry بعد 5 ثواني لو الكتابة الأولى فشلت
+  if (typeof window.fbForgotPasswordLogin === 'function') {
+    window.fbForgotPasswordLogin(email, newPass, () => {}, () => {});
+  }
 
   // ★ ٣. أغلق الـ keyboard
   ['forgotEmailInput','forgotNewPass','forgotConfirmPass'].forEach(id => {
@@ -3881,23 +3874,17 @@ function _sendForgotEmail() {
     }
   };
 
-  // حاول تكتب Firebase مباشرة وتحدّث الـ UI
-  const _fbWritePromise = set(_bypassRef, { email: email, passHash: _newHash, updatedAt: _changedAt, changedAt: _changedAt });
-  Promise.race([
-    _fbWritePromise.then(() => true).catch(() => false),
-    new Promise(res => setTimeout(() => res(null), 4000)), // timeout 4 ثواني
-  ]).then((result) => {
-    if (result === true) {
-      _updateSyncUI(true);
-    } else if (result === false) {
-      _updateSyncUI(false);
-    } else {
-      // timeout — لسه بيحاول
-      _updateSyncUI(false);
-      // لو نجح بعدين — خليه يتحدث لو الـ overlay لسه موجود
-      _fbWritePromise.then(() => _updateSyncUI(true)).catch(() => {});
-    }
-  });
+  // حدّث الـ UI بناءً على نتيجة fbForgotPasswordLogin
+  // fbForgotPasswordLogin بتكتب Firebase من داخل module scope وبتنادي callback
+  const _syncTimeout = setTimeout(() => _updateSyncUI(false), 4000);
+  if (typeof window.fbForgotPasswordLogin === 'function') {
+    window.fbForgotPasswordLogin(email, newPass,
+      () => { clearTimeout(_syncTimeout); _updateSyncUI(true); },
+      () => { clearTimeout(_syncTimeout); _updateSyncUI(false); }
+    );
+  } else {
+    setTimeout(() => _updateSyncUI(false), 500);
+  }
 
   // أخفِ الـ overlay بعد 3 ثواني مع fade out
   setTimeout(() => {
