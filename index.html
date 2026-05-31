@@ -3453,7 +3453,16 @@ function doLogin() {
         // ★ Fallback محلي: بس لو Firebase مش متاح (مش لو رفض الباسورد)
         const _lFresh = getUsers()[user];
         const _fbReject = errMsg && (errMsg.includes('خاطئة') || errMsg.includes('denied') || errMsg.includes('wrong'));
-        // ★ لا fallback محلي - Firebase هو المصدر الوحيد للباسورد دايماً
+        // ★ Offline fallback: بس لو Firebase مش وصّل خالص (مش لو رفض الباسورد)
+        if (!window._loggedOut && !_fbReject && _lFresh && _lFresh.password === btoa(pass)) {
+          const _storedName = (typeof window._getStoredName === 'function' ? window._getStoredName(user) : null)
+                           || _lFresh.name
+                           || (user && user.includes('@') ? user.split('@')[0] : user);
+          const _enriched = { ..._lFresh, name: _storedName, email: user };
+          document.getElementById('loginScreen').classList.add('hide');
+          loginSuccess(user, _enriched);
+          return;
+        }
         showLoginErr(errMsg || 'الإيميل أو كلمة المرور خاطئة');
       }
     );
@@ -4193,24 +4202,10 @@ function updateHomeStats() {
     if (currentUser.isGuest) {
       _gn.style.display = 'block';
       // ★ ذكاء البانر: لو فيه حساب محفوظ، نوريه ونديله زرار رجوع مباشر
-      try {
-        const lastUser = localStorage.getItem('nour_last_user');
-        if (lastUser) {
-          const users = JSON.parse(localStorage.getItem('nour_users') || '{}');
-          const data  = users[lastUser];
-          const dispName = (data && data.name) ? data.name : lastUser;
-          _gn.onclick = null; // نشيل onclick القديم لأن فيه زرار داخلي دلوقتي
-          _gn.innerHTML =
-            '<div style="font-size:13px;color:#ffb784;font-weight:700;margin-bottom:8px;">🕊️ بتلعب كضيف — مش حساب «' + dispName + '»</div>' +
-            '<button onclick="event.stopPropagation();_switchBackToSaved()" style="background:rgba(255,150,80,0.25);border:1px solid rgba(255,150,80,0.6);color:#ffe0c0;padding:6px 14px;border-radius:9px;font-family:\'Cairo\',sans-serif;font-size:12px;font-weight:700;cursor:pointer;">↩ ارجع لحسابك</button>';
-        } else {
-          // مفيش حساب محفوظ — البانر القديم العادي (يدخل شاشة الدخول)
-          _gn.onclick = doLogout;
-          _gn.innerHTML =
-            '<div style="font-size:12px;color:#ffb784;font-weight:700;">🕊️ أنت تلعب كضيف</div>' +
-            '<div style="font-size:11px;color:rgba(255,200,160,0.75);margin-top:4px;line-height:1.6;">نقاطك محفوظة على الجهاز ده بس ومش بتتوحّد مع باقي أجهزتك.<br><b style="color:#ffd9b8;">اضغط هنا لتسجيل الدخول بحسابك وتوحيد نقاطك 👈</b></div>';
-        }
-      } catch (e) {}
+      _gn.onclick = doLogout;
+      _gn.innerHTML =
+        '<div style="font-size:12px;color:#ffb784;font-weight:700;">🕊️ أنت تلعب كضيف</div>' +
+        '<div style="font-size:11px;color:rgba(255,200,160,0.75);margin-top:4px;line-height:1.6;">نقاطك محفوظة على الجهاز ده بس ومش بتتوحّد مع باقي أجهزتك.<br><b style="color:#ffd9b8;">اضغط هنا لتسجيل الدخول بحسابك وتوحيد نقاطك 👈</b></div>';
     } else {
       _gn.style.display = 'none';
     }
