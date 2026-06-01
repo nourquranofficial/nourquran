@@ -2272,6 +2272,18 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       const rawOld = (isGuest ? 'guest__' : '') + String(username).replace(/[\.\#\$\/\[\]]/g, '_');
       if (rawOld !== key) remove(ref(db, LB_PATH + rawOld)).catch(() => {});
     } catch (e) {}
+    // ★★ الحل الجذري: لو الـ name مختلف عن الـ username (الإيميل) — امسح أي مفتاح
+    //    بيطابق الـ name (اسم العرض) عشان ما يتكرروش في لوحة الشرف
+    try {
+      const displayName = data.name || '';
+      if (!isGuest && displayName && displayName !== username) {
+        const nameAsKey = dataKey(displayName);
+        if (nameAsKey !== key) remove(ref(db, LB_PATH + nameAsKey)).catch(() => {});
+        // نسخة بدون تحويل hex (ASCII عادي)
+        const nameRaw = String(displayName).replace(/[\.#$\/\[\]@]/g, '_').toLowerCase();
+        if (nameRaw !== key) remove(ref(db, LB_PATH + nameRaw)).catch(() => {});
+      }
+    } catch (e) {}
 
     const ts = data.updatedAt || Date.now();
     // خلّي currentUser.updatedAt يطابق آخر رفع (للمقارنة وقت القراءة)
@@ -2293,6 +2305,26 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       };
     }).catch(e => console.error('fbSaveUser error:', e));
   };
+  // ★★ مسح مفتاح الاسم المكرر (لما الحساب كان محفوظ بالاسم بدل الإيميل)
+  window.fbCleanDuplicateNameKey = function(email, displayName) {
+    if (!email || !displayName || displayName === email) return;
+    const emailKey = dataKey(email);
+    // مفتاح الاسم بالـ ASCII
+    const nameKeyRaw = String(displayName).replace(/[\.#$\/\[\]@]/g, '_').toLowerCase();
+    if (nameKeyRaw !== emailKey) remove(ref(db, LB_PATH + nameKeyRaw)).catch(() => {});
+    // مفتاح الاسم بالـ hex (لو عربي أو غير ASCII)
+    try {
+      const bytes = new TextEncoder().encode(displayName.trim());
+      let hexOut = 'u';
+      for (let i = 0; i < bytes.length; i++) hexOut += bytes[i].toString(16).padStart(2, '0');
+      if (hexOut !== emailKey) remove(ref(db, LB_PATH + hexOut)).catch(() => {});
+    } catch(e) {}
+    // مفتاح makeKey (بدون toLower)
+    const mkKey = makeKey(displayName, false);
+    if (mkKey !== emailKey) remove(ref(db, LB_PATH + mkKey)).catch(() => {});
+    console.log('🧹 تنظيف مفاتيح الاسم المكررة لـ', email, '→', displayName);
+  };
+
   // رفع علامة مسح الغلطات فقط (من غير ما نلمس النقط) — تتوحّد عبر الأجهزة
   window.fbMarkMistakesCleared = function(username, isGuest) {
     if (!username) return;
@@ -4269,6 +4301,17 @@ function loginSuccess(username, data, isGuest=false) {
       && !window.currentUser._pendingVerify && !window._registering) return;
   currentUser = { username, isGuest, ...(data || {}) };
   window.currentUser = currentUser;
+
+  // ★★ تنظيف عند الـ login: لو الاسم مختلف عن الإيميل — امسح مفتاح الاسم من لوحة الشرف
+  // ده بيحل مشكلة التكرار نهائياً: نخلّي fbCleanDuplicateNameKey يعمل الشغل
+  if (!isGuest && data && data.name && data.name !== username) {
+    setTimeout(() => {
+      if (typeof window.fbCleanDuplicateNameKey === 'function') {
+        window.fbCleanDuplicateNameKey(username, data.name);
+      }
+    }, 1500);
+  }
+
   _finishLogin(username, isGuest);
 }
 window.loginSuccess = loginSuccess;
