@@ -2402,6 +2402,28 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     _lbUnsub = onValue(ref(db, LB_PATH), (snap) => {
       _lbOk = true; _lbRetry = 0;
       const data = snap.val() || {};
+
+      // ★ مسح تلقائي للمفاتيح المكررة (نفس الاسم بمفتاحين) — بيحصل مرة لما الـ Auth موجود
+      try {
+        if (auth.currentUser) {
+          const _nameMap = new Map();
+          Object.entries(data).forEach(([k, d]) => {
+            if (!d || !d.name) return;
+            const norm = String(d.name).trim().toLowerCase();
+            if (!_nameMap.has(norm)) _nameMap.set(norm, []);
+            _nameMap.get(norm).push({ key: k, hasanat: d.totalHasanat || 0 });
+          });
+          _nameMap.forEach((entries) => {
+            if (entries.length <= 1) return;
+            entries.sort((a, b) => b.hasanat - a.hasanat);
+            entries.slice(1).forEach(e => {
+              remove(ref(db, LB_PATH + e.key)).catch(() => {});
+              console.log('🧹 مسح مفتاح مكرر من لوحة الشرف:', e.key);
+            });
+          });
+        }
+      } catch (_e) {}
+
       window._renderLbFromData(data);
       console.log('🏆 لوحة الشرف اتحدثت — ' + Object.keys(data).length + ' لاعب');
     }, (err) => {
@@ -2497,9 +2519,18 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
 
     // ترتيب تنازلي حسب الحسنات (مع احترام مفتاح ظهور الضيوف)
     const _showGuests = window.SHOW_GUESTS_IN_RANKING !== false;
-    const list = Object.entries(data || {})
-      .filter(([k, d]) => d && d.name && (d.totalHasanat || 0) > 0 &&
-        (_showGuests || (!d.isGuest && !String(k).startsWith('guest__'))))
+    // ★ deduplication: لو نفس الاسم موجود بأكتر من مفتاح → ناخد الأعلى نقاطاً بس
+    const _seenNames = new Map();
+    Object.entries(data || {}).forEach(([k, d]) => {
+      if (!d || !d.name || (d.totalHasanat || 0) <= 0) return;
+      if (!_showGuests && (d.isGuest || String(k).startsWith('guest__'))) return;
+      const normName = String(d.name).trim().toLowerCase();
+      const existing = _seenNames.get(normName);
+      if (!existing || (d.totalHasanat || 0) > (existing[1].totalHasanat || 0)) {
+        _seenNames.set(normName, [k, d]);
+      }
+    });
+    const list = Array.from(_seenNames.values())
       .sort(([, a], [, b]) => (b.totalHasanat || 0) - (a.totalHasanat || 0));
 
     window._lbAllList = list;
