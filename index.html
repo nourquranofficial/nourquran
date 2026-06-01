@@ -1580,10 +1580,13 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     const key = dataKey(username);
     const ts  = Date.now();
     const _doWrite = () => Promise.all([
-      // ★ كتابة مباشرة على مسار الاسم — يـtrigger الـ onValue listener فوراً
+      // ★ كتابة مباشرة على مسار الاسم — يـtrigger الـ onValue listener فوراً على كل الأجهزة
       set(ref(db, 'leaderboard/' + key + '/name'), name).catch(() => {}),
       set(ref(db, 'leaderboard/' + key + '/nameUpdatedAt'), ts).catch(() => {}),
       set(ref(db, 'users/' + key + '/name'), name).catch(() => {}),
+      set(ref(db, 'users/' + key + '/nameUpdatedAt'), ts).catch(() => {}),
+      // ★★ update() مباشر على مدخل لوحة الشرف — يضمن تحديث الاسم حتى لو الـ transaction بطأ
+      update(ref(db, 'leaderboard/' + key), { name, nameUpdatedAt: ts }).catch(() => {}),
     ]);
     if (auth.currentUser) { _doWrite(); return; }
     signInAnonymously(auth).then(_doWrite).catch(() => { _doWrite().catch(() => {}); });
@@ -1611,11 +1614,20 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       // ★ حدّث فوراً
       window.currentUser.name = fbName;
       currentUser = window.currentUser;
-      try { localStorage.setItem('nour_name_' + username, fbName); } catch(e) {}
+      try {
+        localStorage.setItem('nour_name_' + username, fbName);
+        localStorage.setItem('nour_name_ts_' + username, String(Date.now()));
+        // حدّث nour_users محلياً عشان يتزامن بعد الـ logout/login
+        const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
+        if (_lu[username]) { _lu[username].name = fbName; localStorage.setItem('nour_users', JSON.stringify(_lu)); }
+      } catch(e) {}
       const el = document.getElementById('userNameDisplay');
       if (el && !el.querySelector('input')) {
         el.innerHTML = '👤 ' + fbName + ' <button onclick="event.stopPropagation();editDisplayName()" title="غيّر اسمك للعرض" style="background:none;border:none;font-size:13px;cursor:pointer;color:var(--gold);opacity:.7;padding:2px 4px;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">✏️</button>';
       }
+      // ★★ تحديث لوحة الشرف والترتيب العام لحظياً بعد استقبال الاسم الجديد من Firebase
+      if (typeof renderLeaderboard === 'function') renderLeaderboard();
+      if (typeof window.updateGlobalRankChip === 'function') window.updateGlobalRankChip();
     });
   };
   window.fbUnwatchName = function() {
@@ -2064,10 +2076,18 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
           const _fbName     = fbName || (fbData && fbData.name && !fbData.name.includes('@') ? fbData.name : null) || (lbData && lbData.name && !lbData.name.includes('@') ? lbData.name : null);
           const _fbTs       = (fbData && fbData.nameUpdatedAt) || (lbData && lbData.nameUpdatedAt) || 0;
           const _googleName = (user && user.displayName && !user.displayName.includes('@')) ? user.displayName : null;
-          // لو Firebase أحدث → استخدمه وحدّث المحلي
-          if (_fbName && _fbTs > _localTs) {
-            try { localStorage.setItem('nour_name_' + realUsername, _fbName); localStorage.setItem('nour_name_ts_' + realUsername, String(_fbTs)); } catch(e) {}
-            return _fbName;
+          // ★★ لو Firebase عنده اسم صح (مش إيميل) → استخدمه دايماً حتى لو مفيش timestamp
+          // (backward compat: الاسم المحفوظ في Firebase أصدق من المحلي بعد logout/login)
+          if (_fbName && !_fbName.includes('@')) {
+            if (_fbTs > _localTs || !_localName || _localName.includes('@')) {
+              try {
+                localStorage.setItem('nour_name_' + realUsername, _fbName);
+                localStorage.setItem('nour_name_ts_' + realUsername, String(_fbTs || Date.now()));
+                const _lu2 = JSON.parse(localStorage.getItem('nour_users') || '{}');
+                if (_lu2[realUsername]) { _lu2[realUsername].name = _fbName; localStorage.setItem('nour_users', JSON.stringify(_lu2)); }
+              } catch(e) {}
+              return _fbName;
+            }
           }
           return _localName || _fbName || _googleName || '';
         })(),
@@ -2109,7 +2129,13 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
           // ★ كتابة فورية في الـ leaderboard حتى لو النقاط صفر عشان الاسم يظهر
           try {
             if (typeof window.fbSaveFullUserData === 'function') window.fbSaveFullUserData(realUsername, merged);
-            if (typeof window.fbSaveUser === 'function') window.fbSaveUser(realUsername, Object.assign({}, merged, {isGuest: !!(merged && merged.isGuest)}));
+            // ★★ fbSaveName الأول عشان يكتب الاسم مباشرة ويسبق الـ transaction
+            if (merged.name && !merged.name.includes('@') && typeof window.fbSaveName === 'function') {
+              window.fbSaveName(realUsername, merged.name);
+            }
+            setTimeout(() => {
+              if (typeof window.fbSaveUser === 'function') window.fbSaveUser(realUsername, Object.assign({}, merged, {isGuest: !!(merged && merged.isGuest)}));
+            }, 300);
           } catch(e) {}
         } else {
           setTimeout(doIt, 30);
@@ -4307,14 +4333,19 @@ function _saveNameEdit() {
   saveCurrentUser();
 
   // ★ ٣. حفظ في Firebase في الخلفية
+  // ★★ fbSaveName أولاً — بتكتب الاسم مباشرة في leaderboard وusers بـ set() + update()
   if (typeof window.fbSaveName === 'function') window.fbSaveName(_email, n);
-  if (typeof window.fbSaveUser === 'function') window.fbSaveUser(_email, {
-    name: n, isGuest: false,
-    totalHasanat: currentUser.totalHasanat||0,
-    totalScore: currentUser.totalScore||0,
-    totalGames: currentUser.totalGames||0,
-  });
-  if (typeof renderLeaderboard === 'function') renderLeaderboard();
+  // ★★ تأخير 300ms عشان الـ set() يسبق الـ runTransaction في fbSaveUser
+  setTimeout(() => {
+    if (typeof window.fbSaveUser === 'function') window.fbSaveUser(_email, {
+      name: n, isGuest: false,
+      totalHasanat: currentUser.totalHasanat||0,
+      totalScore: currentUser.totalScore||0,
+      totalGames: currentUser.totalGames||0,
+    });
+    if (typeof renderLeaderboard === 'function') renderLeaderboard();
+    if (typeof window.updateGlobalRankChip === 'function') window.updateGlobalRankChip();
+  }, 300);
 }
 function _cancelNameEdit() {
   const overlay = document.getElementById('_nameEditOverlay');
