@@ -2278,10 +2278,14 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     const entryRef = ref(db, LB_PATH + key);
     if (oldKey !== key) remove(ref(db, LB_PATH + oldKey)).catch(() => {});
     try {
-      const rawOld = (isGuest ? 'guest__' : '') + String(username).replace(/[\.#$\/\[\]]/g, '_');
+      // ★ مسح المفتاح القديم (بدون @ في الـ replace كان سبب التكرار)
+      const rawOld = (isGuest ? 'guest__' : '') + String(username).replace(/[\.#$\/\[\]@]/g, '_');
       if (rawOld !== key) remove(ref(db, LB_PATH + rawOld)).catch(() => {});
+      // مسح نسخة بدون lowercase
+      const rawOldLower = rawOld.toLowerCase();
+      if (rawOldLower !== key && rawOldLower !== rawOld) remove(ref(db, LB_PATH + rawOldLower)).catch(() => {});
     } catch (e) {}
-    // ★ مسح مفتاح اسم العرض لو مختلف عن الإيميل
+    // ★ مسح مفتاح اسم العرض لو مختلف عن الإيميل (السبب الجذري للتكرار)
     try {
       const displayName = data.name || '';
       if (!isGuest && displayName && displayName !== username) {
@@ -2289,6 +2293,12 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         if (nameRaw !== key) remove(ref(db, LB_PATH + nameRaw)).catch(() => {});
         const mkAlt = makeKey(displayName, false);
         if (mkAlt !== key) remove(ref(db, LB_PATH + mkAlt)).catch(() => {});
+        // ★★ مسح مفتاح اسم العرض بـ encodeKey (الطريقة الجديدة)
+        const nameEncoded = encodeKey(displayName);
+        if (nameEncoded !== key) remove(ref(db, LB_PATH + nameEncoded)).catch(() => {});
+        // مسح lowercase بدون رموز (أكثر حالة شائعة للتكرار)
+        const namePlain = String(displayName).trim().toLowerCase().replace(/[^a-z0-9؀-ۿ]/g, '_');
+        if (namePlain !== key) remove(ref(db, LB_PATH + namePlain)).catch(() => {});
       }
     } catch (e) {}
 
@@ -2316,16 +2326,26 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   window.fbCleanDuplicateNameKey = function(email, displayName) {
     if (!email || !displayName || displayName === email) return;
     const emailKey = dataKey(email);
-    const nameRaw = String(displayName).replace(/[\.#$\/\[\]@]/g, '_').toLowerCase();
-    if (nameRaw !== emailKey) remove(ref(db, LB_PATH + nameRaw)).catch(() => {});
-    const mkAlt = makeKey(displayName, false);
-    if (mkAlt !== emailKey) remove(ref(db, LB_PATH + mkAlt)).catch(() => {});
+    // ★ مسح كل الصيغ الممكنة لمفتاح اسم العرض
+    const toTry = new Set();
+    // صيغة 1: replace رموز بـ _
+    toTry.add(String(displayName).replace(/[\.#$\/\[\]@]/g, '_').toLowerCase());
+    // صيغة 2: makeKey
+    toTry.add(makeKey(displayName, false));
+    // صيغة 3: encodeKey
+    toTry.add(encodeKey(displayName));
+    // صيغة 4: lowercase بحت بدون رموز
+    toTry.add(String(displayName).trim().toLowerCase().replace(/[^a-z0-9\u0600-\u06ff]/g, '_'));
+    // صيغة 5: lowercase بدون أي فراغ أو رموز
+    toTry.add(String(displayName).trim().toLowerCase().replace(/[\s]/g, '_'));
+    // صيغة 6: hex
     try {
       const bytes = new TextEncoder().encode(displayName.trim());
       let hex = 'u';
       for (let i = 0; i < bytes.length; i++) hex += bytes[i].toString(16).padStart(2, '0');
-      if (hex !== emailKey) remove(ref(db, LB_PATH + hex)).catch(() => {});
+      toTry.add(hex);
     } catch(e) {}
+    toTry.forEach(k => { if (k && k !== emailKey) remove(ref(db, LB_PATH + k)).catch(() => {}); });
   };
 
   // رفع علامة مسح الغلطات فقط (من غير ما نلمس النقط) — تتوحّد عبر الأجهزة
@@ -4340,11 +4360,11 @@ function loginSuccess(username, data, isGuest=false) {
           }
         });
       }
-      // مسح مفاتيح الاسم المكررة
+      // مسح مفاتيح الاسم المكررة — فوراً عشان ما يظهرش تكرار في اللوحة
       if (data && data.name && data.name !== username && typeof window.fbCleanDuplicateNameKey === 'function') {
         window.fbCleanDuplicateNameKey(username, data.name);
       }
-    }, 2000);
+    }, 0);
   }
 
   _finishLogin(username, isGuest);
@@ -4357,32 +4377,95 @@ window.showGame = showGame;
 function editDisplayName() {
   if (!currentUser) return;
   if (currentUser.isGuest) { showToast('🕊️ الضيوف ما يقدروش يغيّروا الاسم — سجّل حساب أولاً'); return; }
-  let overlay = document.getElementById('_nameEditOverlay');
-  if (overlay) overlay.remove();
-  overlay = document.createElement('div');
-  overlay.id = '_nameEditOverlay';
-  overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;padding:20px;';
-  overlay.innerHTML =
-    '<div style="background:linear-gradient(160deg,#1e1508,#12100a);border:1px solid rgba(201,151,58,0.4);border-radius:18px;padding:24px 20px;width:100%;max-width:320px;text-align:center;">' +
-      '<div style="font-size:14px;color:var(--gold);font-family:Cairo,sans-serif;font-weight:700;margin-bottom:10px;">\u270F\uFE0F تعديل الاسم</div>' +
-      '<input id="_nameEditInput" type="text" maxlength="30" placeholder="اكتب اسمك هنا"' +
-      ' style="width:100%;background:rgba(201,151,58,0.1);border:1.5px solid rgba(201,151,58,0.4);border-radius:12px;padding:10px 14px;font-family:Cairo,sans-serif;font-size:15px;color:var(--gold);direction:rtl;outline:none;text-align:right;box-sizing:border-box;">' +
-      '<div style="display:flex;gap:8px;margin-top:12px;">' +
-        '<button onclick="_cancelNameEdit()" style="flex:1;padding:10px;background:rgba(255,254,249,0.05);border:1px solid rgba(201,151,58,0.2);border-radius:10px;color:rgba(245,217,139,0.5);font-family:Cairo,sans-serif;font-size:14px;cursor:pointer;">\u0625\u0644\u063A\u0627\u0621</button>' +
-        '<button onclick="_saveNameEdit()" ontouchend="event.preventDefault();_saveNameEdit();" style="flex:2;padding:10px;background:linear-gradient(135deg,#C9973A,#E8C46A);border:none;border-radius:10px;font-family:Cairo,sans-serif;font-size:14px;font-weight:900;color:#1a1208;cursor:pointer;touch-action:manipulation;">\u062D\u0641\u0638 \u2713</button>' +
-      '</div>' +
-    '</div>';
-  document.body.appendChild(overlay);
-  overlay.style.display = 'flex';
-  overlay.onclick = (e) => { if (e.target === overlay) _cancelNameEdit(); };
-  const inp = document.getElementById('_nameEditInput');
-  if (inp) {
-    inp.value = currentUser.name || '';
-    setTimeout(() => { inp.focus(); inp.select(); }, 100);
-    inp.onkeydown = (ev) => { if (ev.key === 'Enter') _saveNameEdit(); if (ev.key === 'Escape') _cancelNameEdit(); };
+  const _email = currentUser.username;
+  const _3DAYS = 2 * 60 * 1000; // ★ TEST: دقيقتين — غيّرها لـ 3*24*60*60*1000 بعد التجربة
+
+  function _openEditPopup(isFirstTime) {
+    let overlay = document.getElementById('_nameEditOverlay');
+    if (overlay) overlay.remove();
+    overlay = document.createElement('div');
+    overlay.id = '_nameEditOverlay';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;padding:20px;';
+    const _warn = isFirstTime
+      ? '<div style="font-size:11px;color:rgba(245,217,139,0.45);margin-bottom:12px;line-height:1.7;">بعد الحفظ مش هتقدر تغيره إلا بعد <strong style="color:rgba(201,151,58,0.7);">٣ أيام</strong> \uD83D\uDCCC</div>'
+      : '';
+    overlay.innerHTML =
+      '<div style="background:linear-gradient(160deg,#1e1508,#12100a);border:1px solid rgba(201,151,58,0.4);border-radius:18px;padding:24px 20px;width:100%;max-width:320px;text-align:center;">' +
+        '<div style="font-size:14px;color:var(--gold);font-family:Cairo,sans-serif;font-weight:700;margin-bottom:10px;">\u270F\uFE0F تعديل الاسم</div>' +
+        _warn +
+        '<input id="_nameEditInput" type="text" maxlength="30" placeholder="اكتب اسمك هنا"' +
+        ' style="width:100%;background:rgba(201,151,58,0.1);border:1.5px solid rgba(201,151,58,0.4);border-radius:12px;padding:10px 14px;font-family:Cairo,sans-serif;font-size:15px;color:var(--gold);direction:rtl;outline:none;text-align:right;box-sizing:border-box;">' +
+        '<div style="display:flex;gap:8px;margin-top:12px;">' +
+          '<button onclick="_cancelNameEdit()" style="flex:1;padding:10px;background:rgba(255,254,249,0.05);border:1px solid rgba(201,151,58,0.2);border-radius:10px;color:rgba(245,217,139,0.5);font-family:Cairo,sans-serif;font-size:14px;cursor:pointer;">\u0625\u0644\u063A\u0627\u0621</button>' +
+          '<button onclick="_saveNameEdit()" ontouchend="event.preventDefault();_saveNameEdit();" style="flex:2;padding:10px;background:linear-gradient(135deg,#C9973A,#E8C46A);border:none;border-radius:10px;font-family:Cairo,sans-serif;font-size:14px;font-weight:900;color:#1a1208;cursor:pointer;touch-action:manipulation;">\u062D\u0641\u0638 \u2713</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(overlay);
+    overlay.style.display = 'flex';
+    overlay.onclick = (e) => { if (e.target === overlay) _cancelNameEdit(); };
+    const inp = document.getElementById('_nameEditInput');
+    if (inp) {
+      inp.value = currentUser.name || '';
+      setTimeout(() => { inp.focus(); inp.select(); }, 100);
+      inp.onkeydown = (ev) => { if (ev.key === 'Enter') _saveNameEdit(); if (ev.key === 'Escape') _cancelNameEdit(); };
+    }
+  }
+
+  function _openCooldownPopup(timeStr) {
+    let cdOv = document.getElementById('_nameCooldownOverlay');
+    if (cdOv) cdOv.remove();
+    cdOv = document.createElement('div');
+    cdOv.id = '_nameCooldownOverlay';
+    cdOv.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.75);display:flex;align-items:center;justify-content:center;padding:20px;';
+    cdOv.innerHTML =
+      '<div style="background:linear-gradient(160deg,#1e1508,#12100a);border:1px solid rgba(192,57,43,0.5);border-radius:18px;padding:28px 22px;width:100%;max-width:320px;text-align:center;font-family:Cairo,sans-serif;">' +
+        '<div style="font-size:32px;margin-bottom:10px;">\u23F3</div>' +
+        '<div style="font-size:15px;color:#e87a6a;font-weight:900;margin-bottom:10px;">\u062A\u063A\u064A\u064A\u0631 \u0627\u0644\u0627\u0633\u0645 \u0645\u0634 \u0645\u062A\u0627\u062D \u062F\u0644\u0648\u0642\u062A\u064A</div>' +
+        '<div style="font-size:13px;color:rgba(245,217,139,0.6);line-height:1.8;margin-bottom:18px;">\u062A\u0642\u062F\u0631 \u062A\u063A\u064A\u0631 \u0627\u0633\u0645\u0643 \u0645\u0631\u0629 \u0643\u0644 <strong style="color:var(--gold);">\u0663 \u0623\u064A\u0627\u0645</strong> \u0639\u0634\u0627\u0646 \u0645\u0627 \u064A\u062D\u0635\u0644\u0634 \u0627\u0644\u062A\u0628\u0627\u0633 \u0641\u064A \u0627\u0644\u062A\u0631\u062A\u064A\u0628.<br><span style="color:rgba(245,217,139,0.4);">\u0647\u062A\u0642\u062F\u0631 \u062A\u063A\u064A\u0631\u0647 ' + timeStr + '</span></div>' +
+        '<button id="_cdCloseBtn" style="width:100%;padding:11px;background:linear-gradient(135deg,rgba(201,151,58,0.2),rgba(201,151,58,0.1));border:1px solid rgba(201,151,58,0.35);border-radius:12px;color:var(--gold);font-family:Cairo,sans-serif;font-size:14px;font-weight:700;cursor:pointer;">\u062D\u0633\u0646\u0627\u064B</button>' +
+      '</div>';
+    document.body.appendChild(cdOv);
+    cdOv.style.display = 'flex';
+    cdOv.onclick = (e) => { if (e.target === cdOv) cdOv.style.display = 'none'; };
+    const closeBtn = document.getElementById('_cdCloseBtn');
+    if (closeBtn) closeBtn.onclick = () => { cdOv.style.display = 'none'; };
+  }
+
+  function _checkAndOpen(lastChange) {
+    const isFirstTime = (lastChange || 0) === 0;
+    const msSince = Date.now() - (lastChange || 0);
+    if (isFirstTime || msSince >= _3DAYS) {
+      _openEditPopup(isFirstTime);
+    } else {
+      const daysLeft  = Math.ceil((_3DAYS - msSince) / (24 * 60 * 60 * 1000));
+      const hoursLeft = Math.ceil((_3DAYS - msSince) / (60 * 60 * 1000));
+      const timeStr   = daysLeft > 1 ? '\u0628\u0639\u062F ' + daysLeft + ' \u0623\u064A\u0627\u0645'
+                      : hoursLeft > 1 ? '\u0628\u0639\u062F ' + hoursLeft + ' \u0633\u0627\u0639\u0629'
+                      : '\u0642\u0631\u064A\u0628\u0627\u064B';
+      _openCooldownPopup(timeStr);
+    }
+  }
+
+  // ١. اقرأ من localStorage فوراً
+  let _localTs = 0;
+  try { _localTs = parseInt(localStorage.getItem('nour_name_changed_at_' + _email) || '0', 10) || 0; } catch(e) {}
+  _checkAndOpen(_localTs);
+
+  // ٢. sync من Firebase في الخلفية — لو لقى أحدث يعيد الفتح
+  if (typeof window.fbGetNameCooldown === 'function') {
+    window.fbGetNameCooldown(_email, (fbTs) => {
+      if (!fbTs || fbTs <= _localTs) return;
+      try { localStorage.setItem('nour_name_changed_at_' + _email, String(fbTs)); } catch(e) {}
+      const msSinceFb = Date.now() - fbTs;
+      if (msSinceFb < _3DAYS) {
+        // كان مفروض يتحجب — اغلق الـ edit popup لو كان اتفتح وافتح التحذير
+        const _ep = document.getElementById('_nameEditOverlay');
+        if (_ep) _ep.style.display = 'none';
+        _checkAndOpen(fbTs);
+      }
+    });
   }
 }
-
 function _saveNameEdit() {
   const inp = document.getElementById('_nameEditInput');
   if (!inp) return;
