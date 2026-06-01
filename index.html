@@ -9596,7 +9596,6 @@ function multiPlayAgain() {
 
   // ★ منع الضغط المزدوج — لو الغرفة بالفعل في playing انتظر الـ listener
   if (room.phase === 'playing') {
-    showToast('⏳ اللعبة شغّالة...');
     return;
   }
 
@@ -9645,6 +9644,10 @@ function multiPlayAgain() {
       });
     }, 2000);
   }
+
+  // ★ رست زرار «مرة تانية» للمضيف قبل ما يدخل اللعبة
+  const _hostBtn = document.getElementById('multiPlayAgainBtn');
+  if (_hostBtn) { _hostBtn.textContent = '🔄 مرة تانية'; _hostBtn.disabled = false; _hostBtn.style.opacity = '1'; _hostBtn.style.cursor = 'pointer'; }
 
   // المضيف يدخل اللعبة الجديدة فورًا
   _startMultiGame();
@@ -9755,7 +9758,7 @@ function _startPolling() {
       }
       if (multiState.phase === 'waiting') {
         // لو الـ host بدأ اللعبة
-        if (room.phase === 'playing' && !multiState.isHost) {
+        if (room.phase === 'playing') {
           multiState.phase = 'playing';
           multiState.myScore = 0;
           multiState._peakScore = 0;
@@ -9852,7 +9855,12 @@ function _startPolling() {
         }
       } else if (multiState.phase === 'results') {
         // ★ "مرة تانية" أوتوماتيك: المضيف بدأ جولة جديدة → ادخل اللعبة فوراً
-        if (room.phase === 'playing' && !multiState.isHost) {
+        if (room.phase === 'playing') {
+          // ★ رست الزرار للكل
+          const _btn2 = document.getElementById('multiPlayAgainBtn');
+          if (_btn2) { _btn2.textContent = '🔄 مرة تانية'; _btn2.disabled = false; _btn2.style.opacity = '1'; _btn2.style.cursor = 'pointer'; }
+          // المضيف دخل اللعبة بالفعل من _startMultiGame
+          if (multiState.isHost) return;
           clearTimeout(multiState.answerTimer);
           clearInterval(multiState.questionTimer);
           multiState.phase = 'playing';
