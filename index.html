@@ -2518,27 +2518,44 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
 
     // ترتيب تنازلي حسب الحسنات (مع احترام مفتاح ظهور الضيوف)
     const _showGuests = window.SHOW_GUESTS_IN_RANKING !== false;
-    // ★ dedup: لو نفس الاسم اتسجّل بمفتاحين مختلفين، نبقى بالأعلى نقاط بس
-    // ★★ وكمان نمسح التكرارات من Firebase نفسه تلقائياً — يمنع التكرار المستقبلي ★★
-    const _seenNames = new Map();
+    // ★ dedup: نفس الشخص = نفس الـ key دايماً (بغض النظر عن الاسم)
+    // ★★ بنحتفظ بالـ key الكانوني بس — ونمسح أي نسخ مكررة تلقائياً ★★
+    const _seenKeys = new Map();
+    const cu = window.currentUser;
+    const myKey = cu && window._makeKey ? window._makeKey(cu.username, cu.isGuest || false) : null;
+    const myKeyAlt = cu && window._makeKey ? window._makeKey(cu.username, false) : null;
+
     Object.entries(data || {})
       .filter(([k, d]) => d && d.name && (d.totalHasanat || 0) > 0 &&
         (_showGuests || (!d.isGuest && !String(k).startsWith('guest__'))))
       .forEach(([k, d]) => {
-        const nm = d.name.trim().toLowerCase();
-        const existing = _seenNames.get(nm);
-        if (!existing || (d.totalHasanat || 0) > (existing[1].totalHasanat || 0)) {
-          // لو فيه مفتاح مكرر قديم — امسحه من Firebase تلقائياً
-          if (existing) {
-            try { remove(ref(db, LB_PATH + existing[0])).catch(() => {}); } catch (_) {}
-          }
-          _seenNames.set(nm, [k, d]);
-        } else {
-          // المفتاح الحالي أقل نقاطاً — امسحه من Firebase تلقائياً
-          try { remove(ref(db, LB_PATH + k)).catch(() => {}); } catch (_) {}
+        // ★ لو ده الـ key بتاع المستخدم الحالي — خذ اسمه من currentUser مباشرة
+        const isMyKey = myKey && (k === myKey || k === myKeyAlt);
+        const resolvedName = isMyKey && cu && cu.name ? cu.name : (d.name || 'لاعب');
+        const resolvedEntry = { ...d, name: resolvedName };
+
+        const existing = _seenKeys.get(k);
+        if (!existing || (resolvedEntry.totalHasanat || 0) > (existing[1].totalHasanat || 0)) {
+          _seenKeys.set(k, [k, resolvedEntry]);
         }
       });
-    const list = Array.from(_seenNames.values())
+
+    // مسح التكرارات القديمة بالاسم (احتياط للبيانات القديمة في Firebase)
+    const _seenNamesDedup = new Map();
+    Array.from(_seenKeys.values()).forEach(([k, d]) => {
+      const nm = (d.name || '').trim().toLowerCase();
+      const existing = _seenNamesDedup.get(nm);
+      if (!existing || (d.totalHasanat || 0) > (existing[1].totalHasanat || 0)) {
+        if (existing) {
+          try { remove(ref(db, LB_PATH + existing[0])).catch(() => {}); } catch (_) {}
+        }
+        _seenNamesDedup.set(nm, [k, d]);
+      } else {
+        try { remove(ref(db, LB_PATH + k)).catch(() => {}); } catch (_) {}
+      }
+    });
+
+    const list = Array.from(_seenNamesDedup.values())
       .sort(([, a], [, b]) => (b.totalHasanat || 0) - (a.totalHasanat || 0));
 
     window._lbAllList = list;
@@ -3575,6 +3592,7 @@ function doGoogleSignIn() {
     provider.setCustomParameters({ prompt: 'select_account' });
 
     signInWithPopup(_auth, provider)
+      .finally(() => { restore(); })
       .then((result) => {
         const gUser = result.user;
         const email = (gUser.email || '').trim().toLowerCase();
@@ -3611,6 +3629,22 @@ function doGoogleSignIn() {
 }
 window.doGoogleSignIn = doGoogleSignIn;
 
+// ★ إعادة تفعيل أزرار Google وFacebook كلما ظهرت شاشة اللوجين من جديد
+(function() {
+  const _obs = new MutationObserver(() => {
+    const ls = document.getElementById('loginScreen');
+    if (!ls || ls.classList.contains('hide')) return;
+    const gBtn = document.getElementById('googleSignInBtn');
+    const fBtn = document.getElementById('facebookSignInBtn');
+    if (gBtn) { gBtn.disabled = false; gBtn.style.opacity = '1'; }
+    if (fBtn) { fBtn.disabled = false; fBtn.style.opacity = '1'; }
+  });
+  document.addEventListener('DOMContentLoaded', () => {
+    const ls = document.getElementById('loginScreen');
+    if (ls) _obs.observe(ls, { attributes: true, attributeFilter: ['class', 'style'] });
+  });
+})();
+
 // ============================================================
 // ★ Facebook Sign-In — Firebase v10 modular
 // ============================================================
@@ -3624,6 +3658,7 @@ function doFacebookSignIn() {
     const provider = new FacebookAuthProvider();
 
     signInWithPopup(_auth, provider)
+      .finally(() => { restore(); })
       .then((result) => {
         const fbUser = result.user;
         const email  = (fbUser.email || '').trim().toLowerCase();
@@ -4348,6 +4383,9 @@ function _saveNameEdit() {
 
   // ★ ٣. حفظ في Firebase في الخلفية
   const _nameTs = Date.now();
+  // ★ حدّث currentUser.name قبل أي render عشان الـ dedup يشوف الاسم الجديد صح
+  if (window.currentUser) window.currentUser.name = n;
+
   if (typeof window.fbSaveName === 'function') window.fbSaveName(_email, n);
   if (typeof window.fbSaveUser === 'function') window.fbSaveUser(_email, {
     name: n, nameUpdatedAt: _nameTs, isGuest: false,
@@ -4356,7 +4394,16 @@ function _saveNameEdit() {
     totalGames: currentUser.totalGames||0,
     updatedAt: _nameTs,
   });
-  if (typeof renderLeaderboard === 'function') renderLeaderboard();
+  // ★ مش بنعمل renderLeaderboard() هنا — الـ Firebase listener هو اللي هيعمل الـ render
+  // بعد ما يستقبل البيانات المحدّثة من السيرفر (بعد ثانية تقريباً)
+  // بس لو مفيش listener شغال (offline) نعمل render يدوي بعد تأخير
+  setTimeout(() => {
+    if (typeof window.fbRenderLeaderboard === 'function') {
+      window.fbRenderLeaderboard();
+    } else if (typeof renderLeaderboard === 'function') {
+      renderLeaderboard();
+    }
+  }, 800);
 }
 function _cancelNameEdit() {
   const overlay = document.getElementById('_nameEditOverlay');
