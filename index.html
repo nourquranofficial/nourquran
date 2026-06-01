@@ -2288,10 +2288,22 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       window.currentUser.updatedAt = Math.max(window.currentUser.updatedAt || 0, ts);
     }
     // transaction: بنقارن الـtimestamp بس ★ دايمًا بناخد الأعلى في النقاط — النقاط مش بتنقص أبدًا
+    const nameTs = data.nameUpdatedAt || ts;
     runTransaction(entryRef, (cur) => {
-      if (cur && (cur.updatedAt || 0) > ts) return cur; // فيه أحدث منه — سيبه
+      // ★ الاسم دايماً يُحدَّث — حتى لو الـ updatedAt القديم أكبر
+      // بنقارن nameUpdatedAt بشكل منفصل عن updatedAt عشان تغيير الاسم يعدي دايماً
+      const curNameTs = (cur && cur.nameUpdatedAt) || 0;
+      const winningName = (curNameTs > nameTs)
+        ? ((cur && cur.name) || data.name || username)   // Firebase أحدث — سيبه
+        : (data.name || (cur && cur.name) || username);   // البيانات الجديدة أحدث — خذ الجديد
+
+      if (cur && (cur.updatedAt || 0) > ts) {
+        // النقاط القديمة أحدث — ارجع القديم بس مع الاسم الصح
+        return { ...cur, name: winningName, nameUpdatedAt: Math.max(curNameTs, nameTs) };
+      }
       return {
-        name:             data.name || (cur && cur.name) || username, // ★ الاسم للعرض وليس الإيميل
+        name:             winningName,
+        nameUpdatedAt:    Math.max(curNameTs, nameTs),
         // ★★ ناخد الأعلى بين القديم والجديد — مستحيل تنقص النقاط حتى لو حصل overwrite خطأ
         totalHasanat:     Math.max((cur && cur.totalHasanat) || 0, data.totalHasanat || 0),
         totalScore:       Math.max((cur && cur.totalScore)   || 0, data.totalScore   || 0),
@@ -2538,7 +2550,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         const mk = window._makeKey;
         const myEntry = Object.entries(data || {}).find(([k, d]) =>
           (mk && (k === mk(cu.username, false) || k === mk(cu.username, true))) ||
-          (d && d.name && d.name === cu.username)
+          (d && cu.name && d.name && d.name.trim().toLowerCase() === cu.name.trim().toLowerCase())
         );
         if (myEntry) {
           const e = myEntry[1] || {};
@@ -2596,7 +2608,8 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         if (key === window._makeKey(cu.username, cu.isGuest || false)) return true;
         if (key === window._makeKey(cu.username, false)) return true;
       }
-      return !!(d && d.name && cu.username && d.name === cu.username);
+      // ★ نقارن بالـ key بس — مش بالاسم عشان الاسم ممكن يتغيّر
+      return false;
     };
 
     window._lbTop3Data = top3.map(([key, d], i) =>
@@ -2657,7 +2670,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     const checkFn = isMyEntryFn || ((key, d) => {
       const mk1 = window._makeKey ? window._makeKey(cu.username, false) : cu.username;
       const mk2 = window._makeKey ? window._makeKey(cu.username, true)  : cu.username;
-      return key === mk1 || key === mk2 || (d && d.name === cu.username);
+      return key === mk1 || key === mk2 || (d && cu.name && d.name && d.name.trim().toLowerCase() === cu.name.trim().toLowerCase());
     });
 
     const myIdx = list.findIndex(([k, d]) => checkFn(k, d));
@@ -4334,12 +4347,14 @@ function _saveNameEdit() {
   saveCurrentUser();
 
   // ★ ٣. حفظ في Firebase في الخلفية
+  const _nameTs = Date.now();
   if (typeof window.fbSaveName === 'function') window.fbSaveName(_email, n);
   if (typeof window.fbSaveUser === 'function') window.fbSaveUser(_email, {
-    name: n, isGuest: false,
+    name: n, nameUpdatedAt: _nameTs, isGuest: false,
     totalHasanat: currentUser.totalHasanat||0,
     totalScore: currentUser.totalScore||0,
     totalGames: currentUser.totalGames||0,
+    updatedAt: _nameTs,
   });
   if (typeof renderLeaderboard === 'function') renderLeaderboard();
 }
@@ -8208,7 +8223,7 @@ function updateGlobalRankChip() {
 
   const idx = list.findIndex(([k, d]) =>
     (mk && (k === mk(cu.username, false) || k === mk(cu.username, true))) ||
-    (d && d.name && d.name === cu.username)
+    (d && cu.name && d.name && d.name.trim().toLowerCase() === cu.name.trim().toLowerCase())
   );
   if (idx < 0) { hide(); return; }
   const rank = idx + 1, total = list.length;
@@ -8286,7 +8301,7 @@ function openFullRank() {
     const cu = window.currentUser, mk = window._makeKey;
     const isMe = (k, d) => cu && (
       (mk && (k === mk(cu.username, false) || k === mk(cu.username, true))) ||
-      (d && d.name && d.name === cu.username)
+      (d && cu.name && d.name && d.name.trim().toLowerCase() === cu.name.trim().toLowerCase())
     );
     const medals = ['🥇', '🥈', '🥉'];
     body.innerHTML = list.map(([k, d], i) => {
