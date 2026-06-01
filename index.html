@@ -2265,13 +2265,22 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     if (isGuest && window.SHOW_GUESTS_IN_RANKING === false) return;
     // ★ للمسجّلين: مفتاح موحّد (lowercase) عشان نفس الشخص = صفّ واحد بس في اللوحة
     const key    = isGuest ? makeKey(username, true) : dataKey(username);
-    const oldKey = makeKey(username, isGuest); // المفتاح القديم الحسّاس للأحرف
     const entryRef = ref(db, LB_PATH + key);
-    if (oldKey !== key) remove(ref(db, LB_PATH + oldKey)).catch(() => {});
+
+    // ★★ مسح كل الإصدارات المحتملة للمفتاح — يمنع التكرار في الداتا بيز ★★
+    // بنولّد كل الأشكال الممكنة للمفتاح ونمسح أي واحد مختلف عن المفتاح الكانوني
+    const _possibleKeys = new Set();
     try {
-      const rawOld = (isGuest ? 'guest__' : '') + String(username).replace(/[\.\#\$\/\[\]]/g, '_');
-      if (rawOld !== key) remove(ref(db, LB_PATH + rawOld)).catch(() => {});
-    } catch (e) {}
+      _possibleKeys.add(makeKey(username, isGuest));                     // المفتاح القديم
+      _possibleKeys.add(makeKey(username, !isGuest));                    // نفسه بـ isGuest معكوس
+      _possibleKeys.add((isGuest ? 'guest__' : '') + String(username).replace(/[\.\#\$\/\[\]]/g, '_'));
+      _possibleKeys.add((isGuest ? 'guest__' : '') + String(username).replace(/[\.\#\$\/\[\]]/g, '_').toLowerCase());
+      _possibleKeys.add(String(username).toLowerCase().replace(/[\.\#\$\/\[\]\@]/g, '_'));
+      _possibleKeys.add('guest__' + String(username).toLowerCase().replace(/[\.\#\$\/\[\]\@]/g, '_'));
+    } catch (_) {}
+    _possibleKeys.forEach(k => {
+      if (k && k !== key) remove(ref(db, LB_PATH + k)).catch(() => {});
+    });
 
     const ts = data.updatedAt || Date.now();
     // خلّي currentUser.updatedAt يطابق آخر رفع (للمقارنة وقت القراءة)
@@ -2498,6 +2507,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     // ترتيب تنازلي حسب الحسنات (مع احترام مفتاح ظهور الضيوف)
     const _showGuests = window.SHOW_GUESTS_IN_RANKING !== false;
     // ★ dedup: لو نفس الاسم اتسجّل بمفتاحين مختلفين، نبقى بالأعلى نقاط بس
+    // ★★ وكمان نمسح التكرارات من Firebase نفسه تلقائياً — يمنع التكرار المستقبلي ★★
     const _seenNames = new Map();
     Object.entries(data || {})
       .filter(([k, d]) => d && d.name && (d.totalHasanat || 0) > 0 &&
@@ -2506,7 +2516,14 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         const nm = d.name.trim().toLowerCase();
         const existing = _seenNames.get(nm);
         if (!existing || (d.totalHasanat || 0) > (existing[1].totalHasanat || 0)) {
+          // لو فيه مفتاح مكرر قديم — امسحه من Firebase تلقائياً
+          if (existing) {
+            try { remove(ref(db, LB_PATH + existing[0])).catch(() => {}); } catch (_) {}
+          }
           _seenNames.set(nm, [k, d]);
+        } else {
+          // المفتاح الحالي أقل نقاطاً — امسحه من Firebase تلقائياً
+          try { remove(ref(db, LB_PATH + k)).catch(() => {}); } catch (_) {}
         }
       });
     const list = Array.from(_seenNames.values())
