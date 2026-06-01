@@ -1575,18 +1575,29 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   };
 
   // ★ حفظ الاسم في Firebase — مكانين للضمان
-  window.fbSaveName = function(username, name) {
+  window.fbSaveName = function(username, name, nameChangedAt) {
     if (!username || !name) return;
     const key = dataKey(username);
     const ts  = Date.now();
+    const _changedAt = nameChangedAt || ts;
     const _doWrite = () => Promise.all([
-      // ★ كتابة مباشرة على مسار الاسم — يـtrigger الـ onValue listener فوراً
       set(ref(db, 'leaderboard/' + key + '/name'), name).catch(() => {}),
       set(ref(db, 'leaderboard/' + key + '/nameUpdatedAt'), ts).catch(() => {}),
+      set(ref(db, 'leaderboard/' + key + '/nameChangedAt'), _changedAt).catch(() => {}),
       set(ref(db, 'users/' + key + '/name'), name).catch(() => {}),
+      set(ref(db, 'users/' + key + '/nameChangedAt'), _changedAt).catch(() => {}),
     ]);
     if (auth.currentUser) { _doWrite(); return; }
     signInAnonymously(auth).then(_doWrite).catch(() => { _doWrite().catch(() => {}); });
+  };
+
+  // ★ جيب الـ cooldown timestamp من Firebase
+  window.fbGetNameCooldown = function(username, cb) {
+    if (!username) { cb(0); return; }
+    const key = dataKey(username);
+    get(ref(db, 'users/' + key + '/nameChangedAt'))
+      .then(s => cb(s.exists() ? (s.val() || 0) : 0))
+      .catch(() => cb(0));
   };
   window.fbGetName = function(username, cb) {
     if (!username) { cb(null); return; }
@@ -2261,27 +2272,23 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   window.fbSaveUser = function(username, data) {
     if (!username) return;
     const isGuest = data.isGuest || false;
-    // ★ لو الضيوف متخفيين من الترتيب — مانكتبهمش في لوحة الشرف
     if (isGuest && window.SHOW_GUESTS_IN_RANKING === false) return;
-    // ★ للمسجّلين: مفتاح موحّد (lowercase) عشان نفس الشخص = صفّ واحد بس في اللوحة
     const key    = isGuest ? makeKey(username, true) : dataKey(username);
-    const oldKey = makeKey(username, isGuest); // المفتاح القديم الحسّاس للأحرف
+    const oldKey = makeKey(username, isGuest);
     const entryRef = ref(db, LB_PATH + key);
     if (oldKey !== key) remove(ref(db, LB_PATH + oldKey)).catch(() => {});
     try {
-      const rawOld = (isGuest ? 'guest__' : '') + String(username).replace(/[\.\#\$\/\[\]]/g, '_');
+      const rawOld = (isGuest ? 'guest__' : '') + String(username).replace(/[\.#$\/\[\]]/g, '_');
       if (rawOld !== key) remove(ref(db, LB_PATH + rawOld)).catch(() => {});
     } catch (e) {}
-    // ★★ الحل الجذري: لو الـ name مختلف عن الـ username (الإيميل) — امسح أي مفتاح
-    //    بيطابق الـ name (اسم العرض) عشان ما يتكرروش في لوحة الشرف
+    // ★ مسح مفتاح اسم العرض لو مختلف عن الإيميل
     try {
       const displayName = data.name || '';
       if (!isGuest && displayName && displayName !== username) {
-        const nameAsKey = dataKey(displayName);
-        if (nameAsKey !== key) remove(ref(db, LB_PATH + nameAsKey)).catch(() => {});
-        // نسخة بدون تحويل hex (ASCII عادي)
         const nameRaw = String(displayName).replace(/[\.#$\/\[\]@]/g, '_').toLowerCase();
         if (nameRaw !== key) remove(ref(db, LB_PATH + nameRaw)).catch(() => {});
+        const mkAlt = makeKey(displayName, false);
+        if (mkAlt !== key) remove(ref(db, LB_PATH + mkAlt)).catch(() => {});
       }
     } catch (e) {}
 
@@ -2305,24 +2312,20 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       };
     }).catch(e => console.error('fbSaveUser error:', e));
   };
-  // ★★ مسح مفتاح الاسم المكرر (لما الحساب كان محفوظ بالاسم بدل الإيميل)
+  // ★ مسح مفتاح الاسم المكرر من لوحة الشرف
   window.fbCleanDuplicateNameKey = function(email, displayName) {
     if (!email || !displayName || displayName === email) return;
     const emailKey = dataKey(email);
-    // مفتاح الاسم بالـ ASCII
-    const nameKeyRaw = String(displayName).replace(/[\.#$\/\[\]@]/g, '_').toLowerCase();
-    if (nameKeyRaw !== emailKey) remove(ref(db, LB_PATH + nameKeyRaw)).catch(() => {});
-    // مفتاح الاسم بالـ hex (لو عربي أو غير ASCII)
+    const nameRaw = String(displayName).replace(/[\.#$\/\[\]@]/g, '_').toLowerCase();
+    if (nameRaw !== emailKey) remove(ref(db, LB_PATH + nameRaw)).catch(() => {});
+    const mkAlt = makeKey(displayName, false);
+    if (mkAlt !== emailKey) remove(ref(db, LB_PATH + mkAlt)).catch(() => {});
     try {
       const bytes = new TextEncoder().encode(displayName.trim());
-      let hexOut = 'u';
-      for (let i = 0; i < bytes.length; i++) hexOut += bytes[i].toString(16).padStart(2, '0');
-      if (hexOut !== emailKey) remove(ref(db, LB_PATH + hexOut)).catch(() => {});
+      let hex = 'u';
+      for (let i = 0; i < bytes.length; i++) hex += bytes[i].toString(16).padStart(2, '0');
+      if (hex !== emailKey) remove(ref(db, LB_PATH + hex)).catch(() => {});
     } catch(e) {}
-    // مفتاح makeKey (بدون toLower)
-    const mkKey = makeKey(displayName, false);
-    if (mkKey !== emailKey) remove(ref(db, LB_PATH + mkKey)).catch(() => {});
-    console.log('🧹 تنظيف مفاتيح الاسم المكررة لـ', email, '→', displayName);
   };
 
   // رفع علامة مسح الغلطات فقط (من غير ما نلمس النقط) — تتوحّد عبر الأجهزة
@@ -2434,8 +2437,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     _lbUnsub = onValue(ref(db, LB_PATH), (snap) => {
       _lbOk = true; _lbRetry = 0;
       const data = snap.val() || {};
-
-      // ★ مسح تلقائي للمفاتيح المكررة (نفس الاسم بمفتاحين) — بيحصل مرة لما الـ Auth موجود
+      // ★ مسح تلقائي للمفاتيح المكررة (نفس الاسم بمفتاحين)
       try {
         if (auth.currentUser) {
           const _nameMap = new Map();
@@ -2448,14 +2450,10 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
           _nameMap.forEach((entries) => {
             if (entries.length <= 1) return;
             entries.sort((a, b) => b.hasanat - a.hasanat);
-            entries.slice(1).forEach(e => {
-              remove(ref(db, LB_PATH + e.key)).catch(() => {});
-              console.log('🧹 مسح مفتاح مكرر من لوحة الشرف:', e.key);
-            });
+            entries.slice(1).forEach(e => remove(ref(db, LB_PATH + e.key)).catch(() => {}));
           });
         }
       } catch (_e) {}
-
       window._renderLbFromData(data);
       console.log('🏆 لوحة الشرف اتحدثت — ' + Object.keys(data).length + ' لاعب');
     }, (err) => {
@@ -2551,7 +2549,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
 
     // ترتيب تنازلي حسب الحسنات (مع احترام مفتاح ظهور الضيوف)
     const _showGuests = window.SHOW_GUESTS_IN_RANKING !== false;
-    // ★ deduplication: لو نفس الاسم موجود بأكتر من مفتاح → ناخد الأعلى نقاطاً بس
+    // ★ deduplication: نفس الاسم بأكتر من مفتاح → ناخد الأعلى نقاطاً بس
     const _seenNames = new Map();
     Object.entries(data || {}).forEach(([k, d]) => {
       if (!d || !d.name || (d.totalHasanat || 0) <= 0) return;
@@ -4302,14 +4300,24 @@ function loginSuccess(username, data, isGuest=false) {
   currentUser = { username, isGuest, ...(data || {}) };
   window.currentUser = currentUser;
 
-  // ★★ تنظيف عند الـ login: لو الاسم مختلف عن الإيميل — امسح مفتاح الاسم من لوحة الشرف
-  // ده بيحل مشكلة التكرار نهائياً: نخلّي fbCleanDuplicateNameKey يعمل الشغل
-  if (!isGuest && data && data.name && data.name !== username) {
+  if (!isGuest) {
     setTimeout(() => {
-      if (typeof window.fbCleanDuplicateNameKey === 'function') {
+      // sync cooldown من Firebase
+      if (typeof window.fbGetNameCooldown === 'function') {
+        window.fbGetNameCooldown(username, (fbTs) => {
+          if (!fbTs) return;
+          let _localTs = 0;
+          try { _localTs = parseInt(localStorage.getItem('nour_name_changed_at_' + username) || '0', 10) || 0; } catch(e) {}
+          if (fbTs > _localTs) {
+            try { localStorage.setItem('nour_name_changed_at_' + username, String(fbTs)); } catch(e) {}
+          }
+        });
+      }
+      // مسح مفاتيح الاسم المكررة
+      if (data && data.name && data.name !== username && typeof window.fbCleanDuplicateNameKey === 'function') {
         window.fbCleanDuplicateNameKey(username, data.name);
       }
-    }, 1500);
+    }, 2000);
   }
 
   _finishLogin(username, isGuest);
@@ -4322,44 +4330,114 @@ window.showGame = showGame;
 function editDisplayName() {
   if (!currentUser) return;
   if (currentUser.isGuest) { showToast('🕊️ الضيوف ما يقدروش يغيّروا الاسم — سجّل حساب أولاً'); return; }
-  const cur = currentUser.name || '';
+  const _email = currentUser.username;
+  const _3DAYS = 2 * 60 * 1000; // ★ TEST: دقيقتين — غيّرها لـ 3*24*60*60*1000 بعد التجربة
 
-  // ★ popup بسيط بدل inline عشان ما يبوظش شكل الـ user-bar على الموبايل
-  let overlay = document.getElementById('_nameEditOverlay');
-  if (!overlay) {
+  function _openEditPopup(isFirstTime) {
+    let overlay = document.getElementById('_nameEditOverlay');
+    if (overlay) overlay.remove();
     overlay = document.createElement('div');
     overlay.id = '_nameEditOverlay';
     overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;padding:20px;';
+    const _warn = isFirstTime
+      ? '<div style="font-size:11px;color:rgba(245,217,139,0.45);margin-bottom:12px;line-height:1.7;">بعد الحفظ مش هتقدر تغيره إلا بعد <strong style="color:rgba(201,151,58,0.7);">٣ أيام</strong> \uD83D\uDCCC</div>'
+      : '';
     overlay.innerHTML =
       '<div style="background:linear-gradient(160deg,#1e1508,#12100a);border:1px solid rgba(201,151,58,0.4);border-radius:18px;padding:24px 20px;width:100%;max-width:320px;text-align:center;">' +
-        '<div style="font-size:14px;color:var(--gold);font-family:Cairo,sans-serif;font-weight:700;margin-bottom:14px;">✏️ تعديل الاسم</div>' +
+        '<div style="font-size:14px;color:var(--gold);font-family:Cairo,sans-serif;font-weight:700;margin-bottom:10px;">\u270F\uFE0F تعديل الاسم</div>' +
+        _warn +
         '<input id="_nameEditInput" type="text" maxlength="30" placeholder="اكتب اسمك هنا"' +
         ' style="width:100%;background:rgba(201,151,58,0.1);border:1.5px solid rgba(201,151,58,0.4);border-radius:12px;padding:10px 14px;font-family:Cairo,sans-serif;font-size:15px;color:var(--gold);direction:rtl;outline:none;text-align:right;box-sizing:border-box;">' +
         '<div style="display:flex;gap:8px;margin-top:12px;">' +
-          '<button onclick="_cancelNameEdit()" style="flex:1;padding:10px;background:rgba(255,254,249,0.05);border:1px solid rgba(201,151,58,0.2);border-radius:10px;color:rgba(245,217,139,0.5);font-family:Cairo,sans-serif;font-size:14px;cursor:pointer;">إلغاء</button>' +
-          '<button onclick="_saveNameEdit()" ontouchend="event.preventDefault();_saveNameEdit();" style="flex:2;padding:10px;background:linear-gradient(135deg,#C9973A,#E8C46A);border:none;border-radius:10px;font-family:Cairo,sans-serif;font-size:14px;font-weight:900;color:#1a1208;cursor:pointer;touch-action:manipulation;">حفظ ✓</button>' +
+          '<button onclick="_cancelNameEdit()" style="flex:1;padding:10px;background:rgba(255,254,249,0.05);border:1px solid rgba(201,151,58,0.2);border-radius:10px;color:rgba(245,217,139,0.5);font-family:Cairo,sans-serif;font-size:14px;cursor:pointer;">\u0625\u0644\u063A\u0627\u0621</button>' +
+          '<button onclick="_saveNameEdit()" ontouchend="event.preventDefault();_saveNameEdit();" style="flex:2;padding:10px;background:linear-gradient(135deg,#C9973A,#E8C46A);border:none;border-radius:10px;font-family:Cairo,sans-serif;font-size:14px;font-weight:900;color:#1a1208;cursor:pointer;touch-action:manipulation;">\u062D\u0641\u0638 \u2713</button>' +
         '</div>' +
       '</div>';
     document.body.appendChild(overlay);
+    overlay.style.display = 'flex';
+    overlay.onclick = (e) => { if (e.target === overlay) _cancelNameEdit(); };
+    const inp = document.getElementById('_nameEditInput');
+    if (inp) {
+      inp.value = currentUser.name || '';
+      setTimeout(() => { inp.focus(); inp.select(); }, 100);
+      inp.onkeydown = (ev) => { if (ev.key === 'Enter') _saveNameEdit(); if (ev.key === 'Escape') _cancelNameEdit(); };
+    }
   }
-  overlay.style.display = 'flex';
-  const inp = document.getElementById('_nameEditInput');
-  if (inp) {
-    inp.value = cur;
-    setTimeout(() => { inp.focus(); inp.select(); }, 100);
-    inp.onkeydown = (ev) => { if (ev.key === 'Enter') _saveNameEdit(); if (ev.key === 'Escape') _cancelNameEdit(); };
+
+  function _openCooldownPopup(timeStr) {
+    let cdOv = document.getElementById('_nameCooldownOverlay');
+    if (cdOv) cdOv.remove();
+    cdOv = document.createElement('div');
+    cdOv.id = '_nameCooldownOverlay';
+    cdOv.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.75);display:flex;align-items:center;justify-content:center;padding:20px;';
+    cdOv.innerHTML =
+      '<div style="background:linear-gradient(160deg,#1e1508,#12100a);border:1px solid rgba(192,57,43,0.5);border-radius:18px;padding:28px 22px;width:100%;max-width:320px;text-align:center;font-family:Cairo,sans-serif;">' +
+        '<div style="font-size:32px;margin-bottom:10px;">\u23F3</div>' +
+        '<div style="font-size:15px;color:#e87a6a;font-weight:900;margin-bottom:10px;">\u062A\u063A\u064A\u064A\u0631 \u0627\u0644\u0627\u0633\u0645 \u0645\u0634 \u0645\u062A\u0627\u062D \u062F\u0644\u0648\u0642\u062A\u064A</div>' +
+        '<div style="font-size:13px;color:rgba(245,217,139,0.6);line-height:1.8;margin-bottom:18px;">\u062A\u0642\u062F\u0631 \u062A\u063A\u064A\u0631 \u0627\u0633\u0645\u0643 \u0645\u0631\u0629 \u0643\u0644 <strong style="color:var(--gold);">\u0663 \u0623\u064A\u0627\u0645</strong> \u0639\u0634\u0627\u0646 \u0645\u0627 \u064A\u062D\u0635\u0644\u0634 \u0627\u0644\u062A\u0628\u0627\u0633 \u0641\u064A \u0627\u0644\u062A\u0631\u062A\u064A\u0628.<br><span style="color:rgba(245,217,139,0.4);">\u0647\u062A\u0642\u062F\u0631 \u062A\u063A\u064A\u0631\u0647 ' + timeStr + '</span></div>' +
+        '<button id="_cdCloseBtn" style="width:100%;padding:11px;background:linear-gradient(135deg,rgba(201,151,58,0.2),rgba(201,151,58,0.1));border:1px solid rgba(201,151,58,0.35);border-radius:12px;color:var(--gold);font-family:Cairo,sans-serif;font-size:14px;font-weight:700;cursor:pointer;">\u062D\u0633\u0646\u0627\u064B</button>' +
+      '</div>';
+    document.body.appendChild(cdOv);
+    cdOv.style.display = 'flex';
+    cdOv.onclick = (e) => { if (e.target === cdOv) cdOv.style.display = 'none'; };
+    const closeBtn = document.getElementById('_cdCloseBtn');
+    if (closeBtn) closeBtn.onclick = () => { cdOv.style.display = 'none'; };
   }
-  // إغلاق بالضغط على الخلفية
-  overlay.onclick = (e) => { if (e.target === overlay) _cancelNameEdit(); };
+
+  function _checkAndOpen(lastChange) {
+    const isFirstTime = (lastChange || 0) === 0;
+    const msSince = Date.now() - (lastChange || 0);
+    if (isFirstTime || msSince >= _3DAYS) {
+      _openEditPopup(isFirstTime);
+    } else {
+      const daysLeft  = Math.ceil((_3DAYS - msSince) / (24 * 60 * 60 * 1000));
+      const hoursLeft = Math.ceil((_3DAYS - msSince) / (60 * 60 * 1000));
+      const timeStr   = daysLeft > 1 ? '\u0628\u0639\u062F ' + daysLeft + ' \u0623\u064A\u0627\u0645'
+                      : hoursLeft > 1 ? '\u0628\u0639\u062F ' + hoursLeft + ' \u0633\u0627\u0639\u0629'
+                      : '\u0642\u0631\u064A\u0628\u0627\u064B';
+      _openCooldownPopup(timeStr);
+    }
+  }
+
+  // ١. اقرأ من localStorage فوراً
+  let _localTs = 0;
+  try { _localTs = parseInt(localStorage.getItem('nour_name_changed_at_' + _email) || '0', 10) || 0; } catch(e) {}
+  _checkAndOpen(_localTs);
+
+  // ٢. sync من Firebase في الخلفية — لو لقى أحدث يعيد الفتح
+  if (typeof window.fbGetNameCooldown === 'function') {
+    window.fbGetNameCooldown(_email, (fbTs) => {
+      if (!fbTs || fbTs <= _localTs) return;
+      try { localStorage.setItem('nour_name_changed_at_' + _email, String(fbTs)); } catch(e) {}
+      const msSinceFb = Date.now() - fbTs;
+      if (msSinceFb < _3DAYS) {
+        // كان مفروض يتحجب — اغلق الـ edit popup لو كان اتفتح وافتح التحذير
+        const _ep = document.getElementById('_nameEditOverlay');
+        if (_ep) _ep.style.display = 'none';
+        _checkAndOpen(fbTs);
+      }
+    });
+  }
 }
 function _saveNameEdit() {
   const inp = document.getElementById('_nameEditInput');
   if (!inp) return;
   const n = inp.value.trim();
-  if (!n || n.length < 2 || n.length > 30) { showToast('\u26a0\ufe0f الاسم لازم بين ٢ و٣٠ حرف'); return; }
+  if (!n || n.length < 2 || n.length > 30) { showToast('⚠️ الاسم لازم بين ٢ و٣٠ حرف'); return; }
   if (!currentUser || !currentUser.username) return;
 
   const _email = currentUser.username;
+
+  // ★ فحص تكرار الاسم — مش نفس الحساب
+  const _lbData = window._lbAllList || [];
+  const _mk = window._makeKey, _dk = window._dataKey;
+  const _myKey = _dk ? _dk(_email) : _email.toLowerCase();
+  const _nameTaken = _lbData.some(([k, d]) => {
+    if (!d || !d.name) return false;
+    if (d.name.trim().toLowerCase() !== n.toLowerCase()) return false;
+    return k !== _myKey && k !== (_mk ? _mk(_email, false) : _email);
+  });
+  if (_nameTaken) { showToast('❌ الاسم ده موجود بالفعل — اختار اسم تاني'); return; }
 
   // ★ ١. حدّث الـ UI فوراً (قبل أي حاجة)
   currentUser.name = n;
@@ -4369,19 +4447,22 @@ function _saveNameEdit() {
   _cancelNameEdit();
   showToast('\u2705 تم تغيير الاسم: ' + n);
 
-  // ★ ٢. حفظ في localStorage
+  // ★ ٢. حفظ في localStorage + cooldown timestamp
+  const _nameChangedAt = Date.now();
   try {
     localStorage.setItem('nour_name_' + _email, n);
-    localStorage.setItem('nour_name_ts_' + _email, String(Date.now()));
+    localStorage.setItem('nour_name_ts_' + _email, String(_nameChangedAt));
+    localStorage.setItem('nour_name_changed_at_' + _email, String(_nameChangedAt));
     const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
     if (!_lu[_email]) _lu[_email] = {};
     _lu[_email].name = n;
+    _lu[_email].nameChangedAt = _nameChangedAt;
     localStorage.setItem('nour_users', JSON.stringify(_lu));
   } catch(e) {}
   saveCurrentUser();
 
-  // ★ ٣. حفظ في Firebase في الخلفية
-  if (typeof window.fbSaveName === 'function') window.fbSaveName(_email, n);
+  // ★ ٣. حفظ في Firebase مع cooldown timestamp (يشتغل على كل الأجهزة)
+  if (typeof window.fbSaveName === 'function') window.fbSaveName(_email, n, _nameChangedAt);
   if (typeof window.fbSaveUser === 'function') window.fbSaveUser(_email, {
     name: n, isGuest: false,
     totalHasanat: currentUser.totalHasanat||0,
