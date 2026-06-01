@@ -3572,51 +3572,11 @@ function doGoogleSignIn() {
 window.doGoogleSignIn = doGoogleSignIn;
 
 // ============================================================
-// ★ Facebook Sign-In — Firebase v10 modular
+// ★ Facebook Sign-In — محتاج App ID من Facebook Developers
 // ============================================================
 function doFacebookSignIn() {
-  const btn = document.getElementById('facebookSignInBtn');
-  if (btn) { btn.disabled = true; btn.style.opacity = '0.7'; }
-  const restore = () => { if (btn) { btn.disabled = false; btn.style.opacity = '1'; } };
-
-  import('https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js').then(({ FacebookAuthProvider, signInWithPopup, getAuth }) => {
-    const _auth = window._firebaseAuth || getAuth();
-    const provider = new FacebookAuthProvider();
-
-    signInWithPopup(_auth, provider)
-      .then((result) => {
-        const fbUser = result.user;
-        const email  = (fbUser.email || '').trim().toLowerCase();
-        const name   = fbUser.displayName || (email ? email.split('@')[0] : 'مستخدم');
-        if (!email) { restore(); const err = document.getElementById('loginErr'); if(err) err.textContent = '⚠️ تأكد إن الإيميل مفعّل في حساب Facebook'; return; }
-
-        let users = {};
-        try { users = JSON.parse(localStorage.getItem('nour_users') || '{}'); } catch(e) {}
-        let userData = users[email] || (typeof createDefaultUserData === 'function' ? createDefaultUserData() : { level:0, score:0, streak:0 });
-        userData.name = name;
-        userData.email = email;
-        userData.username = email;
-        userData.isGuest = false;
-
-        try { users[email] = userData; localStorage.setItem('nour_users', JSON.stringify(users)); } catch(e) {}
-        if (typeof window.fbSaveUser === 'function') window.fbSaveUser(email, { ...userData, isGuest: false });
-        if (typeof window.fbSaveFullUserData === 'function') window.fbSaveFullUserData(email, userData);
-
-        const ls = document.getElementById('loginScreen');
-        if (ls) ls.classList.add('hide');
-        if (typeof loginSuccess === 'function') loginSuccess(email, userData);
-        restore();
-      })
-      .catch((e) => {
-        restore();
-        if (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request') return;
-        const err = document.getElementById('loginErr');
-        if (!err) return;
-        if (e.code === 'auth/unauthorized-domain') err.textContent = '⚠️ أضف الدومين في Firebase → Authorized domains';
-        else if (e.code === 'auth/operation-not-allowed') err.textContent = '⚠️ فعّل Facebook في Firebase → Sign-in method';
-        else err.textContent = 'خطأ: ' + (e.code || e.message);
-      });
-  });
+  const err = document.getElementById('loginErr');
+  if (err) { err.textContent = '⏳ Facebook قريباً — جاري الإعداد'; }
 }
 window.doFacebookSignIn = doFacebookSignIn;
 
