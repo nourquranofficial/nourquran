@@ -2437,15 +2437,24 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     _lbUnsub = onValue(ref(db, LB_PATH), (snap) => {
       _lbOk = true; _lbRetry = 0;
       const data = snap.val() || {};
-      // ★ مسح تلقائي للمفاتيح المكررة (نفس الاسم بمفتاحين)
+      // ★ مسح تلقائي للمفاتيح المكررة (نفس الاسم بمفتاحين أو إيميل + اسم عرض)
       try {
         if (auth.currentUser) {
           const _nameMap = new Map();
+          const _keyMap  = new Map(); // مفتاح مطبَّع → norm
           Object.entries(data).forEach(([k, d]) => {
             if (!d || !d.name) return;
-            const norm = String(d.name).trim().toLowerCase();
-            if (!_nameMap.has(norm)) _nameMap.set(norm, []);
-            _nameMap.get(norm).push({ key: k, hasanat: d.totalHasanat || 0 });
+            // تطبيع قوي متطابق مع _renderLbFromData
+            const norm    = String(d.name).trim().toLowerCase().replace(/[\s\.\@\_\-\#]/g, '');
+            const normKey = String(k).toLowerCase().replace(/^guest__/, '').replace(/[\s\.\@\_\-\#]/g, '');
+            // ربط المفتاح بالـ norm
+            let resolved = norm;
+            if (_keyMap.has(normKey)) resolved = _keyMap.get(normKey);
+            else if (_keyMap.has(norm)) resolved = _keyMap.get(norm);
+            _keyMap.set(normKey, resolved);
+            _keyMap.set(norm, resolved);
+            if (!_nameMap.has(resolved)) _nameMap.set(resolved, []);
+            _nameMap.get(resolved).push({ key: k, hasanat: d.totalHasanat || 0 });
           });
           _nameMap.forEach((entries) => {
             if (entries.length <= 1) return;
@@ -2550,14 +2559,32 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     // ترتيب تنازلي حسب الحسنات (مع احترام مفتاح ظهور الضيوف)
     const _showGuests = window.SHOW_GUESTS_IN_RANKING !== false;
     // ★ deduplication: نفس الاسم بأكتر من مفتاح → ناخد الأعلى نقاطاً بس
+    // ★★ تطبيع قوي: إزالة مسافات ورموز عشان نلاقي التكرارات حتى لو الاسم مختلف شوية
     const _seenNames = new Map();
+    // خريطة ثانية: مفتاح Firebase المطبَّع → normName (لربط الإيميل باسم العرض)
+    const _seenKeys = new Map();
     Object.entries(data || {}).forEach(([k, d]) => {
       if (!d || !d.name || (d.totalHasanat || 0) <= 0) return;
       if (!_showGuests && (d.isGuest || String(k).startsWith('guest__'))) return;
-      const normName = String(d.name).trim().toLowerCase();
-      const existing = _seenNames.get(normName);
-      if (!existing || (d.totalHasanat || 0) > (existing[1].totalHasanat || 0)) {
-        _seenNames.set(normName, [k, d]);
+      // تطبيع قوي: lowercase + إزالة مسافات ونقاط وشرطات و@ وأرقام وهاش
+      const normName = String(d.name).trim().toLowerCase().replace(/[\s\.\@\_\-\#]/g, '');
+      // تطبيع المفتاح بنفس الطريقة (يلاقي إيميل ≈ اسم عرض)
+      const normKey  = String(k).toLowerCase()
+        .replace(/^guest__/, '')
+        .replace(/[\s\.\@\_\-\#]/g, '');
+      // هل المفتاح المطبَّع مرتبط بـ normName موجود؟ → وحّدهم
+      let resolvedNorm = normName;
+      if (_seenKeys.has(normKey)) {
+        resolvedNorm = _seenKeys.get(normKey);
+      } else if (_seenKeys.has(normName)) {
+        resolvedNorm = _seenKeys.get(normName);
+      }
+      // سجّل الروابط
+      _seenKeys.set(normKey, resolvedNorm);
+      _seenKeys.set(normName, resolvedNorm);
+      const existing = _seenNames.get(resolvedNorm);
+      if (!existing || (d.totalHasanat || 0) >= (existing[1].totalHasanat || 0)) {
+        _seenNames.set(resolvedNorm, [k, d]);
       }
     });
     const list = Array.from(_seenNames.values())
