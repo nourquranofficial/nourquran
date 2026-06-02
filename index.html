@@ -2569,34 +2569,37 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         (_showGuests || (!d.isGuest && !String(k).startsWith('guest__'))))
       .sort(([, a], [, b]) => (b.totalHasanat || 0) - (a.totalHasanat || 0));
 
-    // ★ إزالة التكرار الشامل: بالاسم + بالـ key + بالـ canonical key (للمفاتيح المشفرة)
+    // ★ إزالة التكرار الشامل: بالـ canonical key (الأقوى) + بالاسم + بالـ key الحرفي
     // يمنع ظهور نفس الشخص أكتر من مرة بسبب: تغيير الاسم / مفاتيح قديمة / encoding مختلف
-    const _seenNames    = new Map(); // name.toLowerCase() → index في الـ list النهائية
-    const _seenKeys     = new Set(); // مفاتيح Firebase الحرفية
+    const _seenNames     = new Map(); // name.toLowerCase() → first key
+    const _seenKeys      = new Set(); // مفاتيح Firebase الحرفية
     const _seenCanonical = new Set(); // canonical keys (الإيميل المُرمَّز)
     const list = [];
     for (const [k, d] of _rawList) {
       if (_seenKeys.has(k)) continue; // مفتاح مكرر حرفياً
       _seenKeys.add(k);
 
-      // استخرج الـ canonical key لو أمكن (يشيل التكرار بسبب encoding مختلف)
-      const _ck = (window._dataKey && d && d.username) ? window._dataKey(d.username) :
-                  (window._dataKey && d && d.name && !d.isGuest) ? null : null;
+      // ★ canonical key: المفتاح الموحّد للإيميل (بصرف النظر عن الاسم)
+      // المفتاح نفسه هو الـ canonical لو مش مفتاح ضيف
+      const _ck = window._dataKey
+        ? (d && d.username ? window._dataKey(d.username) : (!d.isGuest && !k.startsWith('guest__') ? k : null))
+        : null;
       if (_ck) {
-        if (_seenCanonical.has(_ck)) continue; // نفس الحساب بمفتاح تاني
+        if (_seenCanonical.has(_ck)) {
+          // ★ نفس الحساب بمفتاح تاني (الاسم اتغيّر وفضل مدخل قديم) — امسحه من Firebase
+          if (typeof window._fbRemoveLeaderboardKey === 'function') window._fbRemoveLeaderboardKey(k);
+          continue;
+        }
         _seenCanonical.add(_ck);
       }
 
       const _normName = (d.name || '').trim().toLowerCase();
       if (_normName && _seenNames.has(_normName)) {
-        // نفس الاسم موجود بالفعل — ده تكرار بسبب مفتاح قديم أو تغيير الاسم
-        // امسح المدخل المكرر من Firebase في الخلفية (cleanup تلقائي)
-        if (typeof window._fbRemoveLeaderboardKey === 'function') {
-          window._fbRemoveLeaderboardKey(k);
-        }
+        // نفس الاسم — تكرار بسبب مفتاح قديم
+        if (typeof window._fbRemoveLeaderboardKey === 'function') window._fbRemoveLeaderboardKey(k);
         continue;
       }
-      if (_normName) _seenNames.set(_normName, list.length);
+      if (_normName) _seenNames.set(_normName, k);
       list.push([k, d]);
     }
 
@@ -4409,6 +4412,8 @@ function _saveNameEdit() {
   if (!currentUser || !currentUser.username) return;
 
   const _email = currentUser.username;
+  // ★ احفظ الاسم القديم قبل التغيير عشان نمسح مدخله من Firebase لو موجود
+  currentUser._prevName = currentUser.name || '';
 
   // ★ timestamp موحّد — نفس الرقم في localStorage وفي Firebase عشان الـ listener ما يرفضش التحديث
   const _nameTs = Date.now();
@@ -4450,33 +4455,37 @@ function _saveNameEdit() {
       if (!_canonKey) return;
       const _mk = window._makeKey;
 
-      // ١. مجموعة المفاتيح المحتملة لنفس الإيميل ده
+      // ★ جمّع كل المفاتيح المحتملة لنفس الإيميل ده
       const _possibleKeys = new Set();
       if (_mk) {
         _possibleKeys.add(_mk(_email, false));
         _possibleKeys.add(_mk(_email, true));
       }
-      // نسخة بدون encode عشان نلاقي المفاتيح القديمة جداً
       try { _possibleKeys.add(String(_email).replace(/[.#$\/\[\]@]/g,'_').toLowerCase()); } catch(e2) {}
-      // امسح كل المفاتيح المحتملة ما عدا المفتاح الصحيح
+
+      // ١. امسح المفاتيح المحتملة غير canonical من Firebase
       _possibleKeys.forEach(k => {
         if (k && k !== _canonKey) window._fbRemoveLeaderboardKey(k);
       });
 
-      // ٢. امسح أي مدخل في الـ leaderboard بالاسم القديم (قبل التعديل)
-      // نجيب البيانات الحالية ونشيل أي مفتاح اسمه بيساوي الاسم القديم (مش المفتاح الصحيح)
-      if (typeof window._lbAllList === 'undefined') return;
+      // ٢. امسح من Firebase + _lbAllList أي مدخل مفتاحه مختلف عن canonical
+      //    ده بيحل مشكلة ظهور الاسم القديم والجديد مع بعض
       const _allEntries = window._lbAllList || [];
-      const _newNameNorm = n.trim().toLowerCase();
+      const _oldNameNorm = (currentUser && currentUser._prevName ? currentUser._prevName : '').trim().toLowerCase();
       _allEntries.forEach(([entryKey, entryData]) => {
-        if (!entryData || !entryData.name) return;
+        if (!entryData) return;
         if (entryKey === _canonKey) return; // المفتاح الصحيح — لا تمسحه
-        // لو مفتاح غير صحيح وبيشاور على نفس الاسم الجديد أو الإيميل ده → امسحه
         const entryNameNorm = (entryData.name || '').trim().toLowerCase();
-        if (entryNameNorm === _newNameNorm || _possibleKeys.has(entryKey)) {
+        // امسح لو: المفتاح من مفاتيح الإيميل ده، أو الاسم هو الاسم القديم
+        if (_possibleKeys.has(entryKey) || (_oldNameNorm && entryNameNorm === _oldNameNorm)) {
           window._fbRemoveLeaderboardKey(entryKey);
         }
       });
+
+      // ٣. شيل التكرار من _lbAllList محلياً فوراً (بدون انتظار Firebase)
+      if (Array.isArray(window._lbAllList)) {
+        window._lbAllList = window._lbAllList.filter(([k]) => k === _canonKey || !_possibleKeys.has(k));
+      }
     } catch(e) {}
   })();
 
