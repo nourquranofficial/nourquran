@@ -2272,6 +2272,21 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       const rawOld = (isGuest ? 'guest__' : '') + String(username).replace(/[\.\#\$\/\[\]]/g, '_');
       if (rawOld !== key) remove(ref(db, LB_PATH + rawOld)).catch(() => {});
     } catch (e) {}
+    // ★ مسح إضافي: لو الاسم اتغيّر، امسح أي مدخل في اللوحة بالاسم الجديد ده (مفتاحه غير canonical)
+    // ده بيحل مشكلة ظهور الاسم مرتين لما بيتغيّر
+    if (!isGuest && data.name) {
+      const _newNameNorm = (data.name || '').trim().toLowerCase();
+      const _allList = window._lbAllList || [];
+      _allList.forEach(([ek]) => {
+        if (ek !== key && ek !== oldKey) {
+          // ممكن يكون مفتاح قديم — امسحه احتياطاً (Firebase transaction كفيل بالصح)
+          remove(ref(db, LB_PATH + ek)).catch(() => {});
+        }
+      });
+      // ★ مسح المفاتيح المبنية على الاسم القديم لو مختلف عن الإيميل
+      const _nameBasedKey = String(data.name).replace(/[\.\#\$\/\[\]\@\s]/g,'_').toLowerCase();
+      if (_nameBasedKey !== key) remove(ref(db, LB_PATH + _nameBasedKey)).catch(() => {});
+    }
 
     const ts = data.updatedAt || Date.now();
     // خلّي currentUser.updatedAt يطابق آخر رفع (للمقارنة وقت القراءة)
@@ -2380,6 +2395,12 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     }
     remove(ref(db, 'nour_lb/' + key)).catch(() => {});
     if (key !== keyAlt) remove(ref(db, 'nour_lb/' + keyAlt)).catch(() => {});
+  };
+
+  // ─── مساعد: مسح مفتاح واحد من leaderboard بـ key مباشر ───
+  window._fbRemoveLeaderboardKey = function(k) {
+    if (!k) return;
+    remove(ref(db, LB_PATH + k)).catch(() => {});
   };
 
   // ─── جلب يدوي فوري (للزرار ولأول تحميل) ───
@@ -2497,10 +2518,41 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
 
     // ترتيب تنازلي حسب الحسنات (مع احترام مفتاح ظهور الضيوف)
     const _showGuests = window.SHOW_GUESTS_IN_RANKING !== false;
-    const list = Object.entries(data || {})
+    const _rawList = Object.entries(data || {})
       .filter(([k, d]) => d && d.name && (d.totalHasanat || 0) > 0 &&
         (_showGuests || (!d.isGuest && !String(k).startsWith('guest__'))))
       .sort(([, a], [, b]) => (b.totalHasanat || 0) - (a.totalHasanat || 0));
+
+    // ★ إزالة التكرار الشامل: بالاسم + بالـ key + بالـ canonical key (للمفاتيح المشفرة)
+    // يمنع ظهور نفس الشخص أكتر من مرة بسبب: تغيير الاسم / مفاتيح قديمة / encoding مختلف
+    const _seenNames    = new Map(); // name.toLowerCase() → index في الـ list النهائية
+    const _seenKeys     = new Set(); // مفاتيح Firebase الحرفية
+    const _seenCanonical = new Set(); // canonical keys (الإيميل المُرمَّز)
+    const list = [];
+    for (const [k, d] of _rawList) {
+      if (_seenKeys.has(k)) continue; // مفتاح مكرر حرفياً
+      _seenKeys.add(k);
+
+      // استخرج الـ canonical key لو أمكن (يشيل التكرار بسبب encoding مختلف)
+      const _ck = (window._dataKey && d && d.username) ? window._dataKey(d.username) :
+                  (window._dataKey && d && d.name && !d.isGuest) ? null : null;
+      if (_ck) {
+        if (_seenCanonical.has(_ck)) continue; // نفس الحساب بمفتاح تاني
+        _seenCanonical.add(_ck);
+      }
+
+      const _normName = (d.name || '').trim().toLowerCase();
+      if (_normName && _seenNames.has(_normName)) {
+        // نفس الاسم موجود بالفعل — ده تكرار بسبب مفتاح قديم أو تغيير الاسم
+        // امسح المدخل المكرر من Firebase في الخلفية (cleanup تلقائي)
+        if (typeof window._fbRemoveLeaderboardKey === 'function') {
+          window._fbRemoveLeaderboardKey(k);
+        }
+        continue;
+      }
+      if (_normName) _seenNames.set(_normName, list.length);
+      list.push([k, d]);
+    }
 
     window._lbAllList = list;
 
@@ -4314,6 +4366,46 @@ function _saveNameEdit() {
     totalScore: currentUser.totalScore||0,
     totalGames: currentUser.totalGames||0,
   });
+
+  // ★ ٤. مسح المدخلات المكررة من Firebase — نشيل كل مفتاح مش Canon للإيميل ده
+  // وكمان نمسح أي مدخل بالاسم القديم لو اتغيّر
+  (function _cleanDuplicateKeys() {
+    try {
+      if (typeof window._fbRemoveLeaderboardKey !== 'function') return;
+      const _canonKey = window._dataKey ? window._dataKey(_email) : null;
+      if (!_canonKey) return;
+      const _mk = window._makeKey;
+
+      // ١. مجموعة المفاتيح المحتملة لنفس الإيميل ده
+      const _possibleKeys = new Set();
+      if (_mk) {
+        _possibleKeys.add(_mk(_email, false));
+        _possibleKeys.add(_mk(_email, true));
+      }
+      // نسخة بدون encode عشان نلاقي المفاتيح القديمة جداً
+      try { _possibleKeys.add(String(_email).replace(/[.#$\/\[\]@]/g,'_').toLowerCase()); } catch(e2) {}
+      // امسح كل المفاتيح المحتملة ما عدا المفتاح الصحيح
+      _possibleKeys.forEach(k => {
+        if (k && k !== _canonKey) window._fbRemoveLeaderboardKey(k);
+      });
+
+      // ٢. امسح أي مدخل في الـ leaderboard بالاسم القديم (قبل التعديل)
+      // نجيب البيانات الحالية ونشيل أي مفتاح اسمه بيساوي الاسم القديم (مش المفتاح الصحيح)
+      if (typeof window._lbAllList === 'undefined') return;
+      const _allEntries = window._lbAllList || [];
+      const _newNameNorm = n.trim().toLowerCase();
+      _allEntries.forEach(([entryKey, entryData]) => {
+        if (!entryData || !entryData.name) return;
+        if (entryKey === _canonKey) return; // المفتاح الصحيح — لا تمسحه
+        // لو مفتاح غير صحيح وبيشاور على نفس الاسم الجديد أو الإيميل ده → امسحه
+        const entryNameNorm = (entryData.name || '').trim().toLowerCase();
+        if (entryNameNorm === _newNameNorm || _possibleKeys.has(entryKey)) {
+          window._fbRemoveLeaderboardKey(entryKey);
+        }
+      });
+    } catch(e) {}
+  })();
+
   if (typeof renderLeaderboard === 'function') renderLeaderboard();
 }
 function _cancelNameEdit() {
