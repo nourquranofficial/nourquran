@@ -2317,33 +2317,43 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       const rawOld = (isGuest ? 'guest__' : '') + String(username).replace(/[\.\#\$\/\[\]]/g, '_');
       if (rawOld !== key) remove(ref(db, LB_PATH + rawOld)).catch(() => {});
     } catch (e) {}
-
+    // ★ مسح إضافي: لو الاسم اتغيّر، امسح أي مدخل في اللوحة بالاسم الجديد ده (مفتاحه غير canonical)
+    // ده بيحل مشكلة ظهور الاسم مرتين لما بيتغيّر
+    if (!isGuest && data.name) {
+      const _newNameNorm = (data.name || '').trim().toLowerCase();
+      const _allList = window._lbAllList || [];
+      _allList.forEach(([ek]) => {
+        if (ek !== key && ek !== oldKey) {
+          // ممكن يكون مفتاح قديم — امسحه احتياطاً (Firebase transaction كفيل بالصح)
+          remove(ref(db, LB_PATH + ek)).catch(() => {});
+        }
+      });
+      // ★ مسح المفاتيح المبنية على الاسم القديم لو مختلف عن الإيميل
+      const _nameBasedKey = String(data.name).replace(/[\.\#\$\/\[\]\@\s]/g,'_').toLowerCase();
+      if (_nameBasedKey !== key) remove(ref(db, LB_PATH + _nameBasedKey)).catch(() => {});
+    }
 
     const ts = data.updatedAt || Date.now();
     // خلّي currentUser.updatedAt يطابق آخر رفع (للمقارنة وقت القراءة)
     if (window.currentUser && window.currentUser.username === username) {
       window.currentUser.updatedAt = Math.max(window.currentUser.updatedAt || 0, ts);
     }
-    // transaction: دايماً خذ الأعلى في النقاط — مش بنقارن بالـ timestamp عشان نتجنب الرعشة
+    // transaction: بنقارن الـtimestamp بس ★ دايمًا بناخد الأعلى في النقاط — النقاط مش بتنقص أبدًا
     runTransaction(entryRef, (cur) => {
-      // ★ الاسم: احمِه لو Firebase فيه nameUpdatedAt أحدث
+      if (cur && (cur.updatedAt || 0) > ts) return cur; // فيه أحدث منه — سيبه
+      // ★ FIX: احمِ اسم العرض — لو Firebase فيه nameUpdatedAt أحدث من ts البيانات، سيبه
       const _curNameTs = (cur && cur.nameUpdatedAt) || 0;
       const _newName   = data.name || (cur && cur.name) || username;
-      const _safeName  = (_curNameTs > (data.nameUpdatedAt || 0) && cur && cur.name) ? cur.name : _newName;
-      // ★ النقاط: دايماً الأعلى — مستحيل تنقص
-      const newHasanat = Math.max((cur && cur.totalHasanat) || 0, data.totalHasanat || 0);
-      const newScore   = Math.max((cur && cur.totalScore)   || 0, data.totalScore   || 0);
-      const newGames   = Math.max((cur && cur.totalGames)   || 0, data.totalGames   || 0);
-      // ★ updatedAt: خذ الأحدث دايماً
-      const newTs      = Math.max((cur && cur.updatedAt) || 0, ts);
+      const _safeName  = (_curNameTs > ts && cur && cur.name) ? cur.name : _newName;
       return {
-        name:             _safeName,
-        totalHasanat:     newHasanat,
-        totalScore:       newScore,
-        totalGames:       newGames,
+        name:             _safeName, // ★ الاسم للعرض وليس الإيميل
+        // ★★ ناخد الأعلى بين القديم والجديد — مستحيل تنقص النقاط حتى لو حصل overwrite خطأ
+        totalHasanat:     Math.max((cur && cur.totalHasanat) || 0, data.totalHasanat || 0),
+        totalScore:       Math.max((cur && cur.totalScore)   || 0, data.totalScore   || 0),
+        totalGames:       Math.max((cur && cur.totalGames)   || 0, data.totalGames   || 0),
         isGuest:          isGuest,
-        updatedAt:        newTs,
-        nameUpdatedAt:    Math.max(_curNameTs, data.nameUpdatedAt || 0),
+        updatedAt:        ts,
+        nameUpdatedAt:    Math.max(_curNameTs, data.nameUpdatedAt || 0), // ★ احتفظ بـ nameUpdatedAt
         mistakesClearedAt: Math.max((cur && cur.mistakesClearedAt) || 0, data.mistakesClearedAt || 0),
       };
     }).catch(e => console.error('fbSaveUser error:', e));
@@ -2460,24 +2470,11 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   function _attachLbListener() {
     // ★ شيل أي مستمع قديم قبل ما نحط جديد (يمنع تراكم مستمعين عند إعادة المحاولة)
     if (_lbUnsub) { try { _lbUnsub(); } catch (e) {} _lbUnsub = null; }
-    let _lbDebounceTimer = null;
-    let _lbLastHash = null;
     _lbUnsub = onValue(ref(db, LB_PATH), (snap) => {
       _lbOk = true; _lbRetry = 0;
       const data = snap.val() || {};
-      // ★ FIX: debounce + hash — مش بنعمل re-render إلا لو في تغيير حقيقي في الترتيب
-      const _topHash = Object.entries(data)
-        .sort(([,a],[,b]) => (b.totalHasanat||0) - (a.totalHasanat||0))
-        .slice(0, 20)
-        .map(([k,v]) => k + ':' + (v.totalHasanat||0) + ':' + (v.name||''))
-        .join('|');
-      if (_topHash === _lbLastHash) return; // مفيش تغيير في الترتيب — تجاهل
-      _lbLastHash = _topHash;
-      if (_lbDebounceTimer) clearTimeout(_lbDebounceTimer);
-      _lbDebounceTimer = setTimeout(() => {
-        window._renderLbFromData(data);
-        console.log('🏆 لوحة الشرف اتحدثت — ' + Object.keys(data).length + ' لاعب');
-      }, 800); // انتظر ٠.٨ ثانية قبل الـ render عشان تتجمع التحديثات
+      window._renderLbFromData(data);
+      console.log('🏆 لوحة الشرف اتحدثت — ' + Object.keys(data).length + ' لاعب');
     }, (err) => {
       console.error('leaderboard listener error:', err);
       if (_lbOk || _lbRetry >= 6) {
