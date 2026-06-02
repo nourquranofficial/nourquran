@@ -1833,13 +1833,38 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     if (!username) return;
     const key = dataKey(username);
 
-    // جلب الـ 4 مسارات دفعة واحدة
+    // جلب الـ 5 مسارات دفعة واحدة (+ الاسم)
     Promise.all([
       get(ref(db, 'users/' + key + '/mistakes')),
       get(ref(db, 'users/' + key + '/revprog')),
       get(ref(db, 'users/' + key + '/surahprog')),
       get(ref(db, 'users/' + key + '/memorized')),
-    ]).then(([mistSnap, revSnap, surahSnap, memSnap]) => {
+      get(ref(db, 'users/' + key + '/name')),
+    ]).then(([mistSnap, revSnap, surahSnap, memSnap, nameSnap]) => {
+      // ── الاسم — sync فوري بين الأجهزة ──
+      if (nameSnap && nameSnap.exists()) {
+        const fbName = nameSnap.val();
+        if (fbName && typeof fbName === 'string' && !fbName.includes('@') && fbName.trim()) {
+          const localTs = (() => { try { return parseInt(localStorage.getItem('nour_name_ts_' + username) || '0', 10); } catch(e) { return 0; } })();
+          const cu = window.currentUser;
+          // اقبل الاسم من Firebase لو محلي مفيش أو قديم
+          if (cu && cu.username === username && cu.name !== fbName && localTs < Date.now() - 3000) {
+            cu.name = fbName;
+            window.currentUser = cu;
+            try {
+              localStorage.setItem('nour_name_' + username, fbName);
+              const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
+              if (!_lu[username]) _lu[username] = {};
+              _lu[username].name = fbName;
+              localStorage.setItem('nour_users', JSON.stringify(_lu));
+            } catch(e) {}
+            const _el = document.getElementById('userNameDisplay');
+            if (_el && !_el.querySelector('input')) {
+              _el.innerHTML = '👤 ' + fbName + ' <button onclick="event.stopPropagation();editDisplayName()" title="غيّر اسمك للعرض" style="background:none;border:none;font-size:13px;cursor:pointer;color:var(--gold);opacity:.7;padding:2px 4px;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">✏️</button>';
+            }
+          }
+        }
+      }
 
       // ── الغلطات ──
       if (mistSnap.exists()) {
@@ -4538,6 +4563,36 @@ function _finishLogin(username, isGuest) {
 
   // ★ sync كامل من Firebase عند الدخول (مسجلين فقط)
   if (!isGuest) {
+    // ★ جلب الاسم من Firebase فور الدخول — يضمن تحديث الاسم على كل الأجهزة
+    const _syncNameOnLogin = () => {
+      if (typeof window.fbGetName !== 'function') { setTimeout(_syncNameOnLogin, 500); return; }
+      window.fbGetName(username, (fbName) => {
+        if (!fbName || typeof fbName !== 'string' || fbName.includes('@') || !fbName.trim()) return;
+        const localTs = (() => { try { return parseInt(localStorage.getItem('nour_name_ts_' + username) || '0', 10); } catch(e) { return 0; } })();
+        const cur = window.currentUser;
+        if (!cur || cur.username !== username) return;
+        // لو المحلي أحدث بأكتر من ثانيتين → احتفظ بالمحلي (المستخدم غيّر الاسم للتو)
+        if (localTs > Date.now() - 2000 && cur.name && !cur.name.includes('@')) return;
+        if (cur.name === fbName) return; // نفس الاسم — مفيش حاجة
+        // ★ حدّث الاسم من Firebase
+        cur.name = fbName;
+        window.currentUser = cur;
+        try {
+          localStorage.setItem('nour_name_' + username, fbName);
+          const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
+          if (!_lu[username]) _lu[username] = {};
+          _lu[username].name = fbName;
+          localStorage.setItem('nour_users', JSON.stringify(_lu));
+        } catch(e) {}
+        // ★ حدّث الـ UI فوراً
+        const _nameEl = document.getElementById('userNameDisplay');
+        if (_nameEl && !_nameEl.querySelector('input')) {
+          _nameEl.innerHTML = '👤 ' + fbName + ' <button onclick="event.stopPropagation();editDisplayName()" title="غيّر اسمك للعرض" style="background:none;border:none;font-size:13px;cursor:pointer;color:var(--gold);opacity:.7;padding:2px 4px;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">✏️</button>';
+        }
+      });
+    };
+    setTimeout(_syncNameOnLogin, 600); // جلب الاسم بعد 600ms عشان Firebase Auth يكمل
+
     const _doSync = () => {
       if (typeof window.fbSyncAllUserData === 'function') {
         window.fbSyncAllUserData(username);
