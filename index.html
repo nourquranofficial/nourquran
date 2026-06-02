@@ -2294,6 +2294,25 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     }).catch(e => console.error('fbSaveUser error:', e));
   };
   // رفع علامة مسح الغلطات فقط (من غير ما نلمس النقط) — تتوحّد عبر الأجهزة
+  // ★ مسح التكرار: لو المستخدم غيّر اسمه، امسح الـ entry القديمة من الـ leaderboard
+  // بيمسح أي صف اسمه = الاسم القديم وليس مرتبط بنفس الإيميل
+  window._fbRemoveOldNameEntries = function(email, oldName) {
+    if (!oldName || !email) return;
+    const currentKey = dataKey(email);
+    // ★ بنحسب كل المفاتيح المحتملة للاسم القديم ونمسحهم مباشرة
+    // بدل مطابقة الاسم (اللي ممكن يمسح ناس تانيين بنفس الاسم)
+    const oldKeyAscii  = encodeKey(oldName);                    // ASCII key
+    const oldKeyHex    = 'u' + Array.from(new TextEncoder().encode(oldName)).map(b => b.toString(16).padStart(2,'0')).join(''); // hex key
+    const oldKeyLower  = oldName.trim().toLowerCase().replace(/[\.#$\/\[\]@]/g,'_'); // raw lowercase
+
+    const keysToRemove = [...new Set([oldKeyAscii, oldKeyHex, oldKeyLower])].filter(k => k && k !== currentKey);
+
+    keysToRemove.forEach(k => {
+      remove(ref(db, LB_PATH + k)).catch(() => {});
+      console.log('🧹 مسح مفتاح قديم من الـ leaderboard:', k);
+    });
+  };
+
   window.fbMarkMistakesCleared = function(username, isGuest) {
     if (!username) return;
     const key = isGuest ? makeKey(username, true) : dataKey(username);
@@ -4249,6 +4268,7 @@ function editDisplayName() {
   if (!currentUser) return;
   if (currentUser.isGuest) { showToast('🕊️ الضيوف ما يقدروش يغيّروا الاسم — سجّل حساب أولاً'); return; }
   const cur = currentUser.name || '';
+  window._editNameOldValue = cur; // ★ احتفظ بالاسم القديم لمسح التكرار
 
   // ★ popup بسيط بدل inline عشان ما يبوظش شكل الـ user-bar على الموبايل
   let overlay = document.getElementById('_nameEditOverlay');
@@ -4308,6 +4328,12 @@ function _saveNameEdit() {
 
   // ★ ٣. حفظ في Firebase في الخلفية
   if (typeof window.fbSaveName === 'function') window.fbSaveName(_email, n);
+
+  // ★ مسح التكرار: امسح أي entry قديمة بالاسم القديم من الـ leaderboard قبل الكتابة
+  if (typeof window._fbRemoveOldNameEntries === 'function') {
+    window._fbRemoveOldNameEntries(_email, window._editNameOldValue || '');
+  }
+
   if (typeof window.fbSaveUser === 'function') window.fbSaveUser(_email, {
     name: n, isGuest: false,
     totalHasanat: currentUser.totalHasanat||0,
