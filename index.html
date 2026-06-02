@@ -1584,6 +1584,8 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       set(ref(db, 'leaderboard/' + key + '/name'), name).catch(() => {}),
       set(ref(db, 'leaderboard/' + key + '/nameUpdatedAt'), ts).catch(() => {}),
       set(ref(db, 'users/' + key + '/name'), name).catch(() => {}),
+      // ★ FIX: حفظ nameUpdatedAt في users/ عشان المقارنة بالـ timestamp تشتغل صح عند الرجوع
+      set(ref(db, 'users/' + key + '/nameUpdatedAt'), ts).catch(() => {}),
     ]);
     if (auth.currentUser) { _doWrite(); return; }
     signInAnonymously(auth).then(_doWrite).catch(() => { _doWrite().catch(() => {}); });
@@ -1602,16 +1604,25 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     if (_nameUnsub) { _nameUnsub(); _nameUnsub = null; }
     if (!username) return;
     const key = dataKey(username);
-    _nameUnsub = onValue(ref(db, 'leaderboard/' + key + '/name'), (snap) => {
+    // ★ FIX: نستمع على المجلد كله عشان نجيب الاسم والـ timestamp مع بعض
+    _nameUnsub = onValue(ref(db, 'leaderboard/' + key), (snap) => {
       if (!snap.exists()) return;
-      const fbName = snap.val();
+      const data = snap.val() || {};
+      const fbName = data.name;
+      const fbTs   = data.nameUpdatedAt || 0;
       if (!fbName || typeof fbName !== 'string' || fbName.includes('@')) return;
       if (!window.currentUser || window.currentUser.username !== username) return;
       if (window.currentUser.name === fbName) return; // مفيش تغيير
+      // ★ FIX: لو المحلي أحدث من Firebase بأكتر من ثانيتين → احتفظ بالمحلي
+      const localTs = (() => { try { return parseInt(localStorage.getItem('nour_name_ts_' + username) || '0', 10); } catch(e) { return 0; } })();
+      if (localTs > fbTs + 2000) return;
       // ★ حدّث فوراً
       window.currentUser.name = fbName;
       currentUser = window.currentUser;
-      try { localStorage.setItem('nour_name_' + username, fbName); } catch(e) {}
+      try {
+        localStorage.setItem('nour_name_' + username, fbName);
+        if (fbTs) localStorage.setItem('nour_name_ts_' + username, String(fbTs));
+      } catch(e) {}
       const el = document.getElementById('userNameDisplay');
       if (el && !el.querySelector('input')) {
         el.innerHTML = '👤 ' + fbName + ' <button onclick="event.stopPropagation();editDisplayName()" title="غيّر اسمك للعرض" style="background:none;border:none;font-size:13px;cursor:pointer;color:var(--gold);opacity:.7;padding:2px 4px;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">✏️</button>';
@@ -2837,7 +2848,7 @@ function _callWhenReady(fn, args) {
       <div class="logo-title">نـور</div>
       <div class="logo-sub">تحدي حفظ القرآن الكريم</div>
       <div style="display:inline-block;margin-top:6px;padding:3px 12px;background:rgba(201,151,58,0.12);border:1px solid rgba(201,151,58,0.35);border-radius:20px;font-size:10px;color:rgba(245,217,139,0.7);letter-spacing:0.5px;">★ الموقع الرسمي الوحيد ★</div>
-      <div style="margin-top:6px;font-size:10px;color:rgba(245,217,139,0.4);">الصوت: الشيخ مشاري بن راشد العفاسي — جميع الحقوق محفوظة</div>
+      <div style="margin-top:6px;font-size:10px;color:rgba(245,217,139,0.55);">🔊 الصوت: الشيخ مشاري بن راشد العفاسي — مقدَّم من <a href="https://everyayah.com" target="_blank" rel="noopener" style="color:rgba(201,151,58,0.8);text-decoration:underline;">everyayah.com</a></div>
       <div style="margin-top:4px;font-size:10px;"><a href="privacy-policy.html" target="_blank" style="color:rgba(201,151,58,0.4);text-decoration:none;">سياسة الخصوصية</a></div>
     </div>
 
@@ -4269,7 +4280,13 @@ function loginSuccess(username, data, isGuest=false) {
       if (data.lastPlay) cu.lastPlay = data.lastPlay;
       if (data.password) cu.password = data.password;
       // ★ الاسم: خذ الاسم الجديد لو أحسن من الموجود
-      if (data.name && !data.name.includes('@') && data.name.trim()) cu.name = data.name.trim();
+      // ★ FIX: الاسم — خذ الجديد بس لو Firebase أحدث من المحلي
+      if (data.name && !data.name.includes('@') && data.name.trim()) {
+        const _localTs = (() => { try { return parseInt(localStorage.getItem('nour_name_ts_' + username) || '0', 10); } catch(e) { return 0; } })();
+        const _dataTs  = data.nameUpdatedAt || 0;
+        // لو مفيش اسم محلي أو Firebase أحدث → خذ من Firebase
+        if (!cu.name || !cu.name.trim() || _dataTs >= _localTs) cu.name = data.name.trim();
+      }
       const _lu = getUsers();
       if (_lu[username]) {
         _lu[username].totalScore   = cu.totalScore;
