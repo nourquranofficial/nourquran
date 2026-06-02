@@ -2318,19 +2318,15 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       if (rawOld !== key) remove(ref(db, LB_PATH + rawOld)).catch(() => {});
     } catch (e) {}
     // ★ مسح إضافي: لو الاسم اتغيّر، امسح أي مدخل في اللوحة بالاسم الجديد ده (مفتاحه غير canonical)
-    // ده بيحل مشكلة ظهور الاسم مرتين لما بيتغيّر
+    // ★ FIX: نمسح بس المفاتيح غير canonical للمستخدم ده نفسه — مش كل المفاتيح (ده كان بيمسح الضيوف)
     if (!isGuest && data.name) {
-      const _newNameNorm = (data.name || '').trim().toLowerCase();
-      const _allList = window._lbAllList || [];
-      _allList.forEach(([ek]) => {
-        if (ek !== key && ek !== oldKey) {
-          // ممكن يكون مفتاح قديم — امسحه احتياطاً (Firebase transaction كفيل بالصح)
-          remove(ref(db, LB_PATH + ek)).catch(() => {});
-        }
+      // ★ امسح بس المفاتيح المعروفة لنفس الإيميل ده (مش loop على كل اللاعبين)
+      const _possibleOwnKeys = new Set([oldKey, key]);
+      try { _possibleOwnKeys.add(String(username).replace(/[.#$\/\[\]@]/g,'_')); } catch(e) {}
+      try { _possibleOwnKeys.add(String(username).replace(/[.#$\/\[\]@]/g,'_').toLowerCase()); } catch(e) {}
+      _possibleOwnKeys.forEach(ek => {
+        if (ek && ek !== key) remove(ref(db, LB_PATH + ek)).catch(() => {});
       });
-      // ★ مسح المفاتيح المبنية على الاسم القديم لو مختلف عن الإيميل
-      const _nameBasedKey = String(data.name).replace(/[\.\#\$\/\[\]\@\s]/g,'_').toLowerCase();
-      if (_nameBasedKey !== key) remove(ref(db, LB_PATH + _nameBasedKey)).catch(() => {});
     }
 
     const ts = data.updatedAt || Date.now();
@@ -2344,7 +2340,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       // ★ FIX: احمِ اسم العرض — لو Firebase فيه nameUpdatedAt أحدث من ts البيانات، سيبه
       const _curNameTs = (cur && cur.nameUpdatedAt) || 0;
       const _newName   = data.name || (cur && cur.name) || username;
-      const _safeName  = (_curNameTs > ts && cur && cur.name) ? cur.name : _newName;
+      const _safeName  = (data.nameUpdatedAt && data.nameUpdatedAt >= _curNameTs) ? _newName : ((_curNameTs > ts && cur && cur.name) ? cur.name : _newName);
       return {
         name:             _safeName, // ★ الاسم للعرض وليس الإيميل
         // ★★ ناخد الأعلى بين القديم والجديد — مستحيل تنقص النقاط حتى لو حصل overwrite خطأ
@@ -4484,6 +4480,26 @@ function _saveNameEdit() {
     } catch(e) {}
   })();
 
+  // ★ FIX: حدّث الاسم في _lbAllList مباشرة بدون انتظار Firebase (الـ listener هيكمّل لوحده)
+  try {
+    if (Array.isArray(window._lbAllList) && currentUser && currentUser.username) {
+      const _myKey1 = window._makeKey ? window._makeKey(currentUser.username, false) : null;
+      const _myKey2 = window._makeKey ? window._makeKey(currentUser.username, true) : null;
+      window._lbAllList = window._lbAllList.map(([k, d]) => {
+        if (k === _myKey1 || k === _myKey2 || (d && d.name === currentUser.username)) {
+          return [k, { ...d, name: n }];
+        }
+        return [k, d];
+      });
+      if (typeof window._renderLbFromData === 'function' && window._lbAllList.length > 0) {
+        // أعد رسم اللوحة من الـ cache المحدّث
+        const _cacheData = {};
+        window._lbAllList.forEach(([k, d]) => { if (d) _cacheData[k] = d; });
+        window._renderLbFromData(_cacheData);
+      }
+    }
+  } catch(e) {}
+  // اجلب من Firebase كمان عشان يتزامن
   if (typeof renderLeaderboard === 'function') renderLeaderboard();
 }
 function _cancelNameEdit() {
