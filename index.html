@@ -1505,8 +1505,33 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     Promise.all([
       get(ref(db, 'users/' + key + '/profile')).then(s => s.exists() ? s.val() : null).catch(() => null),
       get(ref(db, 'users/' + key + '/data')).then(s => s.exists() ? s.val() : null).catch(() => null),
-    ]).then(([prof, data]) => {
-      cb((prof && prof.username) ? prof.username : username, data || null);
+      // ★ FIX: جيب اسم العرض الحقيقي من leaderboard (ده اللي بيتحفظ فيه editDisplayName)
+      get(ref(db, 'leaderboard/' + key + '/name')).then(s => s.exists() ? s.val() : null).catch(() => null),
+      get(ref(db, 'users/' + key + '/name')).then(s => s.exists() ? s.val() : null).catch(() => null),
+    ]).then(([prof, data, lbName, userPathName]) => {
+      // ★ أولوية الاسم: leaderboard/name → users/name → local cache → username
+      const _fbDisplayName = (lbName && typeof lbName === 'string' && !lbName.includes('@') && lbName.trim())
+        ? lbName.trim()
+        : (userPathName && typeof userPathName === 'string' && !userPathName.includes('@') && userPathName.trim())
+          ? userPathName.trim()
+          : null;
+      // ★ لو لقينا اسم عرض من Firebase — حدّث المحلي وحدّث الـ UI فوراً
+      if (_fbDisplayName) {
+        try {
+          localStorage.setItem('nour_name_' + username, _fbDisplayName);
+          const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
+          if (_lu[username]) { _lu[username].name = _fbDisplayName; localStorage.setItem('nour_users', JSON.stringify(_lu)); }
+        } catch(e) {}
+        if (window.currentUser && window.currentUser.username === username) {
+          window.currentUser.name = _fbDisplayName;
+          currentUser = window.currentUser;
+          const _el = document.getElementById('userNameDisplay');
+          if (_el && !_el.querySelector('input')) {
+            _el.innerHTML = '👤 ' + _fbDisplayName + ' <button onclick="event.stopPropagation();editDisplayName()" title="غيّر اسمك للعرض" style="background:none;border:none;font-size:13px;cursor:pointer;color:var(--gold);opacity:.7;padding:2px 4px;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">✏️</button>';
+          }
+        }
+      }
+      cb((prof && prof.username) ? prof.username : username, data ? { ...data, name: _fbDisplayName || (data && data.name) || '' } : null);
     }).catch(() => cb(username, null));
   };
 
@@ -1575,10 +1600,10 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   };
 
   // ★ حفظ الاسم في Firebase — مكانين للضمان
-  window.fbSaveName = function(username, name) {
+  window.fbSaveName = function(username, name, forcedTs) {
     if (!username || !name) return;
     const key = dataKey(username);
-    const ts  = Date.now();
+    const ts  = forcedTs || Date.now();
     const _doWrite = () => Promise.all([
       // ★ كتابة مباشرة على مسار الاسم — يـtrigger الـ onValue listener فوراً
       set(ref(db, 'leaderboard/' + key + '/name'), name).catch(() => {}),
@@ -1833,38 +1858,13 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     if (!username) return;
     const key = dataKey(username);
 
-    // جلب الـ 5 مسارات دفعة واحدة (+ الاسم)
+    // جلب الـ 4 مسارات دفعة واحدة
     Promise.all([
       get(ref(db, 'users/' + key + '/mistakes')),
       get(ref(db, 'users/' + key + '/revprog')),
       get(ref(db, 'users/' + key + '/surahprog')),
       get(ref(db, 'users/' + key + '/memorized')),
-      get(ref(db, 'users/' + key + '/name')),
-    ]).then(([mistSnap, revSnap, surahSnap, memSnap, nameSnap]) => {
-      // ── الاسم — sync فوري بين الأجهزة ──
-      if (nameSnap && nameSnap.exists()) {
-        const fbName = nameSnap.val();
-        if (fbName && typeof fbName === 'string' && !fbName.includes('@') && fbName.trim()) {
-          const localTs = (() => { try { return parseInt(localStorage.getItem('nour_name_ts_' + username) || '0', 10); } catch(e) { return 0; } })();
-          const cu = window.currentUser;
-          // اقبل الاسم من Firebase لو محلي مفيش أو قديم
-          if (cu && cu.username === username && cu.name !== fbName && localTs < Date.now() - 3000) {
-            cu.name = fbName;
-            window.currentUser = cu;
-            try {
-              localStorage.setItem('nour_name_' + username, fbName);
-              const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
-              if (!_lu[username]) _lu[username] = {};
-              _lu[username].name = fbName;
-              localStorage.setItem('nour_users', JSON.stringify(_lu));
-            } catch(e) {}
-            const _el = document.getElementById('userNameDisplay');
-            if (_el && !_el.querySelector('input')) {
-              _el.innerHTML = '👤 ' + fbName + ' <button onclick="event.stopPropagation();editDisplayName()" title="غيّر اسمك للعرض" style="background:none;border:none;font-size:13px;cursor:pointer;color:var(--gold);opacity:.7;padding:2px 4px;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">✏️</button>';
-            }
-          }
-        }
-      }
+    ]).then(([mistSnap, revSnap, surahSnap, memSnap]) => {
 
       // ── الغلطات ──
       if (mistSnap.exists()) {
@@ -2299,6 +2299,15 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     const isGuest = data.isGuest || false;
     // ★ لو الضيوف متخفيين من الترتيب — مانكتبهمش في لوحة الشرف
     if (isGuest && window.SHOW_GUESTS_IN_RANKING === false) return;
+    // ★ FIX: تأكيد إن الاسم المرفوع هو أحدث اسم من localStorage (مش الاسم القديم)
+    if (!isGuest && typeof window._getStoredName === 'function') {
+      const _lsName = window._getStoredName(username);
+      const _lsTs   = (() => { try { return parseInt(localStorage.getItem('nour_name_ts_' + username) || '0', 10); } catch(e) { return 0; } })();
+      const _datTs  = data.nameUpdatedAt || 0;
+      if (_lsName && !_lsName.includes('@') && _lsTs >= _datTs) {
+        data = { ...data, name: _lsName, nameUpdatedAt: _lsTs };
+      }
+    }
     // ★ للمسجّلين: مفتاح موحّد (lowercase) عشان نفس الشخص = صفّ واحد بس في اللوحة
     const key    = isGuest ? makeKey(username, true) : dataKey(username);
     const oldKey = makeKey(username, isGuest); // المفتاح القديم الحسّاس للأحرف
@@ -2332,14 +2341,19 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     // transaction: بنقارن الـtimestamp بس ★ دايمًا بناخد الأعلى في النقاط — النقاط مش بتنقص أبدًا
     runTransaction(entryRef, (cur) => {
       if (cur && (cur.updatedAt || 0) > ts) return cur; // فيه أحدث منه — سيبه
+      // ★ FIX: احمِ اسم العرض — لو Firebase فيه nameUpdatedAt أحدث من ts البيانات، سيبه
+      const _curNameTs = (cur && cur.nameUpdatedAt) || 0;
+      const _newName   = data.name || (cur && cur.name) || username;
+      const _safeName  = (_curNameTs > ts && cur && cur.name) ? cur.name : _newName;
       return {
-        name:             data.name || (cur && cur.name) || username, // ★ الاسم للعرض وليس الإيميل
+        name:             _safeName, // ★ الاسم للعرض وليس الإيميل
         // ★★ ناخد الأعلى بين القديم والجديد — مستحيل تنقص النقاط حتى لو حصل overwrite خطأ
         totalHasanat:     Math.max((cur && cur.totalHasanat) || 0, data.totalHasanat || 0),
         totalScore:       Math.max((cur && cur.totalScore)   || 0, data.totalScore   || 0),
         totalGames:       Math.max((cur && cur.totalGames)   || 0, data.totalGames   || 0),
         isGuest:          isGuest,
         updatedAt:        ts,
+        nameUpdatedAt:    Math.max(_curNameTs, data.nameUpdatedAt || 0), // ★ احتفظ بـ nameUpdatedAt
         mistakesClearedAt: Math.max((cur && cur.mistakesClearedAt) || 0, data.mistakesClearedAt || 0),
       };
     }).catch(e => console.error('fbSaveUser error:', e));
@@ -3511,6 +3525,12 @@ let currentUser = null;
 // ─── دخول تلقائي فوري لو في مستخدم محفوظ ───────────────────
 (function attemptAutoLogin() {
   try {
+    // ★ FIX: لو المستخدم عمل logout للتو — ما نعملش auto-login ونمسح العلامة
+    if (sessionStorage.getItem('nour_did_logout') === '1') {
+      sessionStorage.removeItem('nour_did_logout');
+      localStorage.removeItem('nour_last_user'); // تأكيد إضافي
+      return;
+    }
     const lastUser = localStorage.getItem('nour_last_user');
     if (!lastUser) return;
     const users = JSON.parse(localStorage.getItem('nour_users') || '{}');
@@ -3771,14 +3791,20 @@ function doLogin() {
           }
         };
         // ★ ادخل فوراً بالبيانات المحلية — الـ Firebase data تيجي في الخلفية
-        _finishFresh(users[user] ? (users[user].name || user) : user, users[user] || localData, null);
+        // ★ FIX: أولوية الاسم: nour_name_ المباشر → nour_users.name → username (مش الـ email)
+        const _storedNameOnLogin = (typeof window._getStoredName === 'function') ? window._getStoredName(user) : null;
+        const _initialName = (_storedNameOnLogin && !_storedNameOnLogin.includes('@')) ? _storedNameOnLogin
+          : (users[user] && users[user].name && !users[user].name.includes('@')) ? users[user].name
+          : null; // لو ما فيش اسم محفوظ، سيبه فاضي وFirebase هيجيبه
+        _finishFresh(_initialName || user, users[user] || localData, null);
 
-        // ★ جيب بيانات Firebase في الخلفية وحدّث لو فيه فرق
+        // ★ جيب اسم العرض الحقيقي من Firebase في الخلفية وحدّث الـ UI فوراً
         if (typeof window.fbGetAccount === 'function') {
           window.fbGetAccount(user, (realName, fbData) => {
             if (fbData && window.currentUser && window.currentUser.username === user) {
               if (typeof window.fbSaveUser === 'function') window.fbSaveUser(user, { ...fbData, isGuest: false });
             }
+            // ★ FIX: fbGetAccount دلوقتي بيحدّث الـ UI من الـ leaderboard تلقائياً
           });
         }
       },
@@ -4310,7 +4336,7 @@ function loginSuccess(username, data, isGuest=false) {
         const _localTs = (() => { try { return parseInt(localStorage.getItem('nour_name_ts_' + username) || '0', 10); } catch(e) { return 0; } })();
         const _dataTs  = data.nameUpdatedAt || 0;
         // لو مفيش اسم محلي أو Firebase أحدث → خذ من Firebase
-        if (!cu.name || !cu.name.trim() || _dataTs >= _localTs) cu.name = data.name.trim();
+        if (!cu.name || !cu.name.trim() || _dataTs > _localTs) cu.name = data.name.trim();
       }
       const _lu = getUsers();
       if (_lu[username]) {
@@ -4331,6 +4357,13 @@ function loginSuccess(username, data, isGuest=false) {
   if (window.currentUser && window.currentUser.username !== username
       && !window.currentUser._pendingVerify && !window._registering) return;
   currentUser = { username, isGuest, ...(data || {}) };
+  // ★ FIX: أولوية اسم العرض — localStorage دايماً أحدث من Firebase لو اتغيّر محلياً
+  const _freshLocalName = (typeof window._getStoredName === 'function') ? window._getStoredName(username) : null;
+  const _freshLocalTs   = (() => { try { return parseInt(localStorage.getItem('nour_name_ts_' + username) || '0', 10); } catch(e) { return 0; } })();
+  const _freshDataTs    = (data && data.nameUpdatedAt) || 0;
+  if (_freshLocalName && !_freshLocalName.includes('@') && _freshLocalTs >= _freshDataTs) {
+    currentUser.name = _freshLocalName;
+  }
   window.currentUser = currentUser;
   _finishLogin(username, isGuest);
 }
@@ -4381,6 +4414,9 @@ function _saveNameEdit() {
 
   const _email = currentUser.username;
 
+  // ★ timestamp موحّد — نفس الرقم في localStorage وفي Firebase عشان الـ listener ما يرفضش التحديث
+  const _nameTs = Date.now();
+
   // ★ ١. حدّث الـ UI فوراً (قبل أي حاجة)
   currentUser.name = n;
   window.currentUser = currentUser;
@@ -4389,10 +4425,10 @@ function _saveNameEdit() {
   _cancelNameEdit();
   showToast('\u2705 تم تغيير الاسم: ' + n);
 
-  // ★ ٢. حفظ في localStorage
+  // ★ ٢. حفظ في localStorage بنفس الـ timestamp اللي هيتبعت لـ Firebase
   try {
     localStorage.setItem('nour_name_' + _email, n);
-    localStorage.setItem('nour_name_ts_' + _email, String(Date.now()));
+    localStorage.setItem('nour_name_ts_' + _email, String(_nameTs));
     const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
     if (!_lu[_email]) _lu[_email] = {};
     _lu[_email].name = n;
@@ -4400,8 +4436,8 @@ function _saveNameEdit() {
   } catch(e) {}
   saveCurrentUser();
 
-  // ★ ٣. حفظ في Firebase في الخلفية
-  if (typeof window.fbSaveName === 'function') window.fbSaveName(_email, n);
+  // ★ ٣. حفظ في Firebase في الخلفية بنفس الـ timestamp
+  if (typeof window.fbSaveName === 'function') window.fbSaveName(_email, n, _nameTs);
   if (typeof window.fbSaveUser === 'function') window.fbSaveUser(_email, {
     name: n, isGuest: false,
     totalHasanat: currentUser.totalHasanat||0,
@@ -4503,6 +4539,9 @@ window.doDeleteAccount = doDeleteAccount;
 
 
 function _finishLogin(username, isGuest) {
+  // ★ FIX: امسح الاسم القديم فوراً قبل أي حاجة تانية — يمنع ظهور اسم يوزر قديم
+  const _elClear = document.getElementById('userNameDisplay');
+  if (_elClear) _elClear.innerHTML = '👤 ...';
   // ★ إخفاء loginScreen بكل الطرق
   const _lsEl = document.getElementById('loginScreen');
   if (_lsEl) {
@@ -4563,36 +4602,6 @@ function _finishLogin(username, isGuest) {
 
   // ★ sync كامل من Firebase عند الدخول (مسجلين فقط)
   if (!isGuest) {
-    // ★ جلب الاسم من Firebase فور الدخول — يضمن تحديث الاسم على كل الأجهزة
-    const _syncNameOnLogin = () => {
-      if (typeof window.fbGetName !== 'function') { setTimeout(_syncNameOnLogin, 500); return; }
-      window.fbGetName(username, (fbName) => {
-        if (!fbName || typeof fbName !== 'string' || fbName.includes('@') || !fbName.trim()) return;
-        const localTs = (() => { try { return parseInt(localStorage.getItem('nour_name_ts_' + username) || '0', 10); } catch(e) { return 0; } })();
-        const cur = window.currentUser;
-        if (!cur || cur.username !== username) return;
-        // لو المحلي أحدث بأكتر من ثانيتين → احتفظ بالمحلي (المستخدم غيّر الاسم للتو)
-        if (localTs > Date.now() - 2000 && cur.name && !cur.name.includes('@')) return;
-        if (cur.name === fbName) return; // نفس الاسم — مفيش حاجة
-        // ★ حدّث الاسم من Firebase
-        cur.name = fbName;
-        window.currentUser = cur;
-        try {
-          localStorage.setItem('nour_name_' + username, fbName);
-          const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
-          if (!_lu[username]) _lu[username] = {};
-          _lu[username].name = fbName;
-          localStorage.setItem('nour_users', JSON.stringify(_lu));
-        } catch(e) {}
-        // ★ حدّث الـ UI فوراً
-        const _nameEl = document.getElementById('userNameDisplay');
-        if (_nameEl && !_nameEl.querySelector('input')) {
-          _nameEl.innerHTML = '👤 ' + fbName + ' <button onclick="event.stopPropagation();editDisplayName()" title="غيّر اسمك للعرض" style="background:none;border:none;font-size:13px;cursor:pointer;color:var(--gold);opacity:.7;padding:2px 4px;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">✏️</button>';
-        }
-      });
-    };
-    setTimeout(_syncNameOnLogin, 600); // جلب الاسم بعد 600ms عشان Firebase Auth يكمل
-
     const _doSync = () => {
       if (typeof window.fbSyncAllUserData === 'function') {
         window.fbSyncAllUserData(username);
@@ -4635,7 +4644,9 @@ function doLogout() {
   window.currentUser = null;
   window._pendingAutoLogin = null;
   window._lbAllList = null;
+  // ★ FIX: امسح nour_last_user وضع علامة في sessionStorage تمنع auto-login بعد الـ reload
   try { localStorage.removeItem('nour_last_user'); } catch(e) {}
+  try { sessionStorage.setItem('nour_did_logout', '1'); } catch(e) {}
   if (typeof window.fbLogout === 'function') window.fbLogout();
   // ★ reload بعد الخروج — أبسط وأضمن حل لمشكلة الـ state
   setTimeout(() => { location.reload(); }, 100);
