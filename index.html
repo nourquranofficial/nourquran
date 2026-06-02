@@ -2317,20 +2317,12 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       const rawOld = (isGuest ? 'guest__' : '') + String(username).replace(/[\.\#\$\/\[\]]/g, '_');
       if (rawOld !== key) remove(ref(db, LB_PATH + rawOld)).catch(() => {});
     } catch (e) {}
-    // ★ مسح إضافي: لو الاسم اتغيّر، امسح أي مدخل في اللوحة بالاسم الجديد ده (مفتاحه غير canonical)
-    // ده بيحل مشكلة ظهور الاسم مرتين لما بيتغيّر
+    // ★ مسح مفاتيح قديمة لنفس المستخدم فقط — لا نمسح اللاعبين التانيين!
     if (!isGuest && data.name) {
-      const _newNameNorm = (data.name || '').trim().toLowerCase();
-      const _allList = window._lbAllList || [];
-      _allList.forEach(([ek]) => {
-        if (ek !== key && ek !== oldKey) {
-          // ممكن يكون مفتاح قديم — امسحه احتياطاً (Firebase transaction كفيل بالصح)
-          remove(ref(db, LB_PATH + ek)).catch(() => {});
-        }
-      });
-      // ★ مسح المفاتيح المبنية على الاسم القديم لو مختلف عن الإيميل
       const _nameBasedKey = String(data.name).replace(/[\.\#\$\/\[\]\@\s]/g,'_').toLowerCase();
-      if (_nameBasedKey !== key) remove(ref(db, LB_PATH + _nameBasedKey)).catch(() => {});
+      if (_nameBasedKey !== key && _nameBasedKey !== oldKey) {
+        remove(ref(db, LB_PATH + _nameBasedKey)).catch(() => {});
+      }
     }
 
     const ts = data.updatedAt || Date.now();
@@ -2613,7 +2605,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         const mk = window._makeKey;
         const myEntry = Object.entries(data || {}).find(([k, d]) =>
           (mk && (k === mk(cu.username, false) || k === mk(cu.username, true))) ||
-          (d && d.name && d.name === cu.username)
+          (d && d.name && (cu.name && !cu.name.includes('@') ? cu.name : cu.username) && d.name === (cu.name && !cu.name.includes('@') ? cu.name : cu.username))
         );
         if (myEntry) {
           const e = myEntry[1] || {};
@@ -2671,9 +2663,9 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         if (key === window._makeKey(cu.username, cu.isGuest || false)) return true;
         if (key === window._makeKey(cu.username, false)) return true;
       }
-      // ★ FIX: قارن بـ cu.name (اسم العرض) مش cu.username (الإيميل)
-      const myDisplayName = cu.name || cu.username || '';
-      return !!(d && d.name && myDisplayName && d.name === myDisplayName);
+      // ★ FIX: قارن باسم العرض (name) مش الإيميل (username)
+      const _myN = (cu.name && !cu.name.includes('@')) ? cu.name : cu.username;
+      return !!(d && d.name && _myN && d.name === _myN);
     };
 
     window._lbTop3Data = top3.map(([key, d], i) =>
@@ -4706,12 +4698,13 @@ function saveCurrentUser() {
 
   // رفع على Leaderboard — كل المستخدمين (مسجلين وضيوف) بشرط وجود نقاط
   if (typeof window.fbSaveUser === 'function' && (currentUser.totalScore || 0) > 0) {
+    const _lbName = (currentUser.name && !currentUser.name.includes('@')) ? currentUser.name : currentUser.username;
     window.fbSaveUser(currentUser.username, {
       totalHasanat: currentUser.totalHasanat,
       totalScore:   currentUser.totalScore,
       totalGames:   currentUser.totalGames,
       isGuest:      currentUser.isGuest || false,
-      name:         currentUser.name || currentUser.username, // ★ FIX: دايماً ابعت الاسم
+      name:         _lbName, // ★ FIX: دايماً ابعت الاسم عشان الضيوف يظهروا
     });
   }
 }
@@ -8357,9 +8350,10 @@ function updateGlobalRankChip() {
   if (!cu || !Array.isArray(list) || list.length === 0) { hide(); return; }
   const mk = window._makeKey;
 
+  const _cuDispName = (cu.name && !cu.name.includes('@')) ? cu.name : cu.username;
   const idx = list.findIndex(([k, d]) =>
     (mk && (k === mk(cu.username, false) || k === mk(cu.username, true))) ||
-    (d && d.name && (cu.name || cu.username) && d.name === (cu.name || cu.username))
+    (d && d.name && _cuDispName && d.name === _cuDispName)
   );
   if (idx < 0) { hide(); return; }
   const rank = idx + 1, total = list.length;
@@ -8435,9 +8429,10 @@ function openFullRank() {
     body.innerHTML = '<div style="text-align:center;color:rgba(245,217,139,0.4);padding:34px 16px;font-size:13px;">لسه مفيش لاعبين سجّلوا نقاط 🌱</div>';
   } else {
     const cu = window.currentUser, mk = window._makeKey;
+    const _cuN = cu ? ((cu.name && !cu.name.includes('@')) ? cu.name : cu.username) : '';
     const isMe = (k, d) => cu && (
       (mk && (k === mk(cu.username, false) || k === mk(cu.username, true))) ||
-      (d && d.name && (cu.name || cu.username) && d.name === (cu.name || cu.username))
+      (d && d.name && _cuN && d.name === _cuN)
     );
     const medals = ['🥇', '🥈', '🥉'];
     body.innerHTML = list.map(([k, d], i) => {
