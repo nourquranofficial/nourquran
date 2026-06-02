@@ -2671,7 +2671,9 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         if (key === window._makeKey(cu.username, cu.isGuest || false)) return true;
         if (key === window._makeKey(cu.username, false)) return true;
       }
-      return !!(d && d.name && cu.username && d.name === cu.username);
+      // ★ FIX: قارن بـ cu.name (اسم العرض) مش cu.username (الإيميل)
+      const myDisplayName = cu.name || cu.username || '';
+      return !!(d && d.name && myDisplayName && d.name === myDisplayName);
     };
 
     window._lbTop3Data = top3.map(([key, d], i) =>
@@ -4709,6 +4711,7 @@ function saveCurrentUser() {
       totalScore:   currentUser.totalScore,
       totalGames:   currentUser.totalGames,
       isGuest:      currentUser.isGuest || false,
+      name:         currentUser.name || currentUser.username, // ★ FIX: دايماً ابعت الاسم
     });
   }
 }
@@ -8356,7 +8359,7 @@ function updateGlobalRankChip() {
 
   const idx = list.findIndex(([k, d]) =>
     (mk && (k === mk(cu.username, false) || k === mk(cu.username, true))) ||
-    (d && d.name && d.name === cu.username)
+    (d && d.name && (cu.name || cu.username) && d.name === (cu.name || cu.username))
   );
   if (idx < 0) { hide(); return; }
   const rank = idx + 1, total = list.length;
@@ -8434,7 +8437,7 @@ function openFullRank() {
     const cu = window.currentUser, mk = window._makeKey;
     const isMe = (k, d) => cu && (
       (mk && (k === mk(cu.username, false) || k === mk(cu.username, true))) ||
-      (d && d.name && d.name === cu.username)
+      (d && d.name && (cu.name || cu.username) && d.name === (cu.name || cu.username))
     );
     const medals = ['🥇', '🥈', '🥉'];
     body.innerHTML = list.map(([k, d], i) => {
