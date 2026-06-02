@@ -2111,27 +2111,6 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
             if (typeof window.fbSaveFullUserData === 'function') window.fbSaveFullUserData(realUsername, merged);
             if (typeof window.fbSaveUser === 'function') window.fbSaveUser(realUsername, Object.assign({}, merged, {isGuest: !!(merged && merged.isGuest)}));
           } catch(e) {}
-          // ★★ one-time cleanup: امسح أي مدخل قديم في leaderboard
-          // عنده نفس الاسم بس مفتاحه مختلف (مشكلة "Salamino" vs مفتاح الإيميل)
-          try {
-            const _myCanonicalKey = window._dataKey ? window._dataKey(realUsername) : null;
-            const _myDisplayName  = (merged.name || '').trim().toLowerCase();
-            if (_myCanonicalKey && _myDisplayName) {
-              get(ref(db, LB_PATH)).then(snap => {
-                if (!snap.exists()) return;
-                Object.entries(snap.val() || {}).forEach(([k, d]) => {
-                  if (!d || !d.name) return;
-                  if (k === _myCanonicalKey) return; // ده مدخلي الصح — ماتلمسوش
-                  if (String(k).startsWith('guest__')) return;
-                  // لو الاسم في المدخل ده بيطابق اسمي → مدخل قديم، امسحه
-                  if (String(d.name).trim().toLowerCase() === _myDisplayName) {
-                    remove(ref(db, LB_PATH + k)).catch(() => {});
-                    console.log('🧹 مسح مدخل قديم من لوحة الشرف:', k);
-                  }
-                });
-              }).catch(() => {});
-            }
-          } catch(e) {}
         } else {
           setTimeout(doIt, 30);
         }
