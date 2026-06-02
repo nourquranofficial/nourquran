@@ -634,33 +634,22 @@ body:has(#loginScreen:not(.hide)) { overflow:hidden; }
   border-radius:20px;
   background:linear-gradient(135deg, rgba(201,151,58,0.06) 0%, rgba(27,107,74,0.06) 100%);
   border:1px solid rgba(201,151,58,0.18);
-  overflow:hidden;
-  transform:translateZ(0);
-  contain:layout;
 }
 .lb-podium-slide {
   display:flex; align-items:center; gap:16px;
   padding:20px;
   border-radius:20px;
   transition:opacity 0.35s ease, transform 0.35s ease;
-  will-change:opacity, transform;
-  backface-visibility:hidden;
-  -webkit-backface-visibility:hidden;
-  transform:translateX(0) translateZ(0);
 }
 .lb-podium-slide.active {
-  opacity:1; transform:translateX(0) translateZ(0);
+  opacity:1; transform:translateX(0);
 }
 .lb-podium-slide.exit {
-  opacity:0; transform:translateX(-60px) translateZ(0);
+  opacity:0; transform:translateX(-60px);
 }
 .lb-podium-rank {
   font-size:52px; line-height:1; flex-shrink:0;
   filter:drop-shadow(0 2px 8px rgba(201,151,58,0.4));
-  transform:translateZ(0);
-  backface-visibility:hidden;
-  -webkit-backface-visibility:hidden;
-  display:inline-block;
 }
 .lb-podium-info { flex:1; min-width:0; }
 .lb-podium-name {
@@ -1105,10 +1094,8 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   display:none; position:fixed; inset:0; z-index:8000;
   background:rgba(10,8,4,0.55); backdrop-filter:blur(16px) saturate(1.1); -webkit-backdrop-filter:blur(16px) saturate(1.1);
   align-items:flex-end; justify-content:center;
-  opacity:0;
-  transition:opacity .25s ease;
 }
-.sheet-overlay.open { display:flex; opacity:1; }
+.sheet-overlay.open { display:flex; }
 .sheet-box {
   width:100%; max-width:480px;
   background:linear-gradient(160deg,#1e1b10,#12100a);
@@ -1116,27 +1103,21 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   border-radius:24px 24px 0 0;
   padding:0 20px 32px;
   max-height:88vh; overflow-y:auto;
-  transform:translateY(100%) translateZ(0);
+  transform:translateY(100%);
   transition:transform .35s cubic-bezier(.32,1.25,.55,1);
-  will-change:transform;
-  backface-visibility:hidden;
-  -webkit-backface-visibility:hidden;
 }
-.sheet-overlay.open .sheet-box { transform:translateY(0) translateZ(0); }
+.sheet-overlay.open .sheet-box { transform:translateY(0); }
 .sheet-handle { width:40px; height:4px; background:rgba(201,151,58,0.3); border-radius:99px; margin:14px auto 18px; }
 .sheet-title { font-size:17px; font-weight:800; color:var(--cream); margin-bottom:18px; text-align:center; }
 .sheet-section { font-size:12px; color:rgba(245,217,139,0.5); margin-bottom:8px; margin-top:14px; }
 
 /* ===== جدول الترتيب العام ===== */
-.rank-list { max-height:62vh; overflow-y:auto; padding:2px; margin:0 -2px; contain:layout style; }
+.rank-list { max-height:62vh; overflow-y:auto; padding:2px; margin:0 -2px; }
 .rank-row {
   display:flex; align-items:center; gap:12px;
   padding:11px 14px; margin-bottom:7px; border-radius:14px;
   background:rgba(255,254,249,0.03); border:1px solid rgba(201,151,58,0.1);
   transition:background .2s;
-  transform:translateZ(0);
-  backface-visibility:hidden;
-  -webkit-backface-visibility:hidden;
 }
 .rank-row.top { background:linear-gradient(135deg,rgba(201,151,58,0.1),rgba(201,151,58,0.03)); border-color:rgba(201,151,58,0.25); }
 .rank-row.me { background:rgba(46,175,120,0.12); border-color:rgba(46,175,120,0.5); }
@@ -2303,7 +2284,6 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   // ============================================================
   // ===== LEADERBOARD — مسار موحد + real-time لكل المستخدمين =====
   const LB_PATH = 'leaderboard/';
-  window._lbFromCloud = false; // ★ يتحول true بس لما onValue يجيب بيانات Firebase حقيقية
 
   // ════════════════════════════════════════════════════════════
   // ★★ مفتاح التحكم: ظهور الضيوف في الترتيب العام ★★
@@ -2337,14 +2317,20 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       const rawOld = (isGuest ? 'guest__' : '') + String(username).replace(/[\.\#\$\/\[\]]/g, '_');
       if (rawOld !== key) remove(ref(db, LB_PATH + rawOld)).catch(() => {});
     } catch (e) {}
-    // ★ مسح المفاتيح القديمة لنفس المستخدم بس (مش كل الناس!)
-    // هنمسح فقط المفاتيح اللي نعرف إنها لنفس الحساب ده
+    // ★ مسح إضافي: لو الاسم اتغيّر، امسح أي مدخل في اللوحة بالاسم الجديد ده (مفتاحه غير canonical)
+    // ده بيحل مشكلة ظهور الاسم مرتين لما بيتغيّر
     if (!isGuest && data.name) {
-      // مسح مفتاح مبني على الاسم القديم لو مختلف عن الـ canonical key
-      const _nameBasedKey = String(username).replace(/[\.\#\$\/\[\]\@\s]/g,'_').toLowerCase();
-      if (_nameBasedKey !== key && _nameBasedKey !== oldKey) {
-        remove(ref(db, LB_PATH + _nameBasedKey)).catch(() => {});
-      }
+      const _newNameNorm = (data.name || '').trim().toLowerCase();
+      const _allList = window._lbAllList || [];
+      _allList.forEach(([ek]) => {
+        if (ek !== key && ek !== oldKey) {
+          // ممكن يكون مفتاح قديم — امسحه احتياطاً (Firebase transaction كفيل بالصح)
+          remove(ref(db, LB_PATH + ek)).catch(() => {});
+        }
+      });
+      // ★ مسح المفاتيح المبنية على الاسم القديم لو مختلف عن الإيميل
+      const _nameBasedKey = String(data.name).replace(/[\.\#\$\/\[\]\@\s]/g,'_').toLowerCase();
+      if (_nameBasedKey !== key) remove(ref(db, LB_PATH + _nameBasedKey)).catch(() => {});
     }
 
     const ts = data.updatedAt || Date.now();
@@ -2396,12 +2382,8 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   window.fbResetLeaderboard = function(username, isGuest) {
     if (!username) return;
     const key = isGuest ? makeKey(username, true) : dataKey(username);
-    // نحافظ على اسم العرض الحالي من localStorage لو موجود
-    const _dispName = (typeof window._getStoredName === 'function')
-      ? (window._getStoredName(username) || (window.currentUser && window.currentUser.name) || username)
-      : ((window.currentUser && window.currentUser.name) || username);
     set(ref(db, LB_PATH + key), {
-      name: _dispName,
+      name: username,
       totalScore: 0, totalGames: 0, totalHasanat: 0,
       isGuest: isGuest || false,
       updatedAt: Date.now(),
@@ -2491,7 +2473,6 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     _lbUnsub = onValue(ref(db, LB_PATH), (snap) => {
       _lbOk = true; _lbRetry = 0;
       const data = snap.val() || {};
-      window._lbFromCloud = true;
       window._renderLbFromData(data);
       console.log('🏆 لوحة الشرف اتحدثت — ' + Object.keys(data).length + ' لاعب');
     }, (err) => {
@@ -2522,9 +2503,8 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         if ((d.totalHasanat || 0) > 0)
           data[name] = { name, totalHasanat: d.totalHasanat||0, totalScore: d.totalScore||0, totalGames: d.totalGames||0, isGuest: d.isGuest||false };
       });
-      window._lbFromCloud = false; // ★ بيانات محلية بس — مش من Firebase
       window._renderLbFromData(data);   // حتى لو فاضي، ده بيشيل رسالة "جاري التحميل"
-    } catch (e) { window._lbFromCloud = false; window._renderLbFromData({}); }
+    } catch (e) { window._renderLbFromData({}); }
   }
   _attachLbListener();
 
@@ -2595,6 +2575,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
 
     // ★ إزالة التكرار الشامل: بالاسم + بالـ key + بالـ canonical key (للمفاتيح المشفرة)
     // يمنع ظهور نفس الشخص أكتر من مرة بسبب: تغيير الاسم / مفاتيح قديمة / encoding مختلف
+    const _seenNames    = new Map(); // name.toLowerCase() → index في الـ list النهائية
     const _seenKeys     = new Set(); // مفاتيح Firebase الحرفية
     const _seenCanonical = new Set(); // canonical keys (الإيميل المُرمَّز)
     const list = [];
@@ -2603,14 +2584,23 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       _seenKeys.add(k);
 
       // استخرج الـ canonical key لو أمكن (يشيل التكرار بسبب encoding مختلف)
-      const _ck = (window._dataKey && d && d.username) ? window._dataKey(d.username) : null;
+      const _ck = (window._dataKey && d && d.username) ? window._dataKey(d.username) :
+                  (window._dataKey && d && d.name && !d.isGuest) ? null : null;
       if (_ck) {
         if (_seenCanonical.has(_ck)) continue; // نفس الحساب بمفتاح تاني
         _seenCanonical.add(_ck);
       }
 
-      // ★ مسح التكرار بالـ key القديم لنفس المستخدم الحالي بس
-      // (لا نمسح أسماء تانية — اسمين متشابهين ممكن يكونوا حسابين مختلفين)
+      const _normName = (d.name || '').trim().toLowerCase();
+      if (_normName && _seenNames.has(_normName)) {
+        // نفس الاسم موجود بالفعل — ده تكرار بسبب مفتاح قديم أو تغيير الاسم
+        // امسح المدخل المكرر من Firebase في الخلفية (cleanup تلقائي)
+        if (typeof window._fbRemoveLeaderboardKey === 'function') {
+          window._fbRemoveLeaderboardKey(k);
+        }
+        continue;
+      }
+      if (_normName) _seenNames.set(_normName, list.length);
       list.push([k, d]);
     }
 
@@ -2621,11 +2611,10 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       const cu = window.currentUser;
       if (cu && !(window._recentReset && Date.now() - window._recentReset < 6000)) {
         const mk = window._makeKey;
-        const myEntry = Object.entries(data || {}).find(([k, d]) => {
-          if (mk) return k === mk(cu.username, false) || k === mk(cu.username, true);
-          const _rk = String(cu.username).replace(/[\.\#\$\/\[\]\@]/g,'_').toLowerCase();
-          return k === _rk || k === 'guest__' + _rk;
-        });
+        const myEntry = Object.entries(data || {}).find(([k, d]) =>
+          (mk && (k === mk(cu.username, false) || k === mk(cu.username, true))) ||
+          (d && d.name && d.name === cu.username)
+        );
         if (myEntry) {
           const e = myEntry[1] || {};
           const eTs = e.updatedAt || 0;
@@ -2682,12 +2671,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         if (key === window._makeKey(cu.username, cu.isGuest || false)) return true;
         if (key === window._makeKey(cu.username, false)) return true;
       }
-      // fallback: قارن فقط لو الـ _makeKey مش متاح (نادر جداً)
-      if (!window._makeKey) {
-        const _rawKey = String(cu.username).replace(/[\.\#\$\/\[\]\@]/g,'_').toLowerCase();
-        if (key === _rawKey || key === 'guest__' + _rawKey) return true;
-      }
-      return false;
+      return !!(d && d.name && cu.username && d.name === cu.username);
     };
 
     window._lbTop3Data = top3.map(([key, d], i) =>
@@ -4961,9 +4945,9 @@ function lbGoTo(idx) {
   const slide = wrap.querySelector('.lb-podium-slide');
   if (!slide) return;
 
-  // fade out بـ class مش inline style عشان ما نكسرش الـ CSS transition
-  slide.classList.remove('active');
-  slide.classList.add('exit');
+  // fade out
+  slide.style.opacity = '0';
+  slide.style.transform = 'translateX(60px)';
 
   setTimeout(() => {
     const [key, d, rankEmoji, rankColor, borderColor, isMe] = window._lbTop3Data[idx];
@@ -4977,8 +4961,8 @@ function lbGoTo(idx) {
     slide.querySelector('.lb-podium-hasanat').textContent = toA(d.totalHasanat||0) + ' ⭐';
     slide.querySelector('.lb-podium-score').textContent = toA(d.totalGames||0) + ' جلسة';
     // fade in
-    slide.classList.remove('exit');
-    slide.classList.add('active');
+    slide.style.opacity = '1';
+    slide.style.transform = 'translateX(0)';
   }, 350);
 
   dots.forEach((dot, i) => dot.classList.toggle('active', i === idx));
@@ -8367,16 +8351,13 @@ function updateGlobalRankChip() {
   const cu = window.currentUser;
   const list = window._lbAllList;
   const hide = () => { if (chip) chip.style.display = 'none'; if (card) card.style.display = 'none'; };
-  // ★ لو البيانات مش من Firebase لسه (fallback محلي) — اخفي الترتيب عشان ميظهرش #١ غلط
-  if (!window._lbFromCloud) { hide(); return; }
   if (!cu || !Array.isArray(list) || list.length === 0) { hide(); return; }
   const mk = window._makeKey;
 
-  const idx = list.findIndex(([k, d]) => {
-    if (mk) return k === mk(cu.username, false) || k === mk(cu.username, true);
-    const _rk = String(cu.username).replace(/[\.\#\$\/\[\]\@]/g,'_').toLowerCase();
-    return k === _rk || k === 'guest__' + _rk;
-  });
+  const idx = list.findIndex(([k, d]) =>
+    (mk && (k === mk(cu.username, false) || k === mk(cu.username, true))) ||
+    (d && d.name && d.name === cu.username)
+  );
   if (idx < 0) { hide(); return; }
   const rank = idx + 1, total = list.length;
 
@@ -8447,18 +8428,14 @@ function openFullRank() {
   const body = document.getElementById('fullRankList');
   const overlay = document.getElementById('fullRankOverlay');
   if (!body || !overlay) return;
-  if (!window._lbFromCloud) {
-    body.innerHTML = '<div style="text-align:center;color:rgba(245,217,139,0.4);padding:34px 16px;font-size:13px;">⏳ جاري تحميل الترتيب من السحابة...</div>';
-  } else if (!Array.isArray(list) || list.length === 0) {
+  if (!Array.isArray(list) || list.length === 0) {
     body.innerHTML = '<div style="text-align:center;color:rgba(245,217,139,0.4);padding:34px 16px;font-size:13px;">لسه مفيش لاعبين سجّلوا نقاط 🌱</div>';
   } else {
     const cu = window.currentUser, mk = window._makeKey;
-    const isMe = (k, d) => {
-      if (!cu) return false;
-      if (mk) return k === mk(cu.username, false) || k === mk(cu.username, true);
-      const _rk = String(cu.username).replace(/[\.\#\$\/\[\]\@]/g,'_').toLowerCase();
-      return k === _rk || k === 'guest__' + _rk;
-    };
+    const isMe = (k, d) => cu && (
+      (mk && (k === mk(cu.username, false) || k === mk(cu.username, true))) ||
+      (d && d.name && d.name === cu.username)
+    );
     const medals = ['🥇', '🥈', '🥉'];
     body.innerHTML = list.map(([k, d], i) => {
       const me = isMe(k, d);
@@ -8471,10 +8448,8 @@ function openFullRank() {
     }).join('');
   }
   overlay.classList.add('open');
-  // مرّر لصفّك تلقائياً لو موجود — بعد frame كامل عشان الـ layout يستقر
-  requestAnimationFrame(() => {
-    setTimeout(() => { const m = body.querySelector('.rank-row.me'); if (m) m.scrollIntoView({ block: 'center', behavior: 'smooth' }); }, 200);
-  });
+  // مرّر لصفّك تلقائياً لو موجود
+  setTimeout(() => { const m = body.querySelector('.rank-row.me'); if (m) m.scrollIntoView({ block: 'center' }); }, 250);
 }
 function closeFullRank() {
   const o = document.getElementById('fullRankOverlay');
