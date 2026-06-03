@@ -2333,19 +2333,23 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     // transaction: بنقارن الـtimestamp بس ★ دايمًا بناخد الأعلى في النقاط — النقاط مش بتنقص أبدًا
     runTransaction(entryRef, (cur) => {
       if (cur && (cur.updatedAt || 0) > ts) return cur; // فيه أحدث منه — سيبه
-      // ★ FIX: احمِ اسم العرض — لو Firebase فيه nameUpdatedAt أحدث من ts البيانات، سيبه
-      const _curNameTs = (cur && cur.nameUpdatedAt) || 0;
-      const _newName   = data.name || (cur && cur.name) || username;
-      const _safeName  = (_curNameTs > ts && cur && cur.name) ? cur.name : _newName;
+      // ★ FIX: احمِ اسم العرض — قارن nameUpdatedAt بـ nameUpdatedAt (مش updatedAt)
+      const _curNameTs  = (cur && cur.nameUpdatedAt) || 0;
+      const _newNameTs  = data.nameUpdatedAt || 0;
+      const _curName    = (cur && cur.name) || '';
+      const _newName    = data.name || _curName || username;
+      // ★ اختار الاسم بناءً على أعلى nameUpdatedAt — لو متساويين خد الجديد
+      const _safeName   = (_curNameTs > _newNameTs && _curName && !_curName.includes('@'))
+                          ? _curName : _newName;
+      const _safeNameTs = Math.max(_curNameTs, _newNameTs);
       return {
-        name:             _safeName, // ★ الاسم للعرض وليس الإيميل
-        // ★★ ناخد الأعلى بين القديم والجديد — مستحيل تنقص النقاط حتى لو حصل overwrite خطأ
+        name:             _safeName,
         totalHasanat:     Math.max((cur && cur.totalHasanat) || 0, data.totalHasanat || 0),
         totalScore:       Math.max((cur && cur.totalScore)   || 0, data.totalScore   || 0),
         totalGames:       Math.max((cur && cur.totalGames)   || 0, data.totalGames   || 0),
         isGuest:          isGuest,
         updatedAt:        ts,
-        nameUpdatedAt:    Math.max(_curNameTs, data.nameUpdatedAt || 0), // ★ احتفظ بـ nameUpdatedAt
+        nameUpdatedAt:    _safeNameTs,
         mistakesClearedAt: Math.max((cur && cur.mistakesClearedAt) || 0, data.mistakesClearedAt || 0),
       };
     }).catch(e => console.error('fbSaveUser error:', e));
@@ -4468,6 +4472,7 @@ function _saveNameEdit() {
   if (typeof window.fbSaveName === 'function') window.fbSaveName(_email, n, _nameTs);
   if (typeof window.fbSaveUser === 'function') window.fbSaveUser(_email, {
     name: n, isGuest: false,
+    nameUpdatedAt: _nameTs,
     totalHasanat: currentUser.totalHasanat||0,
     totalScore: currentUser.totalScore||0,
     totalGames: currentUser.totalGames||0,
@@ -8379,7 +8384,39 @@ function updateGlobalRankChip() {
   const cu = window.currentUser;
   const list = window._lbAllList;
   const hide = () => { if (chip) chip.style.display = 'none'; if (card) card.style.display = 'none'; };
-  if (!cu || !Array.isArray(list) || list.length === 0) { hide(); return; }
+  if (!cu) { hide(); return; }
+
+  // ★ الضيوف: احسب ترتيبهم التقريبي بناءً على نقاطهم مقارنةً باللوحة الموجودة
+  if (cu.isGuest) {
+    const myHasanat = cu.totalHasanat || 0;
+    if (myHasanat <= 0) { hide(); return; }
+    const lbList = Array.isArray(list) ? list : [];
+    // عدد اللاعبين اللي نقاطهم أعلى من الضيف
+    const above = lbList.filter(([, d]) => (d && d.totalHasanat || 0) > myHasanat).length;
+    const rank = above + 1;
+    const total = lbList.length + 1; // الضيف نفسه مش في اللوحة
+    if (chip) {
+      const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : ('#' + toArabicNum(rank));
+      chip.textContent = medal;
+      chip.style.display = 'inline-flex';
+    }
+    if (card) {
+      const t = document.getElementById('grcTitle');
+      const mine = document.getElementById('grcMine');
+      if (t) t.textContent = '🏆 ترتيبك التقريبي';
+      if (mine) mine.style.display = '';
+      const rankEl = document.getElementById('grcRank');
+      const subEl  = document.getElementById('grcSub');
+      const msgEl  = document.getElementById('grcMsg');
+      if (rankEl) rankEl.textContent = toArabicNum(rank);
+      if (subEl)  subEl.innerHTML = 'من بين <b style="color:var(--gold-light);">' + formatBigNum(total) + '</b> لاعب • <b style="color:var(--gold-light);">' + formatBigNum(myHasanat) + '</b> نقطة';
+      if (msgEl)  msgEl.textContent = '🕊️ سجّل دخولك لتظهر في الترتيب الرسمي';
+      card.style.display = '';
+    }
+    return;
+  }
+
+  if (!Array.isArray(list) || list.length === 0) { hide(); return; }
   const mk = window._makeKey;
 
   const cuDisplayName = cu.name || '';
