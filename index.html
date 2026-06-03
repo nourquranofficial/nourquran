@@ -1520,7 +1520,9 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         try {
           localStorage.setItem('nour_name_' + username, _fbDisplayName);
           const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
-          if (_lu[username]) { _lu[username].name = _fbDisplayName; localStorage.setItem('nour_users', JSON.stringify(_lu)); }
+          if (!_lu[username]) _lu[username] = {};
+          _lu[username].name = _fbDisplayName;
+          localStorage.setItem('nour_users', JSON.stringify(_lu));
         } catch(e) {}
         if (window.currentUser && window.currentUser.username === username) {
           window.currentUser.name = _fbDisplayName;
@@ -3821,12 +3823,33 @@ function doLogin() {
           : null; // لو ما فيش اسم محفوظ، سيبه فاضي وFirebase هيجيبه
         _finishFresh(_initialName || user, users[user] || localData, null);
 
-        // ★ جيب اسم العرض الحقيقي من Firebase في الخلفية وحدّث الـ UI فوراً
+        // ★ جيب اسم العرض الحقيقي والنقاط من Firebase في الخلفية وحدّث الـ UI فوراً
         if (typeof window.fbGetAccount === 'function') {
           window.fbGetAccount(user, (realName, fbData) => {
-            if (fbData && window.currentUser && window.currentUser.username === user) {
-              if (typeof window.fbSaveUser === 'function') window.fbSaveUser(user, { ...fbData, isGuest: false });
+            if (!window.currentUser || window.currentUser.username !== user) return;
+            const cu = window.currentUser;
+            // ★ FIX: حدّث النقاط من Firebase لو أعلى من المحلي
+            if (fbData) {
+              const newScore   = Math.max(cu.totalScore   || 0, fbData.totalScore   || 0);
+              const newHasanat = Math.max(cu.totalHasanat || 0, fbData.totalHasanat || 0);
+              const newGames   = Math.max(cu.totalGames   || 0, fbData.totalGames   || 0);
+              cu.totalScore   = newScore;
+              cu.totalHasanat = newHasanat;
+              cu.totalGames   = newGames;
+              window.currentUser = cu;
+              currentUser = cu;
+              // حفظ في localStorage
+              try {
+                const _lu2 = JSON.parse(localStorage.getItem('nour_users') || '{}');
+                if (!_lu2[user]) _lu2[user] = {};
+                _lu2[user].totalScore   = newScore;
+                _lu2[user].totalHasanat = newHasanat;
+                _lu2[user].totalGames   = newGames;
+                localStorage.setItem('nour_users', JSON.stringify(_lu2));
+              } catch(e) {}
+              if (typeof updateHomeStats === 'function') updateHomeStats();
             }
+            if (fbData && typeof window.fbSaveUser === 'function') window.fbSaveUser(user, { ...fbData, isGuest: false });
             // ★ FIX: fbGetAccount دلوقتي بيحدّث الـ UI من الـ leaderboard تلقائياً
           });
         }
