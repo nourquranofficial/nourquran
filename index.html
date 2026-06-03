@@ -2000,6 +2000,15 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
             window.fbSaveUser(username, { totalScore: window.currentUser.totalScore, totalHasanat: window.currentUser.totalHasanat, totalGames: window.currentUser.totalGames, isGuest: (window.currentUser && window.currentUser.isGuest) || false, name: (window.currentUser && window.currentUser.name) || '' });
           }
           if (typeof updateHomeStats === 'function') updateHomeStats();
+          // ★ FIX: حفظ في localStorage حتى لو الـ key مش موجود — بيمنع رجوع النقاط للقيمة القديمة
+          try {
+            const _llu2 = JSON.parse(localStorage.getItem('nour_users') || '{}');
+            if (!_llu2[username]) _llu2[username] = {};
+            _llu2[username].totalScore   = window.currentUser.totalScore;
+            _llu2[username].totalGames   = window.currentUser.totalGames;
+            _llu2[username].totalHasanat = window.currentUser.totalHasanat;
+            localStorage.setItem('nour_users', JSON.stringify(_llu2));
+          } catch(e) {}
         }
       }
     }).catch(() => {
@@ -2330,9 +2339,13 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     if (window.currentUser && window.currentUser.username === username) {
       window.currentUser.updatedAt = Math.max(window.currentUser.updatedAt || 0, ts);
     }
-    // transaction: بنقارن الـtimestamp بس ★ دايمًا بناخد الأعلى في النقاط — النقاط مش بتنقص أبدًا
+    // transaction: ★ دايمًا بناخد الأعلى في النقاط — النقاط مش بتنقص أبدًا حتى لو الـ timestamp قديم
     runTransaction(entryRef, (cur) => {
-      if (cur && (cur.updatedAt || 0) > ts) return cur; // فيه أحدث منه — سيبه
+      // ★ FIX: ما نتجاهلش التحديث بسبب الـ timestamp — قد يكون في نقاط أعلى
+      // بس نتجاهله لو النقاط الجديدة أقل من القديمة فعلاً
+      if (cur && (cur.updatedAt || 0) > ts &&
+          (data.totalHasanat || 0) <= (cur.totalHasanat || 0) &&
+          (data.totalScore   || 0) <= (cur.totalScore   || 0)) return cur; // فيه أحدث ونقاطه أعلى — سيبه
       // احمِ اسم العرض — قارن nameUpdatedAt بـ nameUpdatedAt
       const _curNameTs = (cur && cur.nameUpdatedAt) || 0;
       const _newNameTs = data.nameUpdatedAt || 0;
@@ -4336,14 +4349,14 @@ function loginSuccess(username, data, isGuest=false) {
         if (!cu.name || !cu.name.trim() || _dataTs > _localTs) cu.name = data.name.trim();
       }
       const _lu = getUsers();
-      if (_lu[username]) {
-        _lu[username].totalScore   = cu.totalScore;
-        _lu[username].totalGames   = cu.totalGames;
-        _lu[username].totalHasanat = cu.totalHasanat;
-        _lu[username].streak       = cu.streak;
-        if (cu.name) _lu[username].name = cu.name;
-        saveUsers(_lu);
-      }
+      // ★ FIX: دايماً احفظ في localStorage حتى لو الـ key مش موجود — بيمنع رجوع النقاط للقيمة القديمة
+      if (!_lu[username]) _lu[username] = {};
+      _lu[username].totalScore   = cu.totalScore;
+      _lu[username].totalGames   = cu.totalGames;
+      _lu[username].totalHasanat = cu.totalHasanat;
+      _lu[username].streak       = cu.streak;
+      if (cu.name) _lu[username].name = cu.name;
+      saveUsers(_lu);
     }
     currentUser = cu;
     window.currentUser = cu;
