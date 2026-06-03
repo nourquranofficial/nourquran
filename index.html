@@ -2612,8 +2612,8 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       if (cu && !(window._recentReset && Date.now() - window._recentReset < 6000)) {
         const mk = window._makeKey;
         const myEntry = Object.entries(data || {}).find(([k, d]) =>
-          (mk && (k === mk(cu.username, false) || k === mk(cu.username, true))) ||
-          (d && d.name && d.name === cu.username)
+          (mk && (k === mk(cu.username, false) || k === mk(cu.username, true) || k === mk(cu.username, cu.isGuest || false))) ||
+          (d && d.name && cu.name && d.name.trim().toLowerCase() === cu.name.trim().toLowerCase())
         );
         if (myEntry) {
           const e = myEntry[1] || {};
@@ -2670,8 +2670,11 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       if (window._makeKey) {
         if (key === window._makeKey(cu.username, cu.isGuest || false)) return true;
         if (key === window._makeKey(cu.username, false)) return true;
+        if (key === window._makeKey(cu.username, true)) return true;
       }
-      return !!(d && d.name && cu.username && d.name === cu.username);
+      // مقارنة اسم العرض (d.name) مع اسم العرض للمستخدم الحالي (cu.name) — وليس الإيميل
+      const cuDisplayName = cu.name || '';
+      return !!(d && d.name && cuDisplayName && d.name.trim().toLowerCase() === cuDisplayName.trim().toLowerCase());
     };
 
     window._lbTop3Data = top3.map(([key, d], i) =>
@@ -2698,8 +2701,30 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       `<div class="lb-dot${i===0?' active':''}" onclick="lbGoTo(${i})"></div>`
     ).join('');
 
-    // نسخة المرجع: المنصة بس — مفيش قائمة باقي اللاعبين
-    if (lb) lb.innerHTML = '';
+    // نسخة المرجع: المنصة بس — باقي اللاعبين في قائمة تحت
+    if (lb) {
+      const rest = list.slice(3);
+      if (rest.length === 0) {
+        lb.innerHTML = '';
+        lb.style.display = 'none';
+      } else {
+        lb.style.display = '';
+        lb.innerHTML = rest.map(([k, d], i) => {
+          const rank = i + 4;
+          const me = isMyEntry(k, d);
+          const nm = (d && d.name) ? d.name : 'لاعب';
+          const pts = typeof formatBigNum === 'function' ? formatBigNum(d.totalHasanat||0) : toA(d.totalHasanat||0);
+          return `<div class="lb-card${me?' lb-me':''}">
+            <div class="lb-rank">${toA(rank)}</div>
+            <div class="lb-info">
+              <div class="lb-name">${nm}${me?' <span style="font-size:10px;color:var(--gold);">(أنت)</span>':''}</div>
+              <div class="lb-score">${toA(d.totalGames||0)} جلسة</div>
+            </div>
+            <div class="lb-hasanat">${pts} ⭐</div>
+          </div>`;
+        }).join('');
+      }
+    }
 
     // rotation للـ top3
     if (window.lbPodiumTimer) { clearInterval(window.lbPodiumTimer); window.lbPodiumTimer = null; }
@@ -2729,10 +2754,13 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     if (!cu || cu.isGuest) { rankEl.innerHTML = ''; return; }
 
     const toA = n => String(Math.round(n || 0)).replace(/\d/g, d => '٠١٢٣٤٥٦٧٨٩'[d]);
+    const cuDisplayName2 = cu.name || '';
     const checkFn = isMyEntryFn || ((key, d) => {
       const mk1 = window._makeKey ? window._makeKey(cu.username, false) : cu.username;
       const mk2 = window._makeKey ? window._makeKey(cu.username, true)  : cu.username;
-      return key === mk1 || key === mk2 || (d && d.name === cu.username);
+      const mk3 = window._makeKey ? window._makeKey(cu.username, cu.isGuest || false) : cu.username;
+      return key === mk1 || key === mk2 || key === mk3 ||
+        (d && d.name && cuDisplayName2 && d.name.trim().toLowerCase() === cuDisplayName2.trim().toLowerCase());
     });
 
     const myIdx = list.findIndex(([k, d]) => checkFn(k, d));
@@ -2946,7 +2974,7 @@ function _callWhenReady(fn, args) {
       <!-- المنصة المتحركة للمراكز الـ٣ -->
       <div class="lb-podium-wrap" id="lbPodiumWrap"></div>
       <div class="lb-dots" id="lbDots"></div>
-      <div class="lb-rest" id="leaderboard" style="display:none;"></div>
+      <div class="lb-rest" id="leaderboard"></div>
     </div>
 
     <!-- ★ كارت الترتيب العام (نفس ترتيب لوحة الشرف، مؤشر شخصي واضح) -->
@@ -4705,6 +4733,7 @@ function saveCurrentUser() {
   // رفع على Leaderboard — كل المستخدمين (مسجلين وضيوف) بشرط وجود نقاط
   if (typeof window.fbSaveUser === 'function' && (currentUser.totalScore || 0) > 0) {
     window.fbSaveUser(currentUser.username, {
+      name:         currentUser.name || currentUser.username,
       totalHasanat: currentUser.totalHasanat,
       totalScore:   currentUser.totalScore,
       totalGames:   currentUser.totalGames,
@@ -7358,14 +7387,13 @@ function showResults() {
   // رفع على Leaderboard — أي حد عنده نقاط
   if (typeof window.fbSaveUser === 'function' && (currentUser.totalScore || 0) > 0) {
     window.fbSaveUser(currentUser.username, {
+      name:         currentUser.name || currentUser.username,
       totalHasanat: currentUser.totalHasanat,
       totalScore:   currentUser.totalScore,
       totalGames:   currentUser.totalGames,
       isGuest:      currentUser.isGuest || false,
     });
   }
-
-  const levelUpBox = document.getElementById('levelUpBox');
   levelUpBox.classList.remove('show');
 
   let emoji, title, msg;
@@ -8354,9 +8382,10 @@ function updateGlobalRankChip() {
   if (!cu || !Array.isArray(list) || list.length === 0) { hide(); return; }
   const mk = window._makeKey;
 
+  const cuDisplayName = cu.name || '';
   const idx = list.findIndex(([k, d]) =>
-    (mk && (k === mk(cu.username, false) || k === mk(cu.username, true))) ||
-    (d && d.name && d.name === cu.username)
+    (mk && (k === mk(cu.username, false) || k === mk(cu.username, true) || k === mk(cu.username, cu.isGuest || false))) ||
+    (d && d.name && cuDisplayName && d.name.trim().toLowerCase() === cuDisplayName.trim().toLowerCase())
   );
   if (idx < 0) { hide(); return; }
   const rank = idx + 1, total = list.length;
@@ -8432,9 +8461,10 @@ function openFullRank() {
     body.innerHTML = '<div style="text-align:center;color:rgba(245,217,139,0.4);padding:34px 16px;font-size:13px;">لسه مفيش لاعبين سجّلوا نقاط 🌱</div>';
   } else {
     const cu = window.currentUser, mk = window._makeKey;
+    const cuDisplayName = (cu && cu.name) || '';
     const isMe = (k, d) => cu && (
-      (mk && (k === mk(cu.username, false) || k === mk(cu.username, true))) ||
-      (d && d.name && d.name === cu.username)
+      (mk && (k === mk(cu.username, false) || k === mk(cu.username, true) || k === mk(cu.username, cu.isGuest || false))) ||
+      (d && d.name && cuDisplayName && d.name.trim().toLowerCase() === cuDisplayName.trim().toLowerCase())
     );
     const medals = ['🥇', '🥈', '🥉'];
     body.innerHTML = list.map(([k, d], i) => {
