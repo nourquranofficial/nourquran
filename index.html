@@ -1680,15 +1680,14 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       cu.totalScore   = Math.max(cu.totalScore   || 0, fbData.totalScore   || 0);
       cu.totalGames   = Math.max(cu.totalGames   || 0, fbData.totalGames   || 0);
       window.currentUser = cu;
-      // حفظ في localStorage
+      // ★ FIX: دايماً احفظ في localStorage حتى لو الـ key مش موجود
       try {
         const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
-        if (_lu[username]) {
-          _lu[username].totalHasanat = cu.totalHasanat;
-          _lu[username].totalScore   = cu.totalScore;
-          _lu[username].totalGames   = cu.totalGames;
-          localStorage.setItem('nour_users', JSON.stringify(_lu));
-        }
+        if (!_lu[username]) _lu[username] = {};
+        _lu[username].totalHasanat = cu.totalHasanat;
+        _lu[username].totalScore   = cu.totalScore;
+        _lu[username].totalGames   = cu.totalGames;
+        localStorage.setItem('nour_users', JSON.stringify(_lu));
       } catch(e) {}
       // تحديث الـ UI فوراً
       if (typeof updateHomeStats === 'function') updateHomeStats();
@@ -2089,7 +2088,8 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       tryGet('users/' + _dbKey + '/data'),
       tryGet('users/' + _dbKey + '/name'),
       tryGet('leaderboard/' + _dbKey),
-    ]).then(([fbData_, fbName, lbData]) => {
+      tryGet('users/' + _dbKey + '/nameUpdatedAt'),
+    ]).then(([fbData_, fbName, lbData, fbNameTs]) => {
       const fbData = fbData_ || {};
       const _localUsers = (() => { try { return JSON.parse(localStorage.getItem('nour_users') || '{}'); } catch(e) { return {}; } })();
       const _localData  = _localUsers[realUsername] || {};
@@ -2107,7 +2107,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
           const _localName  = typeof window._getStoredName === 'function' ? window._getStoredName(realUsername) : null;
           const _localTs    = (() => { try { return JSON.parse(localStorage.getItem('nour_name_ts_' + realUsername) || '0'); } catch(e) { return 0; } })();
           const _fbName     = fbName || (fbData && fbData.name && !fbData.name.includes('@') ? fbData.name : null) || (lbData && lbData.name && !lbData.name.includes('@') ? lbData.name : null);
-          const _fbTs       = (fbData && fbData.nameUpdatedAt) || (lbData && lbData.nameUpdatedAt) || 0;
+          const _fbTs       = fbNameTs || (fbData && fbData.nameUpdatedAt) || (lbData && lbData.nameUpdatedAt) || 0;
           const _googleName = (user && user.displayName && !user.displayName.includes('@')) ? user.displayName : null;
           // لو Firebase أحدث → استخدمه وحدّث المحلي
           if (_fbName && _fbTs > _localTs) {
@@ -2151,6 +2151,19 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         if (window._loggedOut) return;
         if (typeof window.loginSuccess === 'function') {
           window.loginSuccess(realUsername, merged);
+          // ★ FIX: حفظ merged في localStorage فوراً عشان القيم الجديدة من Firebase تتحفظ محلياً
+          try {
+            const _lsave = JSON.parse(localStorage.getItem('nour_users') || '{}');
+            if (!_lsave[realUsername]) _lsave[realUsername] = {};
+            _lsave[realUsername].totalScore   = merged.totalScore   || 0;
+            _lsave[realUsername].totalHasanat = merged.totalHasanat || 0;
+            _lsave[realUsername].totalGames   = merged.totalGames   || 0;
+            if (merged.name && !merged.name.includes('@')) _lsave[realUsername].name = merged.name;
+            localStorage.setItem('nour_users', JSON.stringify(_lsave));
+            if (merged.name && !merged.name.includes('@')) {
+              localStorage.setItem('nour_name_' + realUsername, merged.name);
+            }
+          } catch(e) {}
           // ★ كتابة فورية في الـ leaderboard حتى لو النقاط صفر عشان الاسم يظهر
           try {
             if (typeof window.fbSaveFullUserData === 'function') window.fbSaveFullUserData(realUsername, merged);
