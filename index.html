@@ -2332,30 +2332,20 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     }
     // transaction: بنقارن الـtimestamp بس ★ دايمًا بناخد الأعلى في النقاط — النقاط مش بتنقص أبدًا
     runTransaction(entryRef, (cur) => {
-      // ★ الاسم الأحدث يكسب دايمًا — مقارنة nameUpdatedAt بـ nameUpdatedAt
-      const _curNameTs  = (cur && cur.nameUpdatedAt) || 0;
-      const _newNameTs  = data.nameUpdatedAt || 0;
-      const _curName    = (cur && cur.name) || '';
-      const _newName    = data.name || _curName || username;
-      const _safeName   = (_curNameTs > _newNameTs && _curName && !_curName.includes('@'))
-                          ? _curName : _newName;
-      const _safeNameTs = Math.max(_curNameTs, _newNameTs);
-
-      // لو فيه بيانات أحدث (نقاط) — رجّع cur بس مع تحديث الاسم لو لازم
-      if (cur && (cur.updatedAt || 0) > ts) {
-        if (_safeName === _curName) return cur; // مفيش تغيير
-        return { ...cur, name: _safeName, nameUpdatedAt: _safeNameTs, username: username };
-      }
-
+      if (cur && (cur.updatedAt || 0) > ts) return cur; // فيه أحدث منه — سيبه
+      // ★ FIX: احمِ اسم العرض — لو Firebase فيه nameUpdatedAt أحدث من ts البيانات، سيبه
+      const _curNameTs = (cur && cur.nameUpdatedAt) || 0;
+      const _newName   = data.name || (cur && cur.name) || username;
+      const _safeName  = (_curNameTs > ts && cur && cur.name) ? cur.name : _newName;
       return {
-        name:             _safeName,
-        username:         username,
+        name:             _safeName, // ★ الاسم للعرض وليس الإيميل
+        // ★★ ناخد الأعلى بين القديم والجديد — مستحيل تنقص النقاط حتى لو حصل overwrite خطأ
         totalHasanat:     Math.max((cur && cur.totalHasanat) || 0, data.totalHasanat || 0),
         totalScore:       Math.max((cur && cur.totalScore)   || 0, data.totalScore   || 0),
         totalGames:       Math.max((cur && cur.totalGames)   || 0, data.totalGames   || 0),
         isGuest:          isGuest,
         updatedAt:        ts,
-        nameUpdatedAt:    _safeNameTs,
+        nameUpdatedAt:    Math.max(_curNameTs, data.nameUpdatedAt || 0), // ★ احتفظ بـ nameUpdatedAt
         mistakesClearedAt: Math.max((cur && cur.mistakesClearedAt) || 0, data.mistakesClearedAt || 0),
       };
     }).catch(e => console.error('fbSaveUser error:', e));
@@ -4478,7 +4468,6 @@ function _saveNameEdit() {
   if (typeof window.fbSaveName === 'function') window.fbSaveName(_email, n, _nameTs);
   if (typeof window.fbSaveUser === 'function') window.fbSaveUser(_email, {
     name: n, isGuest: false,
-    nameUpdatedAt: _nameTs,
     totalHasanat: currentUser.totalHasanat||0,
     totalScore: currentUser.totalScore||0,
     totalGames: currentUser.totalGames||0,
@@ -4523,16 +4512,6 @@ function _saveNameEdit() {
     } catch(e) {}
   })();
 
-  // ★ حدّث _lbAllList محلياً فوراً عشان الـ render يظهر الاسم الجديد بدون انتظار Firebase
-  if (Array.isArray(window._lbAllList)) {
-    const _canonKey = window._dataKey ? window._dataKey(_email) : null;
-    window._lbAllList = window._lbAllList.map(([k, d]) => {
-      if (k === _canonKey || (d && d.username && window._dataKey && window._dataKey(d.username) === _canonKey)) {
-        return [k, { ...d, name: n, nameUpdatedAt: _nameTs, username: _email }];
-      }
-      return [k, d];
-    });
-  }
   if (typeof renderLeaderboard === 'function') renderLeaderboard();
 }
 function _cancelNameEdit() {
@@ -4615,7 +4594,7 @@ function _finishLogin(username, isGuest) {
   const _disp = _displayName(currentUser || { username });
   const _el = document.getElementById('userNameDisplay');
   _el.innerHTML = '👤 ' + _disp + ' <button onclick="event.stopPropagation();editDisplayName()" title="غيّر اسمك للعرض" style="background:none;border:none;font-size:13px;cursor:pointer;color:var(--gold);opacity:.7;padding:2px 4px;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">✏️</button>';
-  if (typeof window.fbSignInAnon === 'function' && !isGuest) window.fbSignInAnon();
+  if (typeof window.fbSignInAnon === 'function') window.fbSignInAnon();
   if (typeof window.fbWatchName     === 'function' && !isGuest && username && !username.includes('ضيف')) window.fbWatchName(username);
   if (typeof window.fbWatchUserData  === 'function' && !isGuest && username && !username.includes('ضيف')) window.fbWatchUserData(username);
   // ★ احفظ وقت الـ login + ابدأ مراقبة تغيير الباسورد
@@ -8407,10 +8386,9 @@ function updateGlobalRankChip() {
     const myHasanat = cu.totalHasanat || 0;
     if (myHasanat <= 0) { hide(); return; }
     const lbList = Array.isArray(list) ? list : [];
-    // عدد اللاعبين اللي نقاطهم أعلى من الضيف
     const above = lbList.filter(([, d]) => (d && d.totalHasanat || 0) > myHasanat).length;
     const rank = above + 1;
-    const total = lbList.length + 1; // الضيف نفسه مش في اللوحة
+    const total = lbList.length + 1;
     if (chip) {
       const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : ('#' + toArabicNum(rank));
       chip.textContent = medal;
