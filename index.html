@@ -2377,6 +2377,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         nameUpdatedAt:    Math.max(_curNameTs, data.nameUpdatedAt || 0), // ★ احتفظ بـ nameUpdatedAt
         mistakesClearedAt: Math.max((cur && cur.mistakesClearedAt) || 0, data.mistakesClearedAt || 0),
         _lbKey:           key, // ★ FIX: مفتاح canonical محفوظ — يمنع التكرار عند تغيير الاسم
+        username:         isGuest ? null : username, // ★ FIX: نحفظ الـ username عشان نطابق به حتى لو الاسم اتغيّر
       };
     }).catch(e => console.error('fbSaveUser error:', e));
   };
@@ -2676,6 +2677,8 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         if (key === window._makeKey(cu.username, false)) return true;
         if (key === window._makeKey(cu.username, true)) return true;
       }
+      // ★ FIX: مطابقة بالـ username المخزّن في Firebase
+      if (d && d.username && cu.username && d.username.trim().toLowerCase() === cu.username.trim().toLowerCase()) return true;
       // مقارنة اسم العرض (d.name) مع اسم العرض للمستخدم الحالي (cu.name) — وليس الإيميل
       const cuDisplayName = cu.name || '';
       return !!(d && d.name && cuDisplayName && d.name.trim().toLowerCase() === cuDisplayName.trim().toLowerCase());
@@ -4470,6 +4473,9 @@ function _saveNameEdit() {
   // ★ timestamp موحّد — نفس الرقم في localStorage وفي Firebase عشان الـ listener ما يرفضش التحديث
   const _nameTs = Date.now();
 
+  // ★ احفظ الاسم القديم قبل التغيير عشان نطابق به في _lbAllList
+  window._oldDisplayName = currentUser.name || '';
+
   // ★ ١. حدّث الـ UI فوراً (قبل أي حاجة)
   currentUser.name = n;
   window.currentUser = currentUser;
@@ -4542,7 +4548,23 @@ function _saveNameEdit() {
     } catch(e) {}
   })();
 
+  // ★ FIX: حدّث _lbAllList فوراً بالاسم الجديد عشان updateGlobalRankChip يلاقي المستخدم
+  if (Array.isArray(window._lbAllList) && window._lbAllList.length > 0) {
+    const _cu2 = window.currentUser;
+    const _mk2 = window._makeKey;
+    window._lbAllList = window._lbAllList.map(([k, d]) => {
+      const isOwn = _cu2 && (
+        (_mk2 && (k === _mk2(_cu2.username, false) || k === _mk2(_cu2.username, true) || k === _mk2(_cu2.username, _cu2.isGuest || false))) ||
+        (d && d.name && (d.name.trim().toLowerCase() === (window._oldDisplayName || '').trim().toLowerCase()))
+      );
+      if (isOwn) return [k, { ...d, name: n }];
+      return [k, d];
+    });
+  }
+
   if (typeof renderLeaderboard === 'function') renderLeaderboard();
+  // ★ FIX: حدّث كارت الترتيب العام كمان مرة بعد تحديث الاسم (بعد renderLeaderboard)
+  setTimeout(() => { if (typeof updateGlobalRankChip === 'function') updateGlobalRankChip(); }, 200);
 }
 function _cancelNameEdit() {
   const overlay = document.getElementById('_nameEditOverlay');
@@ -8433,10 +8455,18 @@ function updateGlobalRankChip() {
   const mk = window._makeKey;
 
   const cuDisplayName = cu.name || '';
-  const idx = list.findIndex(([k, d]) =>
-    (mk && (k === mk(cu.username, false) || k === mk(cu.username, true) || k === mk(cu.username, cu.isGuest || false))) ||
-    (d && d.name && cuDisplayName && d.name.trim().toLowerCase() === cuDisplayName.trim().toLowerCase())
-  );
+  const idx = list.findIndex(([k, d]) => {
+    if (mk) {
+      if (k === mk(cu.username, false)) return true;
+      if (k === mk(cu.username, true)) return true;
+      if (k === mk(cu.username, cu.isGuest || false)) return true;
+    }
+    // مطابقة بالاسم — فقط لو الاسم موجود (fallback)
+    if (d && d.name && cuDisplayName && d.name.trim().toLowerCase() === cuDisplayName.trim().toLowerCase()) return true;
+    // ★ FIX: مطابقة بالـ username المخزّن في بيانات Firebase
+    if (d && d.username && cu.username && d.username.trim().toLowerCase() === cu.username.trim().toLowerCase()) return true;
+    return false;
+  });
   if (idx < 0) { hide(); return; }
   const rank = idx + 1, total = list.length;
 
