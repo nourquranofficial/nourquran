@@ -2333,10 +2333,11 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     // transaction: بنقارن الـtimestamp بس ★ دايمًا بناخد الأعلى في النقاط — النقاط مش بتنقص أبدًا
     runTransaction(entryRef, (cur) => {
       if (cur && (cur.updatedAt || 0) > ts) return cur; // فيه أحدث منه — سيبه
-      // ★ FIX: احمِ اسم العرض — لو Firebase فيه nameUpdatedAt أحدث من ts البيانات، سيبه
+      // احمِ اسم العرض — قارن nameUpdatedAt بـ nameUpdatedAt
       const _curNameTs = (cur && cur.nameUpdatedAt) || 0;
+      const _newNameTs = data.nameUpdatedAt || 0;
       const _newName   = data.name || (cur && cur.name) || username;
-      const _safeName  = (_curNameTs > ts && cur && cur.name) ? cur.name : _newName;
+      const _safeName  = (_curNameTs > _newNameTs && cur && cur.name && !cur.name.includes('@')) ? cur.name : _newName;
       return {
         name:             _safeName, // ★ الاسم للعرض وليس الإيميل
         // ★★ ناخد الأعلى بين القديم والجديد — مستحيل تنقص النقاط حتى لو حصل overwrite خطأ
@@ -2508,39 +2509,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       .catch(() => _attachLbListener());
   }
 
-  // ★ تنظيف تلقائي: مسح الضيوف من الداتا بيز كل ٣ أيام
-  (function _cleanOldGuests() {
-    const _3days = 2 * 24 * 60 * 60 * 1000; // ★ يومين
-    const _now   = Date.now();
-    // مسح من leaderboard
-    get(ref(db, LB_PATH)).then(snap => {
-      if (!snap.exists()) return;
-      Object.entries(snap.val()).forEach(([key, entry]) => {
-        if (!entry) return;
-        const isGuest = entry.isGuest || String(key).startsWith('guest__');
-        if (!isGuest) return;
-        const lastSeen = entry.updatedAt || entry.lastPlay || 0;
-        if (_now - lastSeen > _3days) {
-          remove(ref(db, LB_PATH + key)).catch(() => {});
-        }
-      });
-    }).catch(() => {});
-
-    // ★ مسح من users أيضاً
-    get(ref(db, 'users/')).then(snap => {
-      if (!snap.exists()) return;
-      Object.entries(snap.val()).forEach(([key, entry]) => {
-        if (!entry) return;
-        const isGuest = String(key).startsWith('guest__') ||
-          (entry.bypassAuth && entry.bypassAuth.email && String(entry.bypassAuth.email).startsWith('guest'));
-        if (!isGuest) return;
-        const lastSeen = (entry.data && (entry.data.updatedAt || entry.data.lastPlay)) || 0;
-        if (_now - lastSeen > _3days) {
-          remove(ref(db, 'users/' + key)).catch(() => {});
-        }
-      });
-    }).catch(() => {});
-  })();
+  // (guest cleanup removed — guests now appear in leaderboard)
 
   // ─── migration: انقل bيانات nour_lb للمسار الجديد (مرة واحدة) ───
   get(ref(db, 'nour_lb')).then(snap => {
@@ -2583,8 +2552,9 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       if (_seenKeys.has(k)) continue; // مفتاح مكرر حرفياً
       _seenKeys.add(k);
 
-      // استخرج الـ canonical key — الـ key نفسه بعد شيل guest__ prefix
-      const _ck = String(k).replace(/^guest__/, '');
+      // استخرج الـ canonical key لو أمكن (يشيل التكرار بسبب encoding مختلف)
+      const _ck = (window._dataKey && d && d.username) ? window._dataKey(d.username) :
+                  (window._dataKey && d && d.name && !d.isGuest) ? null : null;
       if (_ck) {
         if (_seenCanonical.has(_ck)) continue; // نفس الحساب بمفتاح تاني
         _seenCanonical.add(_ck);
@@ -4512,13 +4482,6 @@ function _saveNameEdit() {
     } catch(e) {}
   })();
 
-  // حدّث _lbAllList محلياً فوراً عشان اللوحة تظهر الاسم الجديد بدون انتظار Firebase
-  if (Array.isArray(window._lbAllList) && window._dataKey) {
-    const _ck = window._dataKey(_email);
-    window._lbAllList = window._lbAllList.map(([k, d]) =>
-      (String(k).replace(/^guest__/,'') === _ck) ? [k, {...d, name: n}] : [k, d]
-    );
-  }
   if (typeof renderLeaderboard === 'function') renderLeaderboard();
 }
 function _cancelNameEdit() {
@@ -8387,36 +8350,25 @@ function updateGlobalRankChip() {
   const list = window._lbAllList;
   const hide = () => { if (chip) chip.style.display = 'none'; if (card) card.style.display = 'none'; };
   if (!cu) { hide(); return; }
-
-  // ★ الضيوف: احسب ترتيبهم التقريبي بناءً على نقاطهم مقارنةً باللوحة الموجودة
   if (cu.isGuest) {
     const myHasanat = cu.totalHasanat || 0;
     if (myHasanat <= 0) { hide(); return; }
     const lbList = Array.isArray(list) ? list : [];
-    const above = lbList.filter(([, d]) => (d && d.totalHasanat || 0) > myHasanat).length;
-    const rank = above + 1;
+    const rank = lbList.filter(([,d]) => (d && d.totalHasanat||0) > myHasanat).length + 1;
     const total = lbList.length + 1;
-    if (chip) {
-      const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : ('#' + toArabicNum(rank));
-      chip.textContent = medal;
-      chip.style.display = 'inline-flex';
-    }
+    if (chip) { chip.textContent = rank===1?'🥇':rank===2?'🥈':rank===3?'🥉':('#'+toArabicNum(rank)); chip.style.display='inline-flex'; }
     if (card) {
-      const t = document.getElementById('grcTitle');
-      const mine = document.getElementById('grcMine');
-      if (t) t.textContent = '🏆 ترتيبك التقريبي';
-      if (mine) mine.style.display = '';
-      const rankEl = document.getElementById('grcRank');
-      const subEl  = document.getElementById('grcSub');
-      const msgEl  = document.getElementById('grcMsg');
-      if (rankEl) rankEl.textContent = toArabicNum(rank);
-      if (subEl)  subEl.innerHTML = 'من بين <b style="color:var(--gold-light);">' + formatBigNum(total) + '</b> لاعب • <b style="color:var(--gold-light);">' + formatBigNum(myHasanat) + '</b> نقطة';
-      if (msgEl)  msgEl.textContent = '🕊️ سجّل دخولك لتظهر في الترتيب الرسمي';
-      card.style.display = '';
+      const t=document.getElementById('grcTitle'),mine=document.getElementById('grcMine');
+      if(t) t.textContent='🏆 ترتيبك التقريبي';
+      if(mine) mine.style.display='';
+      const rankEl=document.getElementById('grcRank'),subEl=document.getElementById('grcSub'),msgEl=document.getElementById('grcMsg');
+      if(rankEl) rankEl.textContent=toArabicNum(rank);
+      if(subEl) subEl.innerHTML='من بين <b style="color:var(--gold-light);">'+formatBigNum(total)+'</b> لاعب • <b style="color:var(--gold-light);">'+formatBigNum(myHasanat)+'</b> نقطة';
+      if(msgEl) msgEl.textContent='🕊️ سجّل دخولك لتظهر في الترتيب الرسمي';
+      card.style.display='';
     }
     return;
   }
-
   if (!Array.isArray(list) || list.length === 0) { hide(); return; }
   const mk = window._makeKey;
 
