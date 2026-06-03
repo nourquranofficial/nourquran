@@ -2145,7 +2145,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
           // ★ كتابة فورية في الـ leaderboard حتى لو النقاط صفر عشان الاسم يظهر
           try {
             if (typeof window.fbSaveFullUserData === 'function') window.fbSaveFullUserData(realUsername, merged);
-            if (typeof window.fbSaveUser === 'function') { const _lbTs = (() => { try { return parseInt(localStorage.getItem('nour_name_ts_' + realUsername) || '0', 10); } catch(e) { return 0; } })(); window.fbSaveUser(realUsername, Object.assign({}, merged, {isGuest: !!(merged && merged.isGuest), nameUpdatedAt: _lbTs})); }
+            if (typeof window.fbSaveUser === 'function') window.fbSaveUser(realUsername, Object.assign({}, merged, {isGuest: !!(merged && merged.isGuest)}));
           } catch(e) {}
         } else {
           setTimeout(doIt, 30);
