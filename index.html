@@ -2558,19 +2558,6 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
 
   // ─── عرض اللوحة من البيانات — موحد لكل المستخدمين ───
   window._renderLbFromData = function(data) {
-    // ★ FIX: لو فيه تغيير اسم حديث (أقل من ٥ ثواني) → حدّث البيانات القادمة من Firebase بالاسم الجديد
-    // يمنع الـ onValue listener من إرجاع الاسم القديم وتبوظ التحديث الفوري
-    const _pnc = window._pendingNameChange;
-    if (_pnc && (Date.now() - _pnc.ts) < 5000 && window.currentUser) {
-      const _cu = window.currentUser;
-      const _mk = window._makeKey;
-      if (_mk && _cu.username) {
-        const _ck1 = _mk(_cu.username, false);
-        const _ck2 = _mk(_cu.username, true);
-        if (data[_ck1]) data[_ck1] = { ...data[_ck1], name: _pnc.name };
-        if (data[_ck2]) data[_ck2] = { ...data[_ck2], name: _pnc.name };
-      }
-    }
     const podiumWrap = document.getElementById('lbPodiumWrap');
     const dotsEl    = document.getElementById('lbDots');
     const lb        = document.getElementById('leaderboard');
@@ -4486,9 +4473,8 @@ function _saveNameEdit() {
   // ★ timestamp موحّد — نفس الرقم في localStorage وفي Firebase عشان الـ listener ما يرفضش التحديث
   const _nameTs = Date.now();
 
-  // ★ احفظ الاسم القديم قبل أي تغيير (مهم: لازم يكون هنا قبل currentUser.name = n)
-  const _oldName = currentUser.name || '';
-  window._oldDisplayName = _oldName;
+  // ★ احفظ الاسم القديم قبل التغيير عشان نطابق به في _lbAllList
+  window._oldDisplayName = currentUser.name || '';
 
   // ★ ١. حدّث الـ UI فوراً (قبل أي حاجة)
   currentUser.name = n;
@@ -4544,8 +4530,7 @@ function _saveNameEdit() {
       // ٢. امسح أي مدخل في الـ leaderboard بالاسم القديم أو الجديد (قبل التعديل)
       // نجيب البيانات الحالية ونشيل أي مفتاح مش هو المفتاح الصحيح ومرتبط بنفس المستخدم
       const _allEntries = window._lbAllList || [];
-      // ★ FIX: استخدم _oldName (الاسم الحقيقي قبل التغيير) مش currentUser.name اللي بقى الاسم الجديد
-      const _oldNameNorm = _oldName.trim().toLowerCase();
+      const _oldNameNorm = (currentUser && currentUser.name ? currentUser.name : '').trim().toLowerCase();
       const _newNameNorm = n.trim().toLowerCase();
       _allEntries.forEach(([entryKey, entryData]) => {
         if (!entryData || !entryData.name) return;
@@ -4570,38 +4555,14 @@ function _saveNameEdit() {
     window._lbAllList = window._lbAllList.map(([k, d]) => {
       const isOwn = _cu2 && (
         (_mk2 && (k === _mk2(_cu2.username, false) || k === _mk2(_cu2.username, true) || k === _mk2(_cu2.username, _cu2.isGuest || false))) ||
-        // ★ FIX: قارن بالاسم القديم (قبل التغيير) مش الاسم الجديد
-        (d && d.name && (d.name.trim().toLowerCase() === _oldName.trim().toLowerCase()))
+        (d && d.name && (d.name.trim().toLowerCase() === (window._oldDisplayName || '').trim().toLowerCase()))
       );
       if (isOwn) return [k, { ...d, name: n }];
       return [k, d];
     });
   }
 
-  // ★ FIX: حدّث _lbTop3Data بالاسم الجديد لو المستخدم في الـ top 3
-  if (Array.isArray(window._lbTop3Data)) {
-    const _cu3 = window.currentUser;
-    const _mk3 = window._makeKey;
-    window._lbTop3Data = window._lbTop3Data.map(([k, d, emoji, color, border, isMe]) => {
-      const isOwn = isMe || (_cu3 && _mk3 && (
-        k === _mk3(_cu3.username, false) || k === _mk3(_cu3.username, true)
-      ));
-      if (isOwn) return [k, { ...d, name: n }, emoji, color, border, true];
-      return [k, d, emoji, color, border, isMe];
-    });
-  }
-
-  // ★ FIX: ارسم اللوحة من الـ cache المحدّث (بدل ما نرجع لـ Firebase اللي لسه ما اتحدثش)
-  // لو fbRenderLeaderboard رجعت البيانات القديمة من Firebase هتمسح التعديل — فنتجنبها لفترة قصيرة
-  window._pendingNameChange = { name: n, ts: Date.now() };
-  if (typeof window._renderLbFromData === 'function' && Array.isArray(window._lbAllList)) {
-    // ابنِ data object من الـ _lbAllList المحدّث عشان _renderLbFromData تشتغل صح
-    const _lbDataObj = {};
-    window._lbAllList.forEach(([k, d]) => { if (d) _lbDataObj[k] = d; });
-    window._renderLbFromData(_lbDataObj);
-  } else if (typeof renderLeaderboard === 'function') {
-    renderLeaderboard();
-  }
+  if (typeof renderLeaderboard === 'function') renderLeaderboard();
   // ★ FIX: حدّث كارت الترتيب العام كمان مرة بعد تحديث الاسم (بعد renderLeaderboard)
   setTimeout(() => { if (typeof updateGlobalRankChip === 'function') updateGlobalRankChip(); }, 200);
 }
