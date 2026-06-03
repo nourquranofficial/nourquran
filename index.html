@@ -2583,9 +2583,8 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       if (_seenKeys.has(k)) continue; // مفتاح مكرر حرفياً
       _seenKeys.add(k);
 
-      // استخرج الـ canonical key لو أمكن (يشيل التكرار بسبب encoding مختلف)
-      const _ck = (window._dataKey && d && d.username) ? window._dataKey(d.username) :
-                  (window._dataKey && d && d.name && !d.isGuest) ? null : null;
+      // استخرج الـ canonical key — الـ key نفسه بعد شيل guest__ prefix
+      const _ck = String(k).replace(/^guest__/, '');
       if (_ck) {
         if (_seenCanonical.has(_ck)) continue; // نفس الحساب بمفتاح تاني
         _seenCanonical.add(_ck);
@@ -4468,6 +4467,7 @@ function _saveNameEdit() {
   if (typeof window.fbSaveName === 'function') window.fbSaveName(_email, n, _nameTs);
   if (typeof window.fbSaveUser === 'function') window.fbSaveUser(_email, {
     name: n, isGuest: false,
+    nameUpdatedAt: _nameTs,
     totalHasanat: currentUser.totalHasanat||0,
     totalScore: currentUser.totalScore||0,
     totalGames: currentUser.totalGames||0,
@@ -4512,6 +4512,13 @@ function _saveNameEdit() {
     } catch(e) {}
   })();
 
+  // حدّث _lbAllList محلياً فوراً عشان اللوحة تظهر الاسم الجديد بدون انتظار Firebase
+  if (Array.isArray(window._lbAllList) && window._dataKey) {
+    const _ck = window._dataKey(_email);
+    window._lbAllList = window._lbAllList.map(([k, d]) =>
+      (String(k).replace(/^guest__/,'') === _ck) ? [k, {...d, name: n}] : [k, d]
+    );
+  }
   if (typeof renderLeaderboard === 'function') renderLeaderboard();
 }
 function _cancelNameEdit() {
