@@ -2332,16 +2332,21 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     }
     // transaction: بنقارن الـtimestamp بس ★ دايمًا بناخد الأعلى في النقاط — النقاط مش بتنقص أبدًا
     runTransaction(entryRef, (cur) => {
-      if (cur && (cur.updatedAt || 0) > ts) return cur; // فيه أحدث منه — سيبه
-      // ★ FIX: احمِ اسم العرض — قارن nameUpdatedAt بـ nameUpdatedAt (مش updatedAt)
+      // ★ الاسم الأحدث يكسب دايمًا — مقارنة nameUpdatedAt بـ nameUpdatedAt
       const _curNameTs  = (cur && cur.nameUpdatedAt) || 0;
       const _newNameTs  = data.nameUpdatedAt || 0;
       const _curName    = (cur && cur.name) || '';
       const _newName    = data.name || _curName || username;
-      // ★ اختار الاسم بناءً على أعلى nameUpdatedAt — لو متساويين خد الجديد
       const _safeName   = (_curNameTs > _newNameTs && _curName && !_curName.includes('@'))
                           ? _curName : _newName;
       const _safeNameTs = Math.max(_curNameTs, _newNameTs);
+
+      // لو فيه بيانات أحدث (نقاط) — رجّع cur بس مع تحديث الاسم لو لازم
+      if (cur && (cur.updatedAt || 0) > ts) {
+        if (_safeName === _curName) return cur; // مفيش تغيير
+        return { ...cur, name: _safeName, nameUpdatedAt: _safeNameTs };
+      }
+
       return {
         name:             _safeName,
         totalHasanat:     Math.max((cur && cur.totalHasanat) || 0, data.totalHasanat || 0),
