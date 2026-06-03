@@ -2145,7 +2145,13 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
           // ★ كتابة فورية في الـ leaderboard حتى لو النقاط صفر عشان الاسم يظهر
           try {
             if (typeof window.fbSaveFullUserData === 'function') window.fbSaveFullUserData(realUsername, merged);
-            if (typeof window.fbSaveUser === 'function') window.fbSaveUser(realUsername, Object.assign({}, merged, {isGuest: !!(merged && merged.isGuest)}));
+            if (typeof window.fbSaveUser === 'function') {
+              // ★ FIX: أدخل nameUpdatedAt عشان الـ transaction ما يرجعش للاسم القديم
+              const _lsTs3 = (() => { try { return parseInt(localStorage.getItem('nour_name_ts_' + realUsername) || '0', 10); } catch(e) { return 0; } })();
+              const _sp3 = Object.assign({}, merged, { isGuest: !!(merged && merged.isGuest) });
+              if (_lsTs3 > 0) _sp3.nameUpdatedAt = _lsTs3;
+              window.fbSaveUser(realUsername, _sp3);
+            }
           } catch(e) {}
         } else {
           setTimeout(doIt, 30);
@@ -3784,7 +3790,11 @@ function doLogin() {
           loginSuccess(realName || user, merged);
           // ★ كتابة فورية عشان الاسم يظهر في الـ leaderboard
           if (typeof window.fbSaveUser === 'function') {
-            window.fbSaveUser(user, Object.assign({}, merged, {isGuest: !!(merged && merged.isGuest)}));
+            // ★ FIX: أدخل nameUpdatedAt عشان الـ transaction يحمي الاسم المعدّل
+            const _lsTs = (() => { try { return parseInt(localStorage.getItem('nour_name_ts_' + user) || '0', 10); } catch(e) { return 0; } })();
+            const _savePayload = Object.assign({}, merged, { isGuest: !!(merged && merged.isGuest) });
+            if (_lsTs > 0) _savePayload.nameUpdatedAt = _lsTs;
+            window.fbSaveUser(user, _savePayload);
           }
         };
         // ★ ادخل فوراً بالبيانات المحلية — الـ Firebase data تيجي في الخلفية
@@ -3799,7 +3809,16 @@ function doLogin() {
         if (typeof window.fbGetAccount === 'function') {
           window.fbGetAccount(user, (realName, fbData) => {
             if (fbData && window.currentUser && window.currentUser.username === user) {
-              if (typeof window.fbSaveUser === 'function') window.fbSaveUser(user, { ...fbData, isGuest: false });
+              // ★ FIX: امنح الاسم المحلي المعدّل الأولوية — أدخل nameUpdatedAt من localStorage
+              // عشان الـ transaction في fbSaveUser ما يرجعش للاسم القديم من السحابة
+              const _localName = (typeof window._getStoredName === 'function') ? window._getStoredName(user) : null;
+              const _localTs   = (() => { try { return parseInt(localStorage.getItem('nour_name_ts_' + user) || '0', 10); } catch(e) { return 0; } })();
+              const _mergedForSave = { ...fbData, isGuest: false };
+              if (_localName && !_localName.includes('@') && _localTs > 0) {
+                _mergedForSave.name = _localName;
+                _mergedForSave.nameUpdatedAt = _localTs;
+              }
+              if (typeof window.fbSaveUser === 'function') window.fbSaveUser(user, _mergedForSave);
             }
             // ★ FIX: fbGetAccount دلوقتي بيحدّث الـ UI من الـ leaderboard تلقائياً
           });
