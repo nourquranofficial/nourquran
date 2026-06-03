@@ -2317,20 +2317,12 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       const rawOld = (isGuest ? 'guest__' : '') + String(username).replace(/[\.\#\$\/\[\]]/g, '_');
       if (rawOld !== key) remove(ref(db, LB_PATH + rawOld)).catch(() => {});
     } catch (e) {}
-    // ★ مسح إضافي: لو الاسم اتغيّر، امسح أي مدخل في اللوحة بالاسم الجديد ده (مفتاحه غير canonical)
-    // ده بيحل مشكلة ظهور الاسم مرتين لما بيتغيّر
+    // مسح مفتاح الاسم القديم فقط (مش مفاتيح اللاعبين التانيين)
     if (!isGuest && data.name) {
-      const _newNameNorm = (data.name || '').trim().toLowerCase();
-      const _allList = window._lbAllList || [];
-      _allList.forEach(([ek]) => {
-        if (ek !== key && ek !== oldKey) {
-          // ممكن يكون مفتاح قديم — امسحه احتياطاً (Firebase transaction كفيل بالصح)
-          remove(ref(db, LB_PATH + ek)).catch(() => {});
-        }
-      });
-      // ★ مسح المفاتيح المبنية على الاسم القديم لو مختلف عن الإيميل
       const _nameBasedKey = String(data.name).replace(/[\.\#\$\/\[\]\@\s]/g,'_').toLowerCase();
-      if (_nameBasedKey !== key) remove(ref(db, LB_PATH + _nameBasedKey)).catch(() => {});
+      if (_nameBasedKey !== key && _nameBasedKey !== oldKey) {
+        remove(ref(db, LB_PATH + _nameBasedKey)).catch(() => {});
+      }
     }
 
     const ts = data.updatedAt || Date.now();
