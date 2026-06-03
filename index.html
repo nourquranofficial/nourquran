@@ -2344,11 +2344,12 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       // لو فيه بيانات أحدث (نقاط) — رجّع cur بس مع تحديث الاسم لو لازم
       if (cur && (cur.updatedAt || 0) > ts) {
         if (_safeName === _curName) return cur; // مفيش تغيير
-        return { ...cur, name: _safeName, nameUpdatedAt: _safeNameTs };
+        return { ...cur, name: _safeName, nameUpdatedAt: _safeNameTs, username: username };
       }
 
       return {
         name:             _safeName,
+        username:         username,
         totalHasanat:     Math.max((cur && cur.totalHasanat) || 0, data.totalHasanat || 0),
         totalScore:       Math.max((cur && cur.totalScore)   || 0, data.totalScore   || 0),
         totalGames:       Math.max((cur && cur.totalGames)   || 0, data.totalGames   || 0),
@@ -4522,6 +4523,16 @@ function _saveNameEdit() {
     } catch(e) {}
   })();
 
+  // ★ حدّث _lbAllList محلياً فوراً عشان الـ render يظهر الاسم الجديد بدون انتظار Firebase
+  if (Array.isArray(window._lbAllList)) {
+    const _canonKey = window._dataKey ? window._dataKey(_email) : null;
+    window._lbAllList = window._lbAllList.map(([k, d]) => {
+      if (k === _canonKey || (d && d.username && window._dataKey && window._dataKey(d.username) === _canonKey)) {
+        return [k, { ...d, name: n, nameUpdatedAt: _nameTs, username: _email }];
+      }
+      return [k, d];
+    });
+  }
   if (typeof renderLeaderboard === 'function') renderLeaderboard();
 }
 function _cancelNameEdit() {
