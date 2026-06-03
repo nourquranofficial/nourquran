@@ -2499,14 +2499,22 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     try {
       const users = (typeof window.getUsers === 'function') ? window.getUsers() : {};
       const data = {};
-      Object.entries(users).forEach(([name, d]) => {
+      Object.entries(users).forEach(([key, d]) => {
         if ((d.totalHasanat || 0) > 0)
-          data[name] = { name, totalHasanat: d.totalHasanat||0, totalScore: d.totalScore||0, totalGames: d.totalGames||0, isGuest: d.isGuest||false };
+          data[key] = { name: d.name || d.username || key, totalHasanat: d.totalHasanat||0, totalScore: d.totalScore||0, totalGames: d.totalGames||0, isGuest: d.isGuest||false };
       });
       window._renderLbFromData(data);   // حتى لو فاضي، ده بيشيل رسالة "جاري التحميل"
     } catch (e) { window._renderLbFromData({}); }
   }
-  _attachLbListener();
+
+  // ─── ضمان الـ Auth قبل قراءة الـ leaderboard ───
+  if (auth.currentUser) {
+    _attachLbListener();
+  } else {
+    signInAnonymously(auth)
+      .then(() => _attachLbListener())
+      .catch(() => _attachLbListener());
+  }
 
   // ★ تنظيف تلقائي: مسح الضيوف من الداتا بيز كل ٣ أيام
   (function _cleanOldGuests() {
@@ -4953,9 +4961,9 @@ function renderLeaderboard() {
   // fallback محلي فقط لو Firebase مش متاح
   const users = getUsers();
   const data = {};
-  Object.entries(users).forEach(([name, d]) => {
+  Object.entries(users).forEach(([key, d]) => {
     if ((d.totalHasanat || 0) > 0) {
-      data[name] = { name, totalHasanat: d.totalHasanat||0, totalScore: d.totalScore||0, totalGames: d.totalGames||0, isGuest: d.isGuest||false };
+      data[key] = { name: d.name || d.username || key, totalHasanat: d.totalHasanat||0, totalScore: d.totalScore||0, totalGames: d.totalGames||0, isGuest: d.isGuest||false };
     }
   });
   if (typeof window._renderLbFromData === 'function') {
