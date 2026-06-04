@@ -2710,6 +2710,8 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         const _canon0 = (window._dataKey ? window._dataKey(_cu0.username) : _email0);
         const _curName0 = (_cu0.name || '').trim().toLowerCase();
         const _oldNames0 = (() => { try { return (JSON.parse(localStorage.getItem('nour_old_names_' + _cu0.username) || '[]') || []).map(x => String(x).trim().toLowerCase()); } catch(e) { return []; } })();
+        // نقاطي من الذاكرة (مصدر الحقيقة) — للمطابقة بالنقاط
+        const _myH0 = _cu0.totalHasanat || 0, _myS0 = _cu0.totalScore || 0, _myG0 = _cu0.totalGames || 0;
         const _isMine0 = (k, d) => {
           const kl = String(k).toLowerCase();
           if (_mk0 && (k === _mk0(_cu0.username, false) || k === _mk0(_cu0.username, true))) return true;
@@ -2721,34 +2723,16 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
           // اسم قديم اتغيّر منه (متسجّل عندنا) يطابق اسم الصفّ أو مفتاحه
           if (_oldNames0.length && d && d.name && _oldNames0.indexOf(d.name.trim().toLowerCase()) !== -1) return true;
           if (_oldNames0.length && _oldNames0.indexOf(_norm0(k)) !== -1) return true;
+          // ★ نفس نقاطي بالظبط (حسنات + نقاط + جلسات) = نسخة مؤكدة من حسابي (زي salama)
+          if (_myH0 > 0 && d && (d.totalHasanat||0) === _myH0 && (d.totalScore||0) === _myS0 && (d.totalGames||0) === _myG0) return true;
+          // ★ مفتاح قديم بكلمة واحدة (مش مفتاح إيميل) ونفس حسناتي = نسختي القديمة
+          //   آمن: الحسابات الحديثة مفاتيحها فيها "_" فمستحيل تتجمّع غلط
+          const _legacyBare = !String(k).includes('_') && !/^u[0-9a-f]{4,}$/i.test(String(k));
+          if (_legacyBare && _myH0 > 0 && d && (d.totalHasanat||0) === _myH0) return true;
           return false;
         };
         const _mineIdx = [];
         for (let i = 0; i < list.length; i++) if (_isMine0(list[i][0], list[i][1])) _mineIdx.push(i);
-        // إشارة إضافية (عرض فقط): لو فيه صفّ تاني بنفس النقاط بالظبط = نسخة من حسابي
-        if (_mineIdx.length >= 1) {
-          const anchor = list[_mineIdx[0]][1] || {};
-          const _aH = anchor.totalHasanat || 0, _aS = anchor.totalScore || 0, _aG = anchor.totalGames || 0;
-          if (_aH > 0) {
-            for (let i = 0; i < list.length; i++) {
-              if (_mineIdx.indexOf(i) !== -1) continue;
-              const k = list[i][0];
-              const d = list[i][1] || {};
-              // (أ) نفس النقاط بالظبط (حسنات + نقاط + جلسات) = نسخة مؤكدة من حسابي
-              if ((d.totalHasanat||0) === _aH && (d.totalScore||0) === _aS && (d.totalGames||0) === _aG) {
-                _mineIdx.push(i); continue;
-              }
-              // (ب) مفتاح قديم بكلمة واحدة (مش مفتاح إيميل — مفيهوش "_") ونفس الحسنات
-              //     ده بيمسك "salama" وأمثاله حتى لو عدد الجلسات مختلف. آمن: الحسابات
-              //     الحديثة كلها مفاتيحها فيها "_" (من الإيميل) فمستحيل تتجمّع غلط.
-              const _kStr = String(k);
-              const _isLegacyBare = !_kStr.includes('_') && !/^u[0-9a-f]{4,}$/i.test(_kStr);
-              if (_isLegacyBare && (d.totalHasanat||0) === _aH) {
-                _mineIdx.push(i); continue;
-              }
-            }
-          }
-        }
         if (_mineIdx.length >= 1) {
           // ادمج كل صفوفي في الأول (الأعلى ترتيبًا)
           const keepI = _mineIdx[0];
@@ -3092,7 +3076,7 @@ function _callWhenReady(fn, args) {
       <div class="logo-sub">تحدي حفظ القرآن الكريم</div>
       <div style="display:inline-block;margin-top:6px;padding:3px 12px;background:rgba(201,151,58,0.12);border:1px solid rgba(201,151,58,0.35);border-radius:20px;font-size:10px;color:rgba(245,217,139,0.7);letter-spacing:0.5px;">★ الموقع الرسمي الوحيد ★</div>
       <div style="margin-top:6px;font-size:10px;color:rgba(245,217,139,0.55);">🔊 الصوت: الشيخ مشاري بن راشد العفاسي — مقدَّم من <a href="https://everyayah.com" target="_blank" rel="noopener" style="color:rgba(201,151,58,0.8);text-decoration:underline;">everyayah.com</a></div>
-      <div style="margin-top:4px;font-size:10px;"><a href="privacy-policy.html" target="_blank" style="color:rgba(201,151,58,0.4);text-decoration:none;">سياسة الخصوصية</a> <span style="color:rgba(245,217,139,0.35);">· v41</span></div>
+      <div style="margin-top:4px;font-size:10px;"><a href="privacy-policy.html" target="_blank" style="color:rgba(201,151,58,0.4);text-decoration:none;">سياسة الخصوصية</a> <span style="color:rgba(245,217,139,0.35);">· v42</span></div>
     </div>
 
     <!-- USER BAR -->
