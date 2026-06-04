@@ -2590,6 +2590,66 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     remove(ref(db, LB_PATH + k)).catch(() => {});
   };
 
+  // ─── عرض الحسابات القديمة (مفاتيح بالاسم) عشان تختار اللي تدمجه ───
+  window.findMyOldAccounts = function() {
+    return get(ref(db, LB_PATH)).then(s => {
+      const data = s.val() || {};
+      const out = [];
+      Object.entries(data).forEach(([k, d]) => {
+        const bare = !String(k).includes('_') && !/^u[0-9a-f]{4,}$/i.test(String(k)) && !String(k).startsWith('guest__');
+        if (bare) out.push({ key: k, name: (d && d.name) || k, hasanat: (d && d.totalHasanat) || 0, games: (d && d.totalGames) || 0 });
+      });
+      out.sort((a, b) => b.hasanat - a.hasanat);
+      try { console.table(out); } catch (e) { console.log(out); }
+      return out;
+    });
+  };
+
+  // ─── دمج حساب قديم في الحساب الحالي (يُشغَّل مرة واحدة من الكونسول) ───
+  //     مثال: mergeOldAccount('salama')  — آمن: لازم تحدّد المفتاح بنفسك
+  window.mergeOldAccount = function(oldKey) {
+    const cu = window.currentUser;
+    if (!cu || !cu.username) { console.error('❌ سجّل دخول الأول'); return Promise.reject('no user'); }
+    if (!oldKey) { console.error('❌ اكتب مفتاح الحساب القديم، مثال: mergeOldAccount("salama")'); return Promise.reject('no key'); }
+    const canon = dataKey(cu.username);
+    if (String(oldKey).toLowerCase() === String(canon).toLowerCase()) { console.error('❌ ده حسابك الحالي نفسه'); return Promise.reject('same'); }
+    return Promise.all([
+      get(ref(db, LB_PATH + oldKey)).then(s => s.val()).catch(() => null),
+      get(ref(db, 'users/' + oldKey + '/data')).then(s => s.val()).catch(() => null),
+      get(ref(db, LB_PATH + canon)).then(s => s.val()).catch(() => null),
+      get(ref(db, 'users/' + canon + '/data')).then(s => s.val()).catch(() => null),
+    ]).then(([oldLb, oldData, curLb, curData]) => {
+      const pick = (...vals) => Math.max(0, ...vals.map(v => v || 0));
+      const H = pick(oldLb && oldLb.totalHasanat, oldData && oldData.totalHasanat, curLb && curLb.totalHasanat, curData && curData.totalHasanat, cu.totalHasanat);
+      const S = pick(oldLb && oldLb.totalScore, oldData && oldData.totalScore, curLb && curLb.totalScore, curData && curData.totalScore, cu.totalScore);
+      const G = pick(oldLb && oldLb.totalGames, oldData && oldData.totalGames, curLb && curLb.totalGames, curData && curData.totalGames, cu.totalGames);
+      const name = cu.name || (curLb && curLb.name) || cu.username;
+      const now = Date.now();
+      if (H <= 0) { console.error('❌ الحساب القديم "' + oldKey + '" مالهوش نقاط أو مش موجود'); return Promise.reject('empty'); }
+      return Promise.all([
+        set(ref(db, 'users/' + canon + '/data'), { totalHasanat: H, totalScore: S, totalGames: G, updatedAt: now }),
+        set(ref(db, LB_PATH + canon), { name: name, nameUpdatedAt: now, totalHasanat: H, totalScore: S, totalGames: G, isGuest: false, updatedAt: now }),
+      ]).then(() => Promise.all([
+        remove(ref(db, LB_PATH + oldKey)).catch(() => {}),
+        remove(ref(db, 'users/' + oldKey)).catch(() => {}),
+      ])).then(() => {
+        cu.totalHasanat = H; cu.totalScore = S; cu.totalGames = G; cu.updatedAt = now;
+        window.currentUser = cu;
+        if (typeof saveCurrentUser === 'function') saveCurrentUser();
+        try {
+          const oldName = (oldLb && oldLb.name) || oldKey;
+          const onKey = 'nour_old_names_' + cu.username;
+          let arr = []; try { arr = JSON.parse(localStorage.getItem(onKey) || '[]'); } catch (e) {}
+          if (arr.indexOf(oldName) === -1) { arr.push(oldName); localStorage.setItem(onKey, JSON.stringify(arr)); }
+        } catch (e) {}
+        if (typeof updateHomeStats === 'function') updateHomeStats();
+        if (typeof renderLeaderboard === 'function') renderLeaderboard();
+        console.log('✅ تم الدمج: ' + H + ' نقطة / ' + G + ' جلسة → "' + name + '". واتمسح "' + oldKey + '" نهائيًا.');
+        return { hasanat: H, score: S, games: G };
+      });
+    });
+  };
+
   // ─── جلب يدوي فوري (للزرار ولأول تحميل) ───
   window.fbRenderLeaderboard = function() {
     get(ref(db, LB_PATH)).then(s => {
@@ -2749,6 +2809,16 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
           keep.totalHasanat = Math.max(keep.totalHasanat || 0, _cu0.totalHasanat || 0);
           keep.totalScore   = Math.max(keep.totalScore   || 0, _cu0.totalScore   || 0);
           keep.totalGames   = Math.max(keep.totalGames   || 0, _cu0.totalGames   || 0);
+          // ★★ استرجاع: لو صفّي في اللوحة أعلى من اللي في الذاكرة (نقاط اتمسحت بالغلط) →
+          //     رجّعها للحساب نفسه واحفظها (مستحيل تنقص) ★★
+          if ((keep.totalHasanat||0) > (_cu0.totalHasanat||0) || (keep.totalGames||0) > (_cu0.totalGames||0)) {
+            _cu0.totalHasanat = Math.max(_cu0.totalHasanat || 0, keep.totalHasanat || 0);
+            _cu0.totalScore   = Math.max(_cu0.totalScore   || 0, keep.totalScore   || 0);
+            _cu0.totalGames   = Math.max(_cu0.totalGames   || 0, keep.totalGames   || 0);
+            window.currentUser = _cu0;
+            if (typeof saveCurrentUser === 'function') saveCurrentUser();
+            if (typeof updateHomeStats === 'function') updateHomeStats();
+          }
           // ★ خلّي مفتاح صفّي = canonical عشان الكارت/الميدالية يتعرّفوا عليّ دايمًا
           list[keepI][0] = _canon0;
           // احذف باقي صفوفي من العرض (لو فيه تكرار)
@@ -2792,19 +2862,14 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         if (myEntry) {
           const e = myEntry[1] || {};
           const eTs = e.updatedAt || 0;
-          const _eZero = (e.totalHasanat||0) === 0 && (e.totalScore||0) === 0 && (e.totalGames||0) === 0;
+          // ★★ لوحة الشرف ما تنقّصش نقاطي أبدًا — ناخد الأعلى بس (الكسب من جهاز تاني يظهر،
+          //     لكن الصفّ بالاسم-فقط أو الصفّ الناقص مايقدرش يمسح نقاطي) ★★
           let _ch = false;
-          if (_eZero && eTs > 0 && eTs > (cu.updatedAt || 0)) {
-            // ★ تصفير حقيقي من جهاز تاني (كل القيم صفر + طابع زمني أحدث) → نزّل لصفر
-            cu.totalHasanat = 0; cu.totalScore = 0; cu.totalGames = 0; cu.updatedAt = eTs; _ch = true;
-          } else {
-            // ★ غير كده: ناخد الأعلى دايمًا — مستحيل النقاط تنقص بعد تسجيل الدخول
-            if ((e.totalHasanat||0) > (cu.totalHasanat||0)) { cu.totalHasanat = e.totalHasanat; _ch = true; }
-            if ((e.totalScore||0)   > (cu.totalScore||0))   { cu.totalScore   = e.totalScore;   _ch = true; }
-            if ((e.totalGames||0)   > (cu.totalGames||0))   { cu.totalGames   = e.totalGames;   _ch = true; }
-            if (_ch) cu.updatedAt = Math.max(cu.updatedAt || 0, eTs);
-          }
+          if ((e.totalHasanat||0) > (cu.totalHasanat||0)) { cu.totalHasanat = e.totalHasanat; _ch = true; }
+          if ((e.totalScore||0)   > (cu.totalScore||0))   { cu.totalScore   = e.totalScore;   _ch = true; }
+          if ((e.totalGames||0)   > (cu.totalGames||0))   { cu.totalGames   = e.totalGames;   _ch = true; }
           if (_ch) {
+            cu.updatedAt = Math.max(cu.updatedAt || 0, eTs);
             window.currentUser = cu;
             if (typeof saveCurrentUser === 'function') saveCurrentUser();
             const _h = document.getElementById('totalHasanat'); if (_h && typeof formatBigNum === 'function') _h.textContent = formatBigNum(cu.totalHasanat);
@@ -3076,7 +3141,7 @@ function _callWhenReady(fn, args) {
       <div class="logo-sub">تحدي حفظ القرآن الكريم</div>
       <div style="display:inline-block;margin-top:6px;padding:3px 12px;background:rgba(201,151,58,0.12);border:1px solid rgba(201,151,58,0.35);border-radius:20px;font-size:10px;color:rgba(245,217,139,0.7);letter-spacing:0.5px;">★ الموقع الرسمي الوحيد ★</div>
       <div style="margin-top:6px;font-size:10px;color:rgba(245,217,139,0.55);">🔊 الصوت: الشيخ مشاري بن راشد العفاسي — مقدَّم من <a href="https://everyayah.com" target="_blank" rel="noopener" style="color:rgba(201,151,58,0.8);text-decoration:underline;">everyayah.com</a></div>
-      <div style="margin-top:4px;font-size:10px;"><a href="privacy-policy.html" target="_blank" style="color:rgba(201,151,58,0.4);text-decoration:none;">سياسة الخصوصية</a> <span style="color:rgba(245,217,139,0.35);">· v42</span></div>
+      <div style="margin-top:4px;font-size:10px;"><a href="privacy-policy.html" target="_blank" style="color:rgba(201,151,58,0.4);text-decoration:none;">سياسة الخصوصية</a> <span style="color:rgba(245,217,139,0.35);">· v44</span></div>
     </div>
 
     <!-- USER BAR -->
