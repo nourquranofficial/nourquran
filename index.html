@@ -2293,6 +2293,88 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   window.SHOW_GUESTS_IN_RANKING = true;
   // ════════════════════════════════════════════════════════════
 
+  // ════════════════════════════════════════════════════════════
+  // ★★ توحيد مفاتيح لوحة الشرف — يمنع ظهور نفس اللاعب مرتين ★★
+  //   عبر نسخ التطبيق القديمة + دخول جوجل/فيسبوك اتغيّرت طريقة عمل المفتاح
+  //   (حروف كبيرة/@/guest__) فممكن نفس الحساب يبقى ليه أكتر من صفّ.
+  // ════════════════════════════════════════════════════════════
+  window._normLbKey = function(k) {
+    return String(k || '')
+      .replace(/^guest__/, '')
+      .replace(/[@.#$\/\[\]]/g, '_')
+      .toLowerCase();
+  };
+  window._mergeLbEntries = function(entries) {
+    let best = { totalHasanat: 0, totalScore: 0, totalGames: 0, updatedAt: 0,
+                 nameUpdatedAt: 0, mistakesClearedAt: 0, name: null, isGuest: true };
+    let repKey = null;
+    for (const [k, d] of entries) {
+      if (!d) continue;
+      best.totalHasanat = Math.max(best.totalHasanat, d.totalHasanat || 0);
+      best.totalScore   = Math.max(best.totalScore,   d.totalScore   || 0);
+      best.totalGames   = Math.max(best.totalGames,   d.totalGames   || 0);
+      best.updatedAt     = Math.max(best.updatedAt,     d.updatedAt     || 0);
+      best.mistakesClearedAt = Math.max(best.mistakesClearedAt, d.mistakesClearedAt || 0);
+      const dName = (d.name && !String(d.name).includes('@')) ? d.name : null;
+      const dNameTs = d.nameUpdatedAt || 0;
+      if (dName && (dNameTs >= best.nameUpdatedAt || !best.name)) {
+        best.name = dName; best.nameUpdatedAt = Math.max(best.nameUpdatedAt, dNameTs);
+      }
+      if (!d.isGuest) best.isGuest = false;
+      const norm = window._normLbKey(k);
+      if (k === norm && !String(k).startsWith('guest__')) repKey = k;
+      if (repKey === null) repKey = norm;
+    }
+    if (!repKey && entries.length) repKey = window._normLbKey(entries[0][0]);
+    return [repKey, best];
+  };
+  window._dedupeLbData = function(data) {
+    if (!data || typeof data !== 'object') return data || {};
+    const groups = {};
+    for (const k of Object.keys(data)) {
+      const n = window._normLbKey(k);
+      (groups[n] = groups[n] || []).push([k, data[k]]);
+    }
+    const out = {};
+    for (const n of Object.keys(groups)) {
+      const g = groups[n];
+      if (g.length === 1) { out[g[0][0]] = g[0][1]; continue; }
+      const [repKey, merged] = window._mergeLbEntries(g);
+      out[repKey] = merged;
+    }
+    return out;
+  };
+  let _lbCleanupDone = false;
+  window._cleanupMyLbDuplicates = function(username) {
+    if (!username || _lbCleanupDone) return;
+    const canonical = dataKey(username);
+    const canonNorm = window._normLbKey(canonical);
+    get(ref(db, LB_PATH)).then(snap => {
+      const data = snap.val() || {};
+      const dupKeys = Object.keys(data).filter(k =>
+        k !== canonical && window._normLbKey(k) === canonNorm
+      );
+      if (dupKeys.length === 0) { _lbCleanupDone = true; return; }
+      const all = [[canonical, data[canonical]]].concat(dupKeys.map(k => [k, data[k]]))
+        .filter(([, d]) => d);
+      const [, merged] = window._mergeLbEntries(all);
+      set(ref(db, LB_PATH + canonical), {
+        name:             merged.name || username,
+        nameUpdatedAt:    merged.nameUpdatedAt || 0,
+        totalHasanat:     merged.totalHasanat || 0,
+        totalScore:       merged.totalScore   || 0,
+        totalGames:       merged.totalGames   || 0,
+        isGuest:          merged.isGuest || false,
+        updatedAt:        Date.now(),
+        mistakesClearedAt: merged.mistakesClearedAt || 0,
+      }).then(() => {
+        dupKeys.forEach(k => remove(ref(db, LB_PATH + k)).catch(() => {}));
+      }).catch(() => {});
+      _lbCleanupDone = true;
+    }).catch(() => {});
+  };
+  window._resetLbCleanup = function() { _lbCleanupDone = false; };
+
   // ─── رفع بيانات اللاعب — "الأحدث يكسب" (LWW) عشان الكسب والتصفير يتوحّدوا ───
   window.fbSaveUser = function(username, data) {
     if (!username) return;
@@ -2375,12 +2457,31 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   window.fbResetLeaderboard = function(username, isGuest) {
     if (!username) return;
     const key = isGuest ? makeKey(username, true) : dataKey(username);
-    set(ref(db, LB_PATH + key), {
-      name: username,
+    // ★ حافظ على الاسم الحقيقي — ما نرجّعهوش للإيميل بعد التصفير
+    const _realName = (window.currentUser && window.currentUser.name && !window.currentUser.name.includes('@'))
+      ? window.currentUser.name
+      : (() => { try { return localStorage.getItem('nour_name_' + username); } catch(e) { return null; } })()
+      || username;
+    const _writeZero = () => set(ref(db, LB_PATH + key), {
+      name: _realName,
+      nameUpdatedAt: (() => { try { return parseInt(localStorage.getItem('nour_name_ts_' + username) || '0', 10) || 0; } catch(e) { return 0; } })(),
       totalScore: 0, totalGames: 0, totalHasanat: 0,
       isGuest: isGuest || false,
       updatedAt: Date.now(),
     }).catch(() => {});
+    // ★★ امسح أي صفوف مكرّرة لنفس اللاعب الأول — عشان الدمج ما يرجّعش نقاط قديمة ★★
+    if (typeof window._normLbKey === 'function') {
+      const canonNorm = window._normLbKey(key);
+      get(ref(db, LB_PATH)).then(snap => {
+        const all = snap.val() || {};
+        Object.keys(all).forEach(k => {
+          if (k !== key && window._normLbKey(k) === canonNorm) remove(ref(db, LB_PATH + k)).catch(() => {});
+        });
+        _writeZero();
+      }).catch(_writeZero);
+    } else {
+      _writeZero();
+    }
   };
 
   // ★ مسح كل بيانات المستخدم من Firebase نهائياً
@@ -2527,51 +2628,32 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   }).catch(() => {});
 
   // ─── عرض اللوحة من البيانات — موحد لكل المستخدمين ───
-  window._renderLbFromData = function(data) {
+  window._renderLbFromData = function(rawData) {
     const podiumWrap = document.getElementById('lbPodiumWrap');
     const dotsEl    = document.getElementById('lbDots');
     const lb        = document.getElementById('leaderboard');
     if (!podiumWrap) return;
 
+    // ★★ توحيد فوري بالمفتاح المُطبَّع: يمنع ظهور نفس اللاعب مرتين ★★
+    // (الاسم القديم + الجديد ليهم نفس المفتاح المُطبَّع — فبيتجمّعوا في صفّ واحد)
+    const data = (typeof window._dedupeLbData === 'function') ? window._dedupeLbData(rawData) : (rawData || {});
+
     const toA = n => String(Math.round(n || 0)).replace(/\d/g, d => '٠١٢٣٤٥٦٧٨٩'[d]);
 
-    // ترتيب تنازلي حسب الحسنات (مع احترام مفتاح ظهور الضيوف)
+    // ترتيب تنازلي: الحسنات → الجلسات → النقاط → المفتاح (tiebreakers مستقرة)
     const _showGuests = window.SHOW_GUESTS_IN_RANKING !== false;
-    const _rawList = Object.entries(data || {})
+    const list = Object.entries(data || {})
       .filter(([k, d]) => d && d.name && (d.totalHasanat || 0) > 0 &&
         (_showGuests || (!d.isGuest && !String(k).startsWith('guest__'))))
-      .sort(([, a], [, b]) => (b.totalHasanat || 0) - (a.totalHasanat || 0));
-
-    // ★ إزالة التكرار الشامل: بالاسم + بالـ key + بالـ canonical key (للمفاتيح المشفرة)
-    // يمنع ظهور نفس الشخص أكتر من مرة بسبب: تغيير الاسم / مفاتيح قديمة / encoding مختلف
-    const _seenNames    = new Map(); // name.toLowerCase() → index في الـ list النهائية
-    const _seenKeys     = new Set(); // مفاتيح Firebase الحرفية
-    const _seenCanonical = new Set(); // canonical keys (الإيميل المُرمَّز)
-    const list = [];
-    for (const [k, d] of _rawList) {
-      if (_seenKeys.has(k)) continue; // مفتاح مكرر حرفياً
-      _seenKeys.add(k);
-
-      // استخرج الـ canonical key لو أمكن (يشيل التكرار بسبب encoding مختلف)
-      const _ck = (window._dataKey && d && d.username) ? window._dataKey(d.username) :
-                  (window._dataKey && d && d.name && !d.isGuest) ? null : null;
-      if (_ck) {
-        if (_seenCanonical.has(_ck)) continue; // نفس الحساب بمفتاح تاني
-        _seenCanonical.add(_ck);
-      }
-
-      const _normName = (d.name || '').trim().toLowerCase();
-      if (_normName && _seenNames.has(_normName)) {
-        // نفس الاسم موجود بالفعل — ده تكرار بسبب مفتاح قديم أو تغيير الاسم
-        // امسح المدخل المكرر من Firebase في الخلفية (cleanup تلقائي)
-        if (typeof window._fbRemoveLeaderboardKey === 'function') {
-          window._fbRemoveLeaderboardKey(k);
-        }
-        continue;
-      }
-      if (_normName) _seenNames.set(_normName, list.length);
-      list.push([k, d]);
-    }
+      .sort(([ka, a], [kb, b]) => {
+        const dh = (b.totalHasanat || 0) - (a.totalHasanat || 0);
+        if (dh !== 0) return dh;
+        const dg = (b.totalGames || 0) - (a.totalGames || 0);
+        if (dg !== 0) return dg;
+        const ds = (b.totalScore || 0) - (a.totalScore || 0);
+        if (ds !== 0) return ds;
+        return String(ka).localeCompare(String(kb));
+      });
 
     window._lbAllList = list;
 
@@ -4443,44 +4525,12 @@ function _saveNameEdit() {
     totalGames: currentUser.totalGames||0,
   });
 
-  // ★ ٤. مسح المدخلات المكررة من Firebase — نشيل كل مفتاح مش Canon للإيميل ده
-  // وكمان نمسح أي مدخل بالاسم القديم لو اتغيّر
-  (function _cleanDuplicateKeys() {
-    try {
-      if (typeof window._fbRemoveLeaderboardKey !== 'function') return;
-      const _canonKey = window._dataKey ? window._dataKey(_email) : null;
-      if (!_canonKey) return;
-      const _mk = window._makeKey;
-
-      // ١. مجموعة المفاتيح المحتملة لنفس الإيميل ده
-      const _possibleKeys = new Set();
-      if (_mk) {
-        _possibleKeys.add(_mk(_email, false));
-        _possibleKeys.add(_mk(_email, true));
-      }
-      // نسخة بدون encode عشان نلاقي المفاتيح القديمة جداً
-      try { _possibleKeys.add(String(_email).replace(/[.#$\/\[\]@]/g,'_').toLowerCase()); } catch(e2) {}
-      // امسح كل المفاتيح المحتملة ما عدا المفتاح الصحيح
-      _possibleKeys.forEach(k => {
-        if (k && k !== _canonKey) window._fbRemoveLeaderboardKey(k);
-      });
-
-      // ٢. امسح أي مدخل في الـ leaderboard بالاسم القديم (قبل التعديل)
-      // نجيب البيانات الحالية ونشيل أي مفتاح اسمه بيساوي الاسم القديم (مش المفتاح الصحيح)
-      if (typeof window._lbAllList === 'undefined') return;
-      const _allEntries = window._lbAllList || [];
-      const _newNameNorm = n.trim().toLowerCase();
-      _allEntries.forEach(([entryKey, entryData]) => {
-        if (!entryData || !entryData.name) return;
-        if (entryKey === _canonKey) return; // المفتاح الصحيح — لا تمسحه
-        // لو مفتاح غير صحيح وبيشاور على نفس الاسم الجديد أو الإيميل ده → امسحه
-        const entryNameNorm = (entryData.name || '').trim().toLowerCase();
-        if (entryNameNorm === _newNameNorm || _possibleKeys.has(entryKey)) {
-          window._fbRemoveLeaderboardKey(entryKey);
-        }
-      });
-    } catch(e) {}
-  })();
+  // ★ ٤. توحيد دائم: امسح كل صفوف اللاعب المكرّرة (أي مفتاح بيطبّع لنفس مفتاح اللاعب)
+  //    بأمان — مايلمسش لاعبين تانيين حتى لو ليهم نفس الاسم
+  if (typeof window._resetLbCleanup === 'function') window._resetLbCleanup();
+  if (typeof window._cleanupMyLbDuplicates === 'function') {
+    setTimeout(() => window._cleanupMyLbDuplicates(_email), 1000);
+  }
 
   if (typeof renderLeaderboard === 'function') renderLeaderboard();
 }
@@ -4572,6 +4622,10 @@ function _finishLogin(username, isGuest) {
   if (typeof window.fbWatchPassChange === 'function' && !isGuest && username && !username.includes('ضيف')) window.fbWatchPassChange(username);
   if (!isGuest) {
     try { localStorage.setItem('nour_last_user', username); } catch(e) {}
+    // ★★ نظّف صفوف اللاعب المكرّرة من لوحة الشرف (اسم قديم + جديد / جوجل + إيميل) ★★
+    if (username && username.includes('@') && typeof window._cleanupMyLbDuplicates === 'function') {
+      setTimeout(() => { if (!window._loggedOut) window._cleanupMyLbDuplicates(username); }, 2500);
+    }
   }
   checkStreak();
   renderLevels();
@@ -4636,6 +4690,7 @@ function doLogout() {
   if (typeof window.fbUnwatchMistakes === 'function') window.fbUnwatchMistakes();
   if (typeof window.fbUnwatchUserData  === 'function') window.fbUnwatchUserData();
   if (typeof window.fbUnwatchPassChange === 'function') window.fbUnwatchPassChange();
+  if (typeof window._resetLbCleanup === 'function') window._resetLbCleanup();
   saveCurrentUser();
   try { clearTimeout(window._autoLoginFallbackTimer); } catch(e) {}
   currentUser = null;
@@ -9486,7 +9541,11 @@ function _bankMultiPoints(earned) {
   _cu.totalScore   = (_cu.totalScore   || 0) + earned;
   currentUser = _cu; window.currentUser = _cu;
   // ★ مسجّل (حتى لو دخل بـ bypass) — يستخدم fbIncrementScore الـ atomic
-  const _isRegistered = !_cu.isGuest && _cu.email && _cu.email.includes('@');
+  // ★ مسجّل = مش ضيف وإيميله فيه @ — نعتمد على username (أضمن من email الاختياري)
+  const _isRegistered = !_cu.isGuest && (
+    (_cu.email && _cu.email.includes('@')) ||
+    (_cu.username && String(_cu.username).includes('@'))
+  );
   if (_isRegistered && typeof window.fbIncrementScore === 'function') {
     window.fbIncrementScore(_cu.username, earned, earned, 0);
   } else if (typeof window.fbSaveUser === 'function') {
