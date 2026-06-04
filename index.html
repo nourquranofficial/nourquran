@@ -2108,6 +2108,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
           return _localName || _fbName || _googleName || '';
         })(),
         email: realUsername,
+        updatedAt: Math.max(fbData.updatedAt || 0, _localData.updatedAt || 0),
       };
       // ★ فحص الباسورد من bypassAuth — لو اتغير على جهاز تاني نطرده فوراً
       const _checkPassThenLogin = () => {
@@ -2370,12 +2371,20 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         (data[canonical] && data[canonical].totalHasanat) || 0,
         (window.currentUser && window.currentUser.username === username && window.currentUser.totalHasanat) || 0
       );
+      // أسماء قديمة اتغيّر منها اللاعب (متسجّلة محليًا) — نمسح صفوفها كمان
+      const _oldNames = (() => { try { return (JSON.parse(localStorage.getItem('nour_old_names_' + username) || '[]') || []).map(x => String(x).trim().toLowerCase()); } catch(e) { return []; } })();
       const _isMineFull = (k) => {
         if (_isMineKey(k)) return true;
-        // مفتاح قديم بكلمة واحدة (مش مفتاح إيميل) ونفس الحسنات = نسختي القديمة (زي salama)
         const _kStr = String(k);
+        const _d = data[k] || {};
+        // اسم قديم اتغيّر منه = نسختي القديمة (زي salama)
+        if (_oldNames.length) {
+          if (_d.name && _oldNames.indexOf(String(_d.name).trim().toLowerCase()) !== -1) return true;
+          if (_oldNames.indexOf(window._normLbKey(k)) !== -1) return true;
+        }
+        // مفتاح قديم بكلمة واحدة (مش مفتاح إيميل) ونفس الحسنات = نسختي القديمة
         const _isLegacyBare = k !== canonical && !_kStr.includes('_') && !/^u[0-9a-f]{4,}$/i.test(_kStr);
-        if (_isLegacyBare && _myH > 0 && data[k] && (data[k].totalHasanat||0) === _myH) return true;
+        if (_isLegacyBare && _myH > 0 && (_d.totalHasanat||0) === _myH) return true;
         return false;
       };
       const dupKeys = Object.keys(data).filter(_isMineFull);
@@ -2700,6 +2709,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         const _loc0   = _email0.includes('@') ? _email0.split('@')[0] : _email0;
         const _canon0 = (window._dataKey ? window._dataKey(_cu0.username) : _email0);
         const _curName0 = (_cu0.name || '').trim().toLowerCase();
+        const _oldNames0 = (() => { try { return (JSON.parse(localStorage.getItem('nour_old_names_' + _cu0.username) || '[]') || []).map(x => String(x).trim().toLowerCase()); } catch(e) { return []; } })();
         const _isMine0 = (k, d) => {
           const kl = String(k).toLowerCase();
           if (_mk0 && (k === _mk0(_cu0.username, false) || k === _mk0(_cu0.username, true))) return true;
@@ -2708,6 +2718,9 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
           if (_loc0 && (kl === _loc0 || _norm0(k) === _loc0)) return true;
           // الاسم الحالي يطابق اسم الصفّ
           if (_curName0 && d && d.name && d.name.trim().toLowerCase() === _curName0) return true;
+          // اسم قديم اتغيّر منه (متسجّل عندنا) يطابق اسم الصفّ أو مفتاحه
+          if (_oldNames0.length && d && d.name && _oldNames0.indexOf(d.name.trim().toLowerCase()) !== -1) return true;
+          if (_oldNames0.length && _oldNames0.indexOf(_norm0(k)) !== -1) return true;
           return false;
         };
         const _mineIdx = [];
@@ -2736,20 +2749,25 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
             }
           }
         }
-        if (_mineIdx.length > 1) {
-          // ادمج كله في الأول (الأعلى ترتيبًا) واحذف الباقي من العرض
+        if (_mineIdx.length >= 1) {
+          // ادمج كل صفوفي في الأول (الأعلى ترتيبًا)
           const keepI = _mineIdx[0];
-          const keep = list[keepI][1];
+          const keep = list[keepI][1] || {};
           for (let j = 1; j < _mineIdx.length; j++) {
             const d = list[_mineIdx[j]][1] || {};
             keep.totalHasanat = Math.max(keep.totalHasanat || 0, d.totalHasanat || 0);
             keep.totalScore   = Math.max(keep.totalScore   || 0, d.totalScore   || 0);
             keep.totalGames   = Math.max(keep.totalGames   || 0, d.totalGames   || 0);
           }
-          // الاسم المعروض = اسم اللاعب الحالي لو موجود
+          // ★ الاسم المعروض دايمًا = اسم اللاعب الحالي (حتى لو صفّ واحد باسم قديم زي salama)
           if (_cu0.name && !_cu0.name.includes('@')) keep.name = _cu0.name;
-          const _rm = new Set(_mineIdx.slice(1));
-          for (let i = list.length - 1; i >= 0; i--) if (_rm.has(i)) list.splice(i, 1);
+          // ★ خلّي مفتاح صفّي = canonical عشان الكارت/الميدالية يتعرّفوا عليّ دايمًا
+          list[keepI][0] = _canon0;
+          // احذف باقي صفوفي من العرض (لو فيه تكرار)
+          if (_mineIdx.length > 1) {
+            const _rm = new Set(_mineIdx.slice(1));
+            for (let i = list.length - 1; i >= 0; i--) if (_rm.has(i)) list.splice(i, 1);
+          }
         }
       }
     } catch (e) {}
@@ -2768,16 +2786,24 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         if (myEntry) {
           const e = myEntry[1] || {};
           const eTs = e.updatedAt || 0;
-          // لو إدخال اللوحة أحدث من المحلي → نتبنّاه (كسب أو تصفير)
-          if (eTs > (cu.updatedAt || 0)) {
-            cu.totalHasanat = e.totalHasanat || 0;
-            cu.totalScore   = e.totalScore   || 0;
-            cu.totalGames   = e.totalGames   || 0;
-            cu.updatedAt    = eTs;
+          const _eZero = (e.totalHasanat||0) === 0 && (e.totalScore||0) === 0 && (e.totalGames||0) === 0;
+          let _ch = false;
+          if (_eZero && eTs > 0 && eTs > (cu.updatedAt || 0)) {
+            // ★ تصفير حقيقي من جهاز تاني (كل القيم صفر + طابع زمني أحدث) → نزّل لصفر
+            cu.totalHasanat = 0; cu.totalScore = 0; cu.totalGames = 0; cu.updatedAt = eTs; _ch = true;
+          } else {
+            // ★ غير كده: ناخد الأعلى دايمًا — مستحيل النقاط تنقص بعد تسجيل الدخول
+            if ((e.totalHasanat||0) > (cu.totalHasanat||0)) { cu.totalHasanat = e.totalHasanat; _ch = true; }
+            if ((e.totalScore||0)   > (cu.totalScore||0))   { cu.totalScore   = e.totalScore;   _ch = true; }
+            if ((e.totalGames||0)   > (cu.totalGames||0))   { cu.totalGames   = e.totalGames;   _ch = true; }
+            if (_ch) cu.updatedAt = Math.max(cu.updatedAt || 0, eTs);
+          }
+          if (_ch) {
             window.currentUser = cu;
             if (typeof saveCurrentUser === 'function') saveCurrentUser();
             const _h = document.getElementById('totalHasanat'); if (_h && typeof formatBigNum === 'function') _h.textContent = formatBigNum(cu.totalHasanat);
             const _g = document.getElementById('totalGames');   if (_g && typeof toArabicNum === 'function') _g.textContent = toArabicNum(cu.totalGames);
+            if (typeof updateHomeStats === 'function') updateHomeStats();
           }
           // مسح الغلطات الموحّد: لو فيه علامة مسح أحدث من اللي عندنا → امسح محليًا
           const eClr = e.mistakesClearedAt || 0;
@@ -4570,6 +4596,16 @@ function _saveNameEdit() {
 
   const _email = currentUser.username;
 
+  // ★ سجّل الاسم القديم عشان نقدر نمسح صفّه من لوحة الشرف بعدين
+  try {
+    const _oldName = (currentUser.name || '').trim();
+    if (_oldName && _oldName.toLowerCase() !== n.toLowerCase() && !_oldName.includes('@')) {
+      const _onKey = 'nour_old_names_' + _email;
+      let _arr = []; try { _arr = JSON.parse(localStorage.getItem(_onKey) || '[]'); } catch(e) {}
+      if (_arr.indexOf(_oldName) === -1) { _arr.push(_oldName); localStorage.setItem(_onKey, JSON.stringify(_arr)); }
+    }
+  } catch(e) {}
+
   // ★ timestamp موحّد — نفس الرقم في localStorage وفي Firebase عشان الـ listener ما يرفضش التحديث
   const _nameTs = Date.now();
 
@@ -4818,6 +4854,7 @@ function saveCurrentUser() {
     totalHasanat: currentUser.totalHasanat,
     streak:       currentUser.streak || 0,
     lastPlay:     currentUser.lastPlay,
+    updatedAt:    currentUser.updatedAt || Date.now(),
     isGuest:      currentUser.isGuest || false,
   };
   saveUsers(users);
@@ -8506,8 +8543,13 @@ function updateGlobalRankChip() {
   const mk = window._makeKey;
 
   const cuDisplayName = cu.name || '';
+  const _normK = window._normLbKey || (x => String(x||'').toLowerCase());
+  const _canonK = window._dataKey ? window._dataKey(cu.username) : cu.username;
+  const _emailLoc = String(cu.username||'').toLowerCase().includes('@') ? String(cu.username).toLowerCase().split('@')[0] : '';
   const idx = list.findIndex(([k, d]) =>
     (mk && (k === mk(cu.username, false) || k === mk(cu.username, true) || k === mk(cu.username, cu.isGuest || false))) ||
+    (_normK(k) === _normK(_canonK)) ||
+    (_emailLoc && (String(k).toLowerCase() === _emailLoc || _normK(k) === _emailLoc)) ||
     (d && d.name && cuDisplayName && d.name.trim().toLowerCase() === cuDisplayName.trim().toLowerCase())
   );
   if (idx < 0) { hide(); return; }
