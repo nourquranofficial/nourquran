@@ -2349,18 +2349,48 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     if (!username || _lbCleanupDone) return;
     const canonical = dataKey(username);
     const canonNorm = window._normLbKey(canonical);
+    // مفاتيح إضافية بتخصّ نفس اللاعب: جزء الإيميل + مفتاح الاسم الحالي
+    const _email = String(username).toLowerCase();
+    const _loc   = _email.includes('@') ? _email.split('@')[0] : _email;
+    const _curName = (window.currentUser && window.currentUser.name && !window.currentUser.name.includes('@'))
+      ? window.currentUser.name : (() => { try { return localStorage.getItem('nour_name_' + username); } catch(e) { return null; } })();
+    const _nameKey = _curName ? String(_curName).replace(/[\s.#$\/\[\]@]/g,'_').toLowerCase() : null;
+    const _isMineKey = (k) => {
+      if (k === canonical) return false; // ده الصفّ الصح — مش تكرار
+      const kl = String(k).toLowerCase();
+      if (window._normLbKey(k) === canonNorm) return true;       // مفتاح الإيميل بصيغة تانية
+      if (_loc && (kl === _loc || window._normLbKey(k) === _loc)) return true; // مفتاح بجزء الإيميل
+      if (_nameKey && (kl === _nameKey || window._normLbKey(k) === _nameKey)) return true; // مفتاح بالاسم الحالي
+      return false;
+    };
     get(ref(db, LB_PATH)).then(snap => {
       const data = snap.val() || {};
-      const dupKeys = Object.keys(data).filter(k =>
-        k !== canonical && window._normLbKey(k) === canonNorm
+      // حسنات الصفّ الصح (للمطابقة بالنقاط مع الصفوف القديمة) — ناخد الأعلى بين Firebase والذاكرة
+      const _myH = Math.max(
+        (data[canonical] && data[canonical].totalHasanat) || 0,
+        (window.currentUser && window.currentUser.username === username && window.currentUser.totalHasanat) || 0
       );
+      const _isMineFull = (k) => {
+        if (_isMineKey(k)) return true;
+        // مفتاح قديم بكلمة واحدة (مش مفتاح إيميل) ونفس الحسنات = نسختي القديمة (زي salama)
+        const _kStr = String(k);
+        const _isLegacyBare = k !== canonical && !_kStr.includes('_') && !/^u[0-9a-f]{4,}$/i.test(_kStr);
+        if (_isLegacyBare && _myH > 0 && data[k] && (data[k].totalHasanat||0) === _myH) return true;
+        return false;
+      };
+      const dupKeys = Object.keys(data).filter(_isMineFull);
       if (dupKeys.length === 0) { _lbCleanupDone = true; return; }
       const all = [[canonical, data[canonical]]].concat(dupKeys.map(k => [k, data[k]]))
         .filter(([, d]) => d);
       const [, merged] = window._mergeLbEntries(all);
+      // الاسم النهائي = اسم اللاعب الحالي لو موجود (مش الاسم القديم)
+      const _finalName = _curName || merged.name || username;
+      // طابع زمني للاسم = الأحدث (من الذاكرة المحلية أو المدموج) عشان الاسم الجديد يكسب دايمًا
+      const _localNameTs = (() => { try { return parseInt(localStorage.getItem('nour_name_ts_' + username) || '0', 10) || 0; } catch(e) { return 0; } })();
+      const _finalNameTs = Math.max(merged.nameUpdatedAt || 0, _localNameTs);
       set(ref(db, LB_PATH + canonical), {
-        name:             merged.name || username,
-        nameUpdatedAt:    merged.nameUpdatedAt || 0,
+        name:             _finalName,
+        nameUpdatedAt:    _finalNameTs,
         totalHasanat:     merged.totalHasanat || 0,
         totalScore:       merged.totalScore   || 0,
         totalGames:       merged.totalGames   || 0,
@@ -2369,6 +2399,10 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         mistakesClearedAt: merged.mistakesClearedAt || 0,
       }).then(() => {
         dupKeys.forEach(k => remove(ref(db, LB_PATH + k)).catch(() => {}));
+        // ★ تأكيد: اكتب الاسم الجديد على كل مسارات الداتا بيز كمان
+        if (typeof window.fbSaveName === 'function' && _finalName && !String(_finalName).includes('@')) {
+          window.fbSaveName(username, _finalName, _finalNameTs);
+        }
       }).catch(() => {});
       _lbCleanupDone = true;
     }).catch(() => {});
@@ -2655,6 +2689,71 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         return String(ka).localeCompare(String(kb));
       });
 
+    // ★★ توحيد صفوف اللاعب الحالي: لو نفس الشخص ظاهر بصفّين (اسم قديم/مفتاح بالاسم/جزء الإيميل) ★★
+    // بنجمّعهم في صفّ واحد بأعلى نقاط — عرض فقط (مش بنمسح من Firebase هنا)
+    try {
+      const _cu0 = window.currentUser;
+      if (_cu0 && _cu0.username && !_cu0.isGuest) {
+        const _mk0 = window._makeKey;
+        const _norm0 = window._normLbKey || (x => String(x||'').toLowerCase());
+        const _email0 = String(_cu0.username).toLowerCase();
+        const _loc0   = _email0.includes('@') ? _email0.split('@')[0] : _email0;
+        const _canon0 = (window._dataKey ? window._dataKey(_cu0.username) : _email0);
+        const _curName0 = (_cu0.name || '').trim().toLowerCase();
+        const _isMine0 = (k, d) => {
+          const kl = String(k).toLowerCase();
+          if (_mk0 && (k === _mk0(_cu0.username, false) || k === _mk0(_cu0.username, true))) return true;
+          if (_norm0(k) === _norm0(_canon0)) return true;
+          // مفتاح متخزّن بجزء الإيميل (الاسم القديم الافتراضي) — زي salama
+          if (_loc0 && (kl === _loc0 || _norm0(k) === _loc0)) return true;
+          // الاسم الحالي يطابق اسم الصفّ
+          if (_curName0 && d && d.name && d.name.trim().toLowerCase() === _curName0) return true;
+          return false;
+        };
+        const _mineIdx = [];
+        for (let i = 0; i < list.length; i++) if (_isMine0(list[i][0], list[i][1])) _mineIdx.push(i);
+        // إشارة إضافية (عرض فقط): لو فيه صفّ تاني بنفس النقاط بالظبط = نسخة من حسابي
+        if (_mineIdx.length >= 1) {
+          const anchor = list[_mineIdx[0]][1] || {};
+          const _aH = anchor.totalHasanat || 0, _aS = anchor.totalScore || 0, _aG = anchor.totalGames || 0;
+          if (_aH > 0) {
+            for (let i = 0; i < list.length; i++) {
+              if (_mineIdx.indexOf(i) !== -1) continue;
+              const k = list[i][0];
+              const d = list[i][1] || {};
+              // (أ) نفس النقاط بالظبط (حسنات + نقاط + جلسات) = نسخة مؤكدة من حسابي
+              if ((d.totalHasanat||0) === _aH && (d.totalScore||0) === _aS && (d.totalGames||0) === _aG) {
+                _mineIdx.push(i); continue;
+              }
+              // (ب) مفتاح قديم بكلمة واحدة (مش مفتاح إيميل — مفيهوش "_") ونفس الحسنات
+              //     ده بيمسك "salama" وأمثاله حتى لو عدد الجلسات مختلف. آمن: الحسابات
+              //     الحديثة كلها مفاتيحها فيها "_" (من الإيميل) فمستحيل تتجمّع غلط.
+              const _kStr = String(k);
+              const _isLegacyBare = !_kStr.includes('_') && !/^u[0-9a-f]{4,}$/i.test(_kStr);
+              if (_isLegacyBare && (d.totalHasanat||0) === _aH) {
+                _mineIdx.push(i); continue;
+              }
+            }
+          }
+        }
+        if (_mineIdx.length > 1) {
+          // ادمج كله في الأول (الأعلى ترتيبًا) واحذف الباقي من العرض
+          const keepI = _mineIdx[0];
+          const keep = list[keepI][1];
+          for (let j = 1; j < _mineIdx.length; j++) {
+            const d = list[_mineIdx[j]][1] || {};
+            keep.totalHasanat = Math.max(keep.totalHasanat || 0, d.totalHasanat || 0);
+            keep.totalScore   = Math.max(keep.totalScore   || 0, d.totalScore   || 0);
+            keep.totalGames   = Math.max(keep.totalGames   || 0, d.totalGames   || 0);
+          }
+          // الاسم المعروض = اسم اللاعب الحالي لو موجود
+          if (_cu0.name && !_cu0.name.includes('@')) keep.name = _cu0.name;
+          const _rm = new Set(_mineIdx.slice(1));
+          for (let i = list.length - 1; i >= 0; i--) if (_rm.has(i)) list.splice(i, 1);
+        }
+      }
+    } catch (e) {}
+
     window._lbAllList = list;
 
     // ★★ توحيد "الأحدث يكسب" — نقرأ صفّ المستخدم من الداتا الخام (حتى لو 0 بعد تصفير) ★★
@@ -2752,30 +2851,8 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       `<div class="lb-dot${i===0?' active':''}" onclick="lbGoTo(${i})"></div>`
     ).join('');
 
-    // نسخة المرجع: المنصة بس — باقي اللاعبين في قائمة تحت
-    if (lb) {
-      const rest = list.slice(3);
-      if (rest.length === 0) {
-        lb.innerHTML = '';
-        lb.style.display = 'none';
-      } else {
-        lb.style.display = '';
-        lb.innerHTML = rest.map(([k, d], i) => {
-          const rank = i + 4;
-          const me = isMyEntry(k, d);
-          const nm = (d && d.name) ? d.name : 'لاعب';
-          const pts = typeof formatBigNum === 'function' ? formatBigNum(d.totalHasanat||0) : toA(d.totalHasanat||0);
-          return `<div class="lb-card${me?' lb-me':''}">
-            <div class="lb-rank">${toA(rank)}</div>
-            <div class="lb-info">
-              <div class="lb-name">${nm}${me?' <span style="font-size:10px;color:var(--gold);">(أنت)</span>':''}</div>
-              <div class="lb-score">${toA(d.totalGames||0)} جلسة</div>
-            </div>
-            <div class="lb-hasanat">${pts} ⭐</div>
-          </div>`;
-        }).join('');
-      }
-    }
+    // ★ نسخة المرجع: المنصة المتحركة بس — مفيش قائمة لاعبين تحتها (الترتيب الكامل في المودال)
+    if (lb) { lb.innerHTML = ''; lb.style.display = 'none'; }
 
     // rotation للـ top3
     if (window.lbPodiumTimer) { clearInterval(window.lbPodiumTimer); window.lbPodiumTimer = null; }
@@ -4526,10 +4603,11 @@ function _saveNameEdit() {
   });
 
   // ★ ٤. توحيد دائم: امسح كل صفوف اللاعب المكرّرة (أي مفتاح بيطبّع لنفس مفتاح اللاعب)
-  //    بأمان — مايلمسش لاعبين تانيين حتى لو ليهم نفس الاسم
-  if (typeof window._resetLbCleanup === 'function') window._resetLbCleanup();
+  //    بأمان — مايلمسش لاعبين تانيين حتى لو ليهم نفس الاسم. مرتين عشان نضمن كتابة Firebase خلصت.
   if (typeof window._cleanupMyLbDuplicates === 'function') {
-    setTimeout(() => window._cleanupMyLbDuplicates(_email), 1000);
+    if (typeof window._resetLbCleanup === 'function') window._resetLbCleanup();
+    setTimeout(() => window._cleanupMyLbDuplicates(_email), 1200);
+    setTimeout(() => { if (typeof window._resetLbCleanup === 'function') window._resetLbCleanup(); window._cleanupMyLbDuplicates(_email); }, 3500);
   }
 
   if (typeof renderLeaderboard === 'function') renderLeaderboard();
