@@ -2761,6 +2761,10 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
           }
           // ★ الاسم المعروض دايمًا = اسم اللاعب الحالي (حتى لو صفّ واحد باسم قديم زي salama)
           if (_cu0.name && !_cu0.name.includes('@')) keep.name = _cu0.name;
+          // ★ النقاط = الأعلى بين الصفّ والذاكرة (مصدر الحقيقة) — يضمن النقاط متحدّثة
+          keep.totalHasanat = Math.max(keep.totalHasanat || 0, _cu0.totalHasanat || 0);
+          keep.totalScore   = Math.max(keep.totalScore   || 0, _cu0.totalScore   || 0);
+          keep.totalGames   = Math.max(keep.totalGames   || 0, _cu0.totalGames   || 0);
           // ★ خلّي مفتاح صفّي = canonical عشان الكارت/الميدالية يتعرّفوا عليّ دايمًا
           list[keepI][0] = _canon0;
           // احذف باقي صفوفي من العرض (لو فيه تكرار)
@@ -2768,6 +2772,24 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
             const _rm = new Set(_mineIdx.slice(1));
             for (let i = list.length - 1; i >= 0; i--) if (_rm.has(i)) list.splice(i, 1);
           }
+        } else if ((_cu0.totalHasanat || 0) > 0 && _cu0.name && !_cu0.name.includes('@')) {
+          // ★★ مفيش صفّ اتطابق معايا في اللوحة → أضف صفّي من بياناتي مباشرة ★★
+          // ده بيضمن إن اسمي الحالي ونقاطي يظهروا، والكارت/الميدالية يشتغلوا دايمًا
+          list.push([_canon0, {
+            name: _cu0.name,
+            totalHasanat: _cu0.totalHasanat || 0,
+            totalScore:   _cu0.totalScore   || 0,
+            totalGames:   _cu0.totalGames   || 0,
+            isGuest: false,
+            updatedAt: _cu0.updatedAt || Date.now(),
+          }]);
+          // أعِد الترتيب بعد الإضافة
+          list.sort(([ka, a], [kb, b]) => {
+            const dh = (b.totalHasanat || 0) - (a.totalHasanat || 0); if (dh !== 0) return dh;
+            const dg = (b.totalGames || 0) - (a.totalGames || 0);     if (dg !== 0) return dg;
+            const ds = (b.totalScore || 0) - (a.totalScore || 0);     if (ds !== 0) return ds;
+            return String(ka).localeCompare(String(kb));
+          });
         }
       }
     } catch (e) {}
@@ -3070,7 +3092,7 @@ function _callWhenReady(fn, args) {
       <div class="logo-sub">تحدي حفظ القرآن الكريم</div>
       <div style="display:inline-block;margin-top:6px;padding:3px 12px;background:rgba(201,151,58,0.12);border:1px solid rgba(201,151,58,0.35);border-radius:20px;font-size:10px;color:rgba(245,217,139,0.7);letter-spacing:0.5px;">★ الموقع الرسمي الوحيد ★</div>
       <div style="margin-top:6px;font-size:10px;color:rgba(245,217,139,0.55);">🔊 الصوت: الشيخ مشاري بن راشد العفاسي — مقدَّم من <a href="https://everyayah.com" target="_blank" rel="noopener" style="color:rgba(201,151,58,0.8);text-decoration:underline;">everyayah.com</a></div>
-      <div style="margin-top:4px;font-size:10px;"><a href="privacy-policy.html" target="_blank" style="color:rgba(201,151,58,0.4);text-decoration:none;">سياسة الخصوصية</a></div>
+      <div style="margin-top:4px;font-size:10px;"><a href="privacy-policy.html" target="_blank" style="color:rgba(201,151,58,0.4);text-decoration:none;">سياسة الخصوصية</a> <span style="color:rgba(245,217,139,0.35);">· v41</span></div>
     </div>
 
     <!-- USER BAR -->
@@ -8539,21 +8561,30 @@ function updateGlobalRankChip() {
     }
     return;
   }
-  if (!Array.isArray(list) || list.length === 0) { hide(); return; }
+  const _listArr = Array.isArray(list) ? list : [];
   const mk = window._makeKey;
 
   const cuDisplayName = cu.name || '';
   const _normK = window._normLbKey || (x => String(x||'').toLowerCase());
   const _canonK = window._dataKey ? window._dataKey(cu.username) : cu.username;
   const _emailLoc = String(cu.username||'').toLowerCase().includes('@') ? String(cu.username).toLowerCase().split('@')[0] : '';
-  const idx = list.findIndex(([k, d]) =>
+  const idx = _listArr.findIndex(([k, d]) =>
     (mk && (k === mk(cu.username, false) || k === mk(cu.username, true) || k === mk(cu.username, cu.isGuest || false))) ||
     (_normK(k) === _normK(_canonK)) ||
     (_emailLoc && (String(k).toLowerCase() === _emailLoc || _normK(k) === _emailLoc)) ||
     (d && d.name && cuDisplayName && d.name.trim().toLowerCase() === cuDisplayName.trim().toLowerCase())
   );
-  if (idx < 0) { hide(); return; }
-  const rank = idx + 1, total = list.length;
+  let rank, total, myHasanat;
+  if (idx >= 0) {
+    rank = idx + 1; total = _listArr.length;
+    myHasanat = (_listArr[idx][1] && _listArr[idx][1].totalHasanat) || 0;
+  } else {
+    // ★ مش لاقي صفّي في اللوحة → احسب ترتيبي من نقاطي مباشرة (الكارت/الميدالية ما يختفوش)
+    myHasanat = cu.totalHasanat || 0;
+    if (myHasanat <= 0) { hide(); return; }
+    rank = _listArr.filter(([,d]) => ((d && d.totalHasanat) || 0) > myHasanat).length + 1;
+    total = _listArr.length + (idx >= 0 ? 0 : 1);
+  }
 
 
   // الدايرة الشيك جنب المستوى (الترتيب العام)
@@ -8569,7 +8600,6 @@ function updateGlobalRankChip() {
     const mine = document.getElementById('grcMine');
     if (t) t.textContent = '🏆 ترتيبك العام';
     if (mine) mine.style.display = '';
-    const myHasanat = (list[idx][1] && list[idx][1].totalHasanat) || 0;
     const rankEl = document.getElementById('grcRank');
     const subEl  = document.getElementById('grcSub');
     const msgEl  = document.getElementById('grcMsg');
