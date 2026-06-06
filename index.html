@@ -1488,7 +1488,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       });
   };
 
-  window.fbLogout = function() { signOut(auth).catch(() => {}); };
+  window.fbLogout = function() { return signOut(auth).catch(() => {}); };
 
   // جلب/حفظ بيانات المستخدم من Firebase DB
   window.fbGetUserData = function(username, onResult) {
@@ -1670,24 +1670,21 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       if (!fbData) return;
       const cu = window.currentUser;
       if (!cu || cu.username !== username) return;
-      // ★★ الأحدث يكسب (مش الأعلى): users/data هو مصدر الحقيقة بطابع زمني.
-      //    - لو كتابة Firebase أحدث (fTs > الذاكرة) → نتبنّاها حتى لو أقل (يظبط التصفير).
-      //    - لو نفس/أقدم في الطابع الزمني → نرفع بس لو أعلى (أمان ضد فقدان النقاط/طابع ناقص).
+      // ★★ آمن: التصفير الحقيقي بس (كل القيم صفر + طابع زمني أحدث) ينزّل لصفر.
+      //    غير كده ناخد الأعلى (مستحيل نخسر نقاط من كتابة جزئية أو قراءة قديمة).
       const fH = fbData.totalHasanat || 0, fS = fbData.totalScore || 0, fG = fbData.totalGames || 0;
       const cH = cu.totalHasanat || 0,   cS = cu.totalScore   || 0,   cG = cu.totalGames   || 0;
       const fTs = fbData.updatedAt || 0, cTs = cu.updatedAt || 0;
+      const _fbZero = fH === 0 && fS === 0 && fG === 0;
       let changed = false;
-      if (fTs > cTs) {
-        // كتابة أحدث (كسب أو تصفير) — نتبنّى القيم كما هي
-        if (fH !== cH || fS !== cS || fG !== cG) {
-          cu.totalHasanat = fH; cu.totalScore = fS; cu.totalGames = fG; changed = true;
-        }
-        if (fTs !== cTs) { cu.updatedAt = fTs; changed = changed || (fH!==cH||fS!==cS||fG!==cG); }
+      if (_fbZero && fTs > cTs && (cH > 0 || cS > 0 || cG > 0)) {
+        // تصفير حقيقي من جهاز تاني
+        cu.totalHasanat = 0; cu.totalScore = 0; cu.totalGames = 0; cu.updatedAt = fTs; changed = true;
       } else if (fH > cH || fS > cS || fG > cG) {
-        // نفس/أقدم زمنيًا → نرفع بس (مأمن ضد فقدان النقاط)
         cu.totalHasanat = Math.max(cH, fH);
         cu.totalScore   = Math.max(cS, fS);
         cu.totalGames   = Math.max(cG, fG);
+        cu.updatedAt    = Math.max(cTs, fTs);
         changed = true;
       }
       if (!changed) return;
@@ -1705,7 +1702,6 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       } catch(e) {}
       // تحديث الـ UI فوراً
       if (typeof updateHomeStats === 'function') updateHomeStats();
-      if (typeof renderLeaderboard === 'function') renderLeaderboard();
     });
   };
   window.fbUnwatchUserData = function() {
@@ -2104,17 +2100,17 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       const fbScore   = fbData.totalScore   || 0;
       const fbHasanat = fbData.totalHasanat || 0;
       const fbGames   = fbData.totalGames   || 0;
-      // ★★ توحيد النقاط بالأحدث-يكسب:
-      //    - Firebase أحدث (طابع زمني أكبر) → خذه كما هو (يظبط التصفير والكسب من جهاز تاني)
-      //    - المحلي أحدث/متساوي → خذ الأعلى (مايضيّعش تقدّم offline)
+      // ★★ آمن: لو Firebase تصفير حقيقي (الكل صفر) وأحدث من المحلي → خذ صفر (يحترم التصفير).
+      //    غير كده → الأعلى (مايضيّعش تقدّم محلي/offline ولا ينزّل من كتابة ناقصة).
       const _fbTs0    = fbData.updatedAt || 0;
       const _localTs0 = _localData.updatedAt || 0;
-      const _fbWins   = _fbTs0 > _localTs0;
+      const _fbZero0  = fbScore === 0 && fbHasanat === 0 && fbGames === 0;
+      const _resetWins = _fbZero0 && _fbTs0 > _localTs0;
       const merged = {
-        totalScore:   _fbWins ? fbScore   : Math.max(fbScore,   _localData.totalScore   || 0),
-        totalGames:   _fbWins ? fbGames   : Math.max(fbGames,   _localData.totalGames   || 0),
-        totalHasanat: _fbWins ? fbHasanat : Math.max(fbHasanat, _localData.totalHasanat || 0),
-        streak:       _fbWins ? (fbData.streak || 0) : Math.max(fbData.streak || 0, _localData.streak || 0),
+        totalScore:   _resetWins ? 0 : Math.max(fbScore,   _localData.totalScore   || 0),
+        totalGames:   _resetWins ? 0 : Math.max(fbGames,   _localData.totalGames   || 0),
+        totalHasanat: _resetWins ? 0 : Math.max(fbHasanat, _localData.totalHasanat || 0),
+        streak:       _resetWins ? 0 : Math.max(fbData.streak || 0, _localData.streak || 0),
         lastPlay:     fbData.lastPlay || _localData.lastPlay || null,
         // ★ توحيد الاسم: ناخد الأحدث بين Firebase والمحلي (زي النقاط بالظبط)
         name: (() => {
@@ -3116,7 +3112,7 @@ function _callWhenReady(fn, args) {
       <div class="logo-sub">تحدي حفظ القرآن الكريم</div>
       <div style="display:inline-block;margin-top:6px;padding:3px 12px;background:rgba(201,151,58,0.12);border:1px solid rgba(201,151,58,0.35);border-radius:20px;font-size:10px;color:rgba(245,217,139,0.7);letter-spacing:0.5px;">★ الموقع الرسمي الوحيد ★</div>
       <div style="margin-top:6px;font-size:10px;color:rgba(245,217,139,0.55);">🔊 الصوت: الشيخ مشاري بن راشد العفاسي — مقدَّم من <a href="https://everyayah.com" target="_blank" rel="noopener" style="color:rgba(201,151,58,0.8);text-decoration:underline;">everyayah.com</a></div>
-      <div style="margin-top:4px;font-size:10px;"><a href="privacy-policy.html" target="_blank" style="color:rgba(201,151,58,0.4);text-decoration:none;">سياسة الخصوصية</a> <span style="color:rgba(245,217,139,0.35);">· v46</span></div>
+      <div style="margin-top:4px;font-size:10px;"><a href="privacy-policy.html" target="_blank" style="color:rgba(201,151,58,0.4);text-decoration:none;">سياسة الخصوصية</a> <span style="color:rgba(245,217,139,0.35);">· v47</span></div>
     </div>
 
     <!-- USER BAR -->
@@ -4552,20 +4548,18 @@ function loginSuccess(username, data, isGuest=false) {
   if (window.currentUser && window.currentUser.username === username) {
     const cu = window.currentUser;
     if (data) {
-      // ★ الأحدث يكسب: لو بيانات الدخول أحدث (أو متساوية) → نتبنّاها كما هي (يحترم التصفير)؛
-      //   غير كده ناخد الأعلى (مايضيّعش نقاط)
+      // ★ آمن: لو البيانات الجديدة تصفير حقيقي (الكل صفر) وأحدث → خذها (يحترم التصفير)؛
+      //   غير كده الأعلى (مايضيّعش نقاط من نداء fallback/افتراضي بطابع زمني)
       const _dTs = data.updatedAt || 0, _cTs = cu.updatedAt || 0;
-      if (_dTs >= _cTs) {
-        cu.totalScore   = data.totalScore   || 0;
-        cu.totalGames   = data.totalGames   || 0;
-        cu.totalHasanat = data.totalHasanat || 0;
-        cu.streak       = data.streak       || 0;
-        cu.updatedAt    = _dTs || _cTs;
+      const _dZero = (data.totalScore||0)===0 && (data.totalHasanat||0)===0 && (data.totalGames||0)===0;
+      if (_dZero && _dTs > _cTs && ((cu.totalHasanat||0)>0 || (cu.totalScore||0)>0 || (cu.totalGames||0)>0)) {
+        cu.totalScore = 0; cu.totalGames = 0; cu.totalHasanat = 0; cu.streak = 0; cu.updatedAt = _dTs;
       } else {
         cu.totalScore   = Math.max(cu.totalScore   || 0, data.totalScore   || 0);
         cu.totalGames   = Math.max(cu.totalGames   || 0, data.totalGames   || 0);
         cu.totalHasanat = Math.max(cu.totalHasanat || 0, data.totalHasanat || 0);
         cu.streak       = Math.max(cu.streak       || 0, data.streak       || 0);
+        if (_dTs > _cTs) cu.updatedAt = _dTs;
       }
       if (data.lastPlay) cu.lastPlay = data.lastPlay;
       if (data.password) cu.password = data.password;
@@ -4871,9 +4865,15 @@ function doLogout() {
   // ★ FIX: امسح nour_last_user وضع علامة في sessionStorage تمنع auto-login بعد الـ reload
   try { localStorage.removeItem('nour_last_user'); } catch(e) {}
   try { sessionStorage.setItem('nour_did_logout', '1'); } catch(e) {}
-  if (typeof window.fbLogout === 'function') window.fbLogout();
-  // ★ reload بعد الخروج — أبسط وأضمن حل لمشكلة الـ state
-  setTimeout(() => { location.reload(); }, 100);
+  // ★ استنّى signOut يخلص فعلاً قبل الـ reload — عشان الجلسة تتمسح ومايرجعش يدخل تلقائي
+  let _reloaded = false;
+  const _doReload = () => { if (_reloaded) return; _reloaded = true; try { location.reload(); } catch(e) {} };
+  try {
+    const _p = (typeof window.fbLogout === 'function') ? window.fbLogout() : null;
+    if (_p && typeof _p.then === 'function') _p.then(_doReload).catch(_doReload);
+  } catch(e) {}
+  // fallback: لو signOut اتأخر، اعمل reload بعد فترة قصيرة على أي حال
+  setTimeout(_doReload, 1200);
   return;
   // ★ أظهر loginScreen مباشرة — reset كامل لكل الـ styles
   const _lsOut = document.getElementById('loginScreen');
