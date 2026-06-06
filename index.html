@@ -1996,11 +1996,12 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       if (result.committed && result.snapshot.exists()) {
         const newData = result.snapshot.val();
         if (window.currentUser && window.currentUser.username === username) {
-          // ★ بعد الـ transaction، snapshot هو القيمة الصحيحة (atomic) — نتبنّاها ونتتبّع updatedAt
-          window.currentUser.totalScore   = newData.totalScore   || 0;
-          window.currentUser.totalGames   = newData.totalGames   || 0;
-          window.currentUser.totalHasanat = newData.totalHasanat || 0;
-          window.currentUser.updatedAt    = newData.updatedAt || Date.now();
+          // ★ fbIncrementScore بيزوّد بس (مفيش تصفير هنا) → ناخد الأعلى لتجنّب وميض النقصان
+          //   عند الإجابات السريعة في اللعب الجماعي. التصفير بيتعامل عبر fbResetUserData + المستمع.
+          window.currentUser.totalScore   = Math.max(window.currentUser.totalScore   || 0, newData.totalScore   || 0);
+          window.currentUser.totalGames   = Math.max(window.currentUser.totalGames   || 0, newData.totalGames   || 0);
+          window.currentUser.totalHasanat = Math.max(window.currentUser.totalHasanat || 0, newData.totalHasanat || 0);
+          window.currentUser.updatedAt    = Math.max(window.currentUser.updatedAt || 0, newData.updatedAt || Date.now());
           // حدّث localStorage بالقيم الجديدة
           try {
             const _llu = JSON.parse(localStorage.getItem('nour_users') || '{}');
@@ -3115,7 +3116,7 @@ function _callWhenReady(fn, args) {
       <div class="logo-sub">تحدي حفظ القرآن الكريم</div>
       <div style="display:inline-block;margin-top:6px;padding:3px 12px;background:rgba(201,151,58,0.12);border:1px solid rgba(201,151,58,0.35);border-radius:20px;font-size:10px;color:rgba(245,217,139,0.7);letter-spacing:0.5px;">★ الموقع الرسمي الوحيد ★</div>
       <div style="margin-top:6px;font-size:10px;color:rgba(245,217,139,0.55);">🔊 الصوت: الشيخ مشاري بن راشد العفاسي — مقدَّم من <a href="https://everyayah.com" target="_blank" rel="noopener" style="color:rgba(201,151,58,0.8);text-decoration:underline;">everyayah.com</a></div>
-      <div style="margin-top:4px;font-size:10px;"><a href="privacy-policy.html" target="_blank" style="color:rgba(201,151,58,0.4);text-decoration:none;">سياسة الخصوصية</a> <span style="color:rgba(245,217,139,0.35);">· v45</span></div>
+      <div style="margin-top:4px;font-size:10px;"><a href="privacy-policy.html" target="_blank" style="color:rgba(201,151,58,0.4);text-decoration:none;">سياسة الخصوصية</a> <span style="color:rgba(245,217,139,0.35);">· v46</span></div>
     </div>
 
     <!-- USER BAR -->
