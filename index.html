@@ -2087,30 +2087,12 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       const fbScore   = fbData.totalScore   || 0;
       const fbHasanat = fbData.totalHasanat || 0;
       const fbGames   = fbData.totalGames   || 0;
-
-      // ★ FIX: احترم الـ resetAt — لو حصل reset بعد آخر تسجيل نقاط → ابدأ من صفر
-      const fbResetAt    = fbData.resetAt    || 0;
-      const localResetAt = (() => { try { return parseInt(localStorage.getItem('nour_reset_ts_' + realUsername) || (_localData.resetAt || '0'), 10); } catch(e) { return 0; } })();
-      const resetAt      = Math.max(fbResetAt, localResetAt); // ★ أحدث reset بين الجهازين
-
-      const fbUpdatedAt    = fbData.updatedAt    || 0;
-      const localUpdatedAt = _localData.updatedAt || 0;
-
-      // لو الـ reset أحدث من آخر تحديث نقاط → النقاط الحقيقية هي صفر
-      const effectiveFbScore    = fbResetAt    > fbUpdatedAt    ? 0 : fbScore;
-      const effectiveLocalScore = localResetAt > localUpdatedAt ? 0 : (_localData.totalScore   || 0);
-      const effectiveFbHasanat  = fbResetAt    > fbUpdatedAt    ? 0 : fbHasanat;
-      const effectiveLocalHasanat = localResetAt > localUpdatedAt ? 0 : (_localData.totalHasanat || 0);
-      const effectiveFbGames    = fbResetAt    > fbUpdatedAt    ? 0 : fbGames;
-      const effectiveLocalGames = localResetAt > localUpdatedAt ? 0 : (_localData.totalGames   || 0);
-
       const merged = {
-        totalScore:   Math.max(effectiveFbScore,   effectiveLocalScore),
-        totalGames:   Math.max(effectiveFbGames,   effectiveLocalGames),
-        totalHasanat: Math.max(effectiveFbHasanat, effectiveLocalHasanat),
+        totalScore:   Math.max(fbScore,   _localData.totalScore   || 0),
+        totalGames:   Math.max(fbGames,   _localData.totalGames   || 0),
+        totalHasanat: Math.max(fbHasanat, _localData.totalHasanat || 0),
         streak:       Math.max(fbData.streak || 0, _localData.streak || 0),
         lastPlay:     fbData.lastPlay || _localData.lastPlay || null,
-        resetAt:      resetAt || undefined,
         // ★ توحيد الاسم: ناخد الأحدث بين Firebase والمحلي (زي النقاط بالظبط)
         name: (() => {
           const _localName  = typeof window._getStoredName === 'function' ? window._getStoredName(realUsername) : null;
@@ -2359,31 +2341,18 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     // transaction: بنقارن الـtimestamp بس ★ دايمًا بناخد الأعلى في النقاط — النقاط مش بتنقص أبدًا
     runTransaction(entryRef, (cur) => {
       if (cur && (cur.updatedAt || 0) > ts) return cur; // فيه أحدث منه — سيبه
-      // ★ FIX: احترم الـ resetAt — لو الـ reset أحدث من الكتابة دي → ابقى على الصفر
-      const curResetAt = (cur && cur.resetAt) || 0;
-      const newResetAt = data.resetAt || 0;
-      const effectiveResetAt = Math.max(curResetAt, newResetAt);
-      // لو الـ reset أحدث من timestamp البيانات → النقاط الجديدة صفر
-      const scoreBase    = effectiveResetAt > ts ? 0 : (data.totalHasanat || 0);
-      const scoreScBase  = effectiveResetAt > ts ? 0 : (data.totalScore   || 0);
-      const gamesBase    = effectiveResetAt > ts ? 0 : (data.totalGames   || 0);
-      // لو الـ reset أحدث من بيانات الـ cur كمان → امسح قيم cur
-      const curHasanat = (curResetAt > (cur && cur.updatedAt || 0)) ? 0 : ((cur && cur.totalHasanat) || 0);
-      const curScore   = (curResetAt > (cur && cur.updatedAt || 0)) ? 0 : ((cur && cur.totalScore)   || 0);
-      const curGames   = (curResetAt > (cur && cur.updatedAt || 0)) ? 0 : ((cur && cur.totalGames)   || 0);
       // ★ FIX: احمِ اسم العرض — لو Firebase فيه nameUpdatedAt أحدث من ts البيانات، سيبه
       const _curNameTs = (cur && cur.nameUpdatedAt) || 0;
       const _newName   = data.name || (cur && cur.name) || username;
       const _safeName  = (_curNameTs > ts && cur && cur.name) ? cur.name : _newName;
       return {
         name:             _safeName, // ★ الاسم للعرض وليس الإيميل
-        // ★★ ناخد الأعلى بس بعد مراعاة الـ reset — مستحيل تنقص النقاط إلا بعد reset صريح
-        totalHasanat:     Math.max(curHasanat, scoreBase),
-        totalScore:       Math.max(curScore,   scoreScBase),
-        totalGames:       Math.max(curGames,   gamesBase),
+        // ★★ ناخد الأعلى بين القديم والجديد — مستحيل تنقص النقاط حتى لو حصل overwrite خطأ
+        totalHasanat:     Math.max((cur && cur.totalHasanat) || 0, data.totalHasanat || 0),
+        totalScore:       Math.max((cur && cur.totalScore)   || 0, data.totalScore   || 0),
+        totalGames:       Math.max((cur && cur.totalGames)   || 0, data.totalGames   || 0),
         isGuest:          isGuest,
         updatedAt:        ts,
-        resetAt:          effectiveResetAt || undefined,
         nameUpdatedAt:    Math.max(_curNameTs, data.nameUpdatedAt || 0), // ★ احتفظ بـ nameUpdatedAt
         mistakesClearedAt: Math.max((cur && cur.mistakesClearedAt) || 0, data.mistakesClearedAt || 0),
       };
@@ -2404,30 +2373,20 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   window.fbResetUserData = function(username) {
     if (!username) return;
     const key = dataKey(username);
-    const _nowReset = Date.now();
     set(ref(db, 'users/' + key + '/data'), {
-      totalScore: 0, totalGames: 0, totalHasanat: 0, streak: 0, lastPlay: null,
-      updatedAt: _nowReset, resetAt: _nowReset
+      totalScore: 0, totalGames: 0, totalHasanat: 0, streak: 0, lastPlay: null, updatedAt: Date.now()
     }).catch(() => {});
-    // ★ احفظ resetAt في localStorage عشان الـ merge يعرفه حتى offline
-    try {
-      const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
-      if (_lu[username]) { _lu[username].resetAt = _nowReset; localStorage.setItem('nour_users', JSON.stringify(_lu)); }
-      localStorage.setItem('nour_reset_ts_' + username, String(_nowReset));
-    } catch(e) {}
   };
 
   // ★ تصفير لوحة الشرف بـ set() مباشرة (يتجاوز الـMAX)
   window.fbResetLeaderboard = function(username, isGuest) {
     if (!username) return;
     const key = isGuest ? makeKey(username, true) : dataKey(username);
-    const _nowReset = Date.now();
     set(ref(db, LB_PATH + key), {
       name: username,
       totalScore: 0, totalGames: 0, totalHasanat: 0,
       isGuest: isGuest || false,
-      updatedAt: _nowReset,
-      resetAt: _nowReset,
+      updatedAt: Date.now(),
     }).catch(() => {});
   };
 
@@ -7470,7 +7429,6 @@ function resetScore() {
     currentUser.totalHasanat = 0;
     currentUser.streak = 0;
     currentUser.updatedAt = _ts;
-    currentUser.resetAt = _ts; // ★ FIX: احفظ resetAt في الـ currentUser
     // محلي
     const users = getUsers();
     if (users[currentUser.username]) {
@@ -7478,11 +7436,8 @@ function resetScore() {
       users[currentUser.username].totalGames = 0;
       users[currentUser.username].totalHasanat = 0;
       users[currentUser.username].streak = 0;
-      users[currentUser.username].resetAt = _ts; // ★ FIX: حفظ resetAt في localStorage
       saveUsers(users);
     }
-    // ★ FIX: حفظ resetAt في مفتاح منفصل كمان عشان الـ merge يقدر يقرأه حتى لو users اتعملوا override
-    try { localStorage.setItem('nour_reset_ts_' + currentUser.username, String(_ts)); } catch(e) {}
     saveCurrentUser();
     // Firebase — تصفير مباشر بـ set() يتجاوز الـMAX في اللوحة
     if (typeof window.fbResetLeaderboard === 'function') {
