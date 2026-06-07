@@ -1623,6 +1623,20 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       .catch(() => cb(null));
   };
 
+  // ★ R1: إضافة اسم قديم لقائمة Firebase (للدمج التلقائي عبر الأجهزة)
+  window._fbAddOldName = function(username, oldName) {
+    if (!username || !oldName || String(oldName).includes('@')) return;
+    const key = dataKey(username);
+    get(ref(db, 'users/' + key + '/oldNames')).then(s => {
+      let arr = s.exists() ? (s.val() || []) : [];
+      if (!Array.isArray(arr)) arr = [];
+      if (arr.indexOf(oldName) === -1) {
+        arr.push(oldName);
+        set(ref(db, 'users/' + key + '/oldNames'), arr).catch(() => {});
+      }
+    }).catch(() => {});
+  };
+
   // ★ listener لتحديث الاسم لحظياً على كل الأجهزة
   let _nameUnsub = null;
   window.fbWatchName = function(username) {
@@ -2669,6 +2683,65 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     });
   };
 
+  // ─── R1: دمج تلقائي آمن للحسابات القديمة (المفاتيح المشتقة من أسماء المستخدم نفسه) ───
+  //     يحلّ مشكلة الأورفان (زي salama) جذريًا وبأمان — مايلمسش حساب حد تاني لأن
+  //     المرشّحات مشتقّة حصريًا من اسم المستخدم الحالي + أسمائه القديمة المسجّلة.
+  window._autoMigrateLegacy = function(username) {
+    const cu = window.currentUser;
+    if (!cu || !cu.username || cu.isGuest) return Promise.resolve();
+    if (String(cu.username) !== String(username)) return Promise.resolve();
+    const canon = dataKey(cu.username);
+    const enc = window._encodeKey || (s => String(s || '').toLowerCase());
+    let names = [];
+    if (cu.name && !String(cu.name).includes('@')) names.push(cu.name);
+    try { const a = JSON.parse(localStorage.getItem('nour_old_names_' + cu.username) || '[]'); if (Array.isArray(a)) names = names.concat(a); } catch (e) {}
+    return get(ref(db, 'users/' + canon + '/oldNames')).then(s => (s.exists() ? s.val() : [])).catch(() => [])
+      .then(fbOld => {
+        if (Array.isArray(fbOld)) names = names.concat(fbOld);
+        const cand = Array.from(new Set(
+          names.map(n => enc(String(n).trim()))
+               .filter(k => k && k !== canon && !/^guest__/.test(k))
+        ));
+        if (!cand.length) return;
+        const reads = [];
+        cand.forEach(k => {
+          reads.push(get(ref(db, LB_PATH + k)).then(s => ['x', k, s.val()]).catch(() => ['x', k, null]));
+          reads.push(get(ref(db, 'users/' + k + '/data')).then(s => ['x', k, s.val()]).catch(() => ['x', k, null]));
+        });
+        reads.push(get(ref(db, LB_PATH + canon)).then(s => ['c', canon, s.val()]).catch(() => ['c', canon, null]));
+        reads.push(get(ref(db, 'users/' + canon + '/data')).then(s => ['c', canon, s.val()]).catch(() => ['c', canon, null]));
+        return Promise.all(reads).then(rows => {
+          let H = cu.totalHasanat || 0, S = cu.totalScore || 0, G = cu.totalGames || 0;
+          let found = false;
+          rows.forEach(([t, k, v]) => {
+            if (!v) return;
+            if (t === 'x') found = true; // فيه حساب قديم بنفس أسمائي
+            H = Math.max(H, v.totalHasanat || 0);
+            S = Math.max(S, v.totalScore || 0);
+            G = Math.max(G, v.totalGames || 0);
+          });
+          if (!found) return; // مفيش أورفان → خلاص
+          const name = (cu.name && !String(cu.name).includes('@')) ? cu.name : cu.username;
+          const now = Date.now();
+          return Promise.all([
+            set(ref(db, 'users/' + canon + '/data'), { totalHasanat: H, totalScore: S, totalGames: G, updatedAt: now }),
+            set(ref(db, LB_PATH + canon), { name: name, nameUpdatedAt: now, totalHasanat: H, totalScore: S, totalGames: G, isGuest: false, updatedAt: now }),
+          ]).then(() => {
+            const dels = [];
+            cand.forEach(k => { dels.push(remove(ref(db, LB_PATH + k)).catch(() => {})); dels.push(remove(ref(db, 'users/' + k)).catch(() => {})); });
+            return Promise.all(dels);
+          }).then(() => {
+            cu.totalHasanat = H; cu.totalScore = S; cu.totalGames = G; cu.updatedAt = now;
+            window.currentUser = cu;
+            if (typeof saveCurrentUser === 'function') saveCurrentUser();
+            if (typeof updateHomeStats === 'function') updateHomeStats();
+            if (typeof renderLeaderboard === 'function') renderLeaderboard();
+            console.log('✅ auto-migrate: ' + cand.join(', ') + ' → ' + canon + ' (' + H + ' pt)');
+          });
+        });
+      }).catch(() => {});
+  };
+
   // ─── جلب يدوي فوري (للزرار ولأول تحميل) ───
   window.fbRenderLeaderboard = function() {
     get(ref(db, LB_PATH)).then(s => {
@@ -3112,7 +3185,7 @@ function _callWhenReady(fn, args) {
       <div class="logo-sub">تحدي حفظ القرآن الكريم</div>
       <div style="display:inline-block;margin-top:6px;padding:3px 12px;background:rgba(201,151,58,0.12);border:1px solid rgba(201,151,58,0.35);border-radius:20px;font-size:10px;color:rgba(245,217,139,0.7);letter-spacing:0.5px;">★ الموقع الرسمي الوحيد ★</div>
       <div style="margin-top:6px;font-size:10px;color:rgba(245,217,139,0.55);">🔊 الصوت: الشيخ مشاري بن راشد العفاسي — مقدَّم من <a href="https://everyayah.com" target="_blank" rel="noopener" style="color:rgba(201,151,58,0.8);text-decoration:underline;">everyayah.com</a></div>
-      <div style="margin-top:4px;font-size:10px;"><a href="privacy-policy.html" target="_blank" style="color:rgba(201,151,58,0.4);text-decoration:none;">سياسة الخصوصية</a> <span style="color:rgba(245,217,139,0.35);">· v47</span></div>
+      <div style="margin-top:4px;font-size:10px;"><a href="privacy-policy.html" target="_blank" style="color:rgba(201,151,58,0.4);text-decoration:none;">سياسة الخصوصية</a> <span style="color:rgba(245,217,139,0.35);">· v48</span></div>
     </div>
 
     <!-- USER BAR -->
@@ -4654,6 +4727,8 @@ function _saveNameEdit() {
       const _onKey = 'nour_old_names_' + _email;
       let _arr = []; try { _arr = JSON.parse(localStorage.getItem(_onKey) || '[]'); } catch(e) {}
       if (_arr.indexOf(_oldName) === -1) { _arr.push(_oldName); localStorage.setItem(_onKey, JSON.stringify(_arr)); }
+      // ★ R1: سجّل الاسم القديم في Firebase كمان → الدمج التلقائي يشتغل على كل الأجهزة
+      if (typeof window._fbAddOldName === 'function') window._fbAddOldName(_email, _oldName);
     }
   } catch(e) {}
 
@@ -4827,6 +4902,13 @@ function _finishLogin(username, isGuest) {
       }
     };
     setTimeout(_doSync, 800); // خلي Firebase Auth يكمل أولاً
+
+    // ★ R1: دمج تلقائي آمن لأي حساب قديم (أورفان) بأسماء هذا المستخدم
+    const _doMigrate = () => {
+      if (typeof window._autoMigrateLegacy === 'function') window._autoMigrateLegacy(username);
+      else setTimeout(_doMigrate, 600);
+    };
+    setTimeout(_doMigrate, 1500);
 
     // ★ مستمع لحظي للغلطات — الإضافات تظهر على كل الأجهزة فورًا
     const _watchMist = () => {
