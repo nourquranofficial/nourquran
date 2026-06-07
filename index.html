@@ -2683,6 +2683,51 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     });
   };
 
+  // ─── حذف كل الحسابات القديمة بدون إيميل (مفاتيح بالاسم — legacy) ───
+  //     مفتاح الإيميل دايمًا فيه "_" (من @ و .). المفتاح بدون "_" = حساب قديم بالاسم.
+  //     افتراضيًا = معاينة فقط (مايمسحش). للمسح الفعلي: purgeLegacyAccounts(true)
+  window.purgeLegacyAccounts = function(confirm) {
+    const _isLegacy = (k) => {
+      const s = String(k || '');
+      if (!s) return false;
+      if (s.startsWith('guest__')) return false;   // الضيوف ليهم تنظيف منفصل
+      if (s.indexOf('_') !== -1) return false;       // فيه "_" = مفتاح إيميل → حساب حقيقي
+      return true;                                   // مفيش "_" = اسم قديم (legacy)
+    };
+    return Promise.all([
+      get(ref(db, LB_PATH)).then(s => s.val() || {}).catch(() => ({})),
+      get(ref(db, 'users')).then(s => s.val() || {}).catch(() => ({})),
+    ]).then(([lb, users]) => {
+      const keys = new Set();
+      Object.keys(lb).forEach(k => { if (_isLegacy(k)) keys.add(k); });
+      Object.keys(users).forEach(k => { if (_isLegacy(k)) keys.add(k); });
+      const list = Array.from(keys).map(k => ({
+        key: k,
+        name: (lb[k] && lb[k].name) || k,
+        hasanat: (lb[k] && lb[k].totalHasanat) || (users[k] && users[k].data && users[k].data.totalHasanat) || 0,
+      })).sort((a, b) => b.hasanat - a.hasanat);
+
+      if (!confirm) {
+        console.log('🔍 معاينة — ' + list.length + ' حساب قديم بدون إيميل (مش هيتمسح دلوقتي):');
+        try { console.table(list); } catch (e) { console.log(list); }
+        console.log('▶️ للمسح الفعلي اكتب: purgeLegacyAccounts(true)');
+        return { preview: true, count: list.length, accounts: list };
+      }
+
+      if (!list.length) { console.log('✅ مفيش حسابات قديمة بدون إيميل.'); return { deleted: 0 }; }
+      const dels = [];
+      list.forEach(({ key }) => {
+        dels.push(remove(ref(db, LB_PATH + key)).catch(() => {}));
+        dels.push(remove(ref(db, 'users/' + key)).catch(() => {}));
+      });
+      return Promise.all(dels).then(() => {
+        if (typeof renderLeaderboard === 'function') renderLeaderboard();
+        console.log('✅ اتمسح ' + list.length + ' حساب قديم بدون إيميل: ' + list.map(x => x.key).join(', '));
+        return { deleted: list.length, keys: list.map(x => x.key) };
+      });
+    });
+  };
+
   // ─── R1: دمج تلقائي آمن للحسابات القديمة (المفاتيح المشتقة من أسماء المستخدم نفسه) ───
   //     يحلّ مشكلة الأورفان (زي salama) جذريًا وبأمان — مايلمسش حساب حد تاني لأن
   //     المرشّحات مشتقّة حصريًا من اسم المستخدم الحالي + أسمائه القديمة المسجّلة.
@@ -3185,7 +3230,7 @@ function _callWhenReady(fn, args) {
       <div class="logo-sub">تحدي حفظ القرآن الكريم</div>
       <div style="display:inline-block;margin-top:6px;padding:3px 12px;background:rgba(201,151,58,0.12);border:1px solid rgba(201,151,58,0.35);border-radius:20px;font-size:10px;color:rgba(245,217,139,0.7);letter-spacing:0.5px;">★ الموقع الرسمي الوحيد ★</div>
       <div style="margin-top:6px;font-size:10px;color:rgba(245,217,139,0.55);">🔊 الصوت: الشيخ مشاري بن راشد العفاسي — مقدَّم من <a href="https://everyayah.com" target="_blank" rel="noopener" style="color:rgba(201,151,58,0.8);text-decoration:underline;">everyayah.com</a></div>
-      <div style="margin-top:4px;font-size:10px;"><a href="privacy-policy.html" target="_blank" style="color:rgba(201,151,58,0.4);text-decoration:none;">سياسة الخصوصية</a> <span style="color:rgba(245,217,139,0.35);">· v48</span></div>
+      <div style="margin-top:4px;font-size:10px;"><a href="privacy-policy.html" target="_blank" style="color:rgba(201,151,58,0.4);text-decoration:none;">سياسة الخصوصية</a> <span style="color:rgba(245,217,139,0.35);">· v49</span></div>
     </div>
 
     <!-- USER BAR -->
