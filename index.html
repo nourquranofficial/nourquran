@@ -1488,7 +1488,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       });
   };
 
-  window.fbLogout = function() { signOut(auth).catch(() => {}); };
+  window.fbLogout = function() { return signOut(auth).catch(() => {}); };
 
   // جلب/حفظ بيانات المستخدم من Firebase DB
   window.fbGetUserData = function(username, onResult) {
@@ -1505,8 +1505,33 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     Promise.all([
       get(ref(db, 'users/' + key + '/profile')).then(s => s.exists() ? s.val() : null).catch(() => null),
       get(ref(db, 'users/' + key + '/data')).then(s => s.exists() ? s.val() : null).catch(() => null),
-    ]).then(([prof, data]) => {
-      cb((prof && prof.username) ? prof.username : username, data || null);
+      // ★ FIX: جيب اسم العرض الحقيقي من leaderboard (ده اللي بيتحفظ فيه editDisplayName)
+      get(ref(db, 'leaderboard/' + key + '/name')).then(s => s.exists() ? s.val() : null).catch(() => null),
+      get(ref(db, 'users/' + key + '/name')).then(s => s.exists() ? s.val() : null).catch(() => null),
+    ]).then(([prof, data, lbName, userPathName]) => {
+      // ★ أولوية الاسم: leaderboard/name → users/name → local cache → username
+      const _fbDisplayName = (lbName && typeof lbName === 'string' && !lbName.includes('@') && lbName.trim())
+        ? lbName.trim()
+        : (userPathName && typeof userPathName === 'string' && !userPathName.includes('@') && userPathName.trim())
+          ? userPathName.trim()
+          : null;
+      // ★ لو لقينا اسم عرض من Firebase — حدّث المحلي وحدّث الـ UI فوراً
+      if (_fbDisplayName) {
+        try {
+          localStorage.setItem('nour_name_' + username, _fbDisplayName);
+          const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
+          if (_lu[username]) { _lu[username].name = _fbDisplayName; localStorage.setItem('nour_users', JSON.stringify(_lu)); }
+        } catch(e) {}
+        if (window.currentUser && window.currentUser.username === username) {
+          window.currentUser.name = _fbDisplayName;
+          currentUser = window.currentUser;
+          const _el = document.getElementById('userNameDisplay');
+          if (_el && !_el.querySelector('input')) {
+            _el.innerHTML = '👤 ' + _fbDisplayName + ' <button onclick="event.stopPropagation();editDisplayName()" title="غيّر اسمك للعرض" style="background:none;border:none;font-size:13px;cursor:pointer;color:var(--gold);opacity:.7;padding:2px 4px;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">✏️</button>';
+          }
+        }
+      }
+      cb((prof && prof.username) ? prof.username : username, data ? { ...data, name: _fbDisplayName || (data && data.name) || '' } : null);
     }).catch(() => cb(username, null));
   };
 
@@ -1575,15 +1600,17 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   };
 
   // ★ حفظ الاسم في Firebase — مكانين للضمان
-  window.fbSaveName = function(username, name) {
+  window.fbSaveName = function(username, name, forcedTs) {
     if (!username || !name) return;
     const key = dataKey(username);
-    const ts  = Date.now();
+    const ts  = forcedTs || Date.now();
     const _doWrite = () => Promise.all([
       // ★ كتابة مباشرة على مسار الاسم — يـtrigger الـ onValue listener فوراً
       set(ref(db, 'leaderboard/' + key + '/name'), name).catch(() => {}),
       set(ref(db, 'leaderboard/' + key + '/nameUpdatedAt'), ts).catch(() => {}),
       set(ref(db, 'users/' + key + '/name'), name).catch(() => {}),
+      // ★ FIX: حفظ nameUpdatedAt في users/ عشان المقارنة بالـ timestamp تشتغل صح عند الرجوع
+      set(ref(db, 'users/' + key + '/nameUpdatedAt'), ts).catch(() => {}),
     ]);
     if (auth.currentUser) { _doWrite(); return; }
     signInAnonymously(auth).then(_doWrite).catch(() => { _doWrite().catch(() => {}); });
@@ -1602,16 +1629,25 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     if (_nameUnsub) { _nameUnsub(); _nameUnsub = null; }
     if (!username) return;
     const key = dataKey(username);
-    _nameUnsub = onValue(ref(db, 'leaderboard/' + key + '/name'), (snap) => {
+    // ★ FIX: نستمع على المجلد كله عشان نجيب الاسم والـ timestamp مع بعض
+    _nameUnsub = onValue(ref(db, 'leaderboard/' + key), (snap) => {
       if (!snap.exists()) return;
-      const fbName = snap.val();
+      const data = snap.val() || {};
+      const fbName = data.name;
+      const fbTs   = data.nameUpdatedAt || 0;
       if (!fbName || typeof fbName !== 'string' || fbName.includes('@')) return;
       if (!window.currentUser || window.currentUser.username !== username) return;
       if (window.currentUser.name === fbName) return; // مفيش تغيير
+      // ★ FIX: لو المحلي أحدث من Firebase بأكتر من ثانيتين → احتفظ بالمحلي
+      const localTs = (() => { try { return parseInt(localStorage.getItem('nour_name_ts_' + username) || '0', 10); } catch(e) { return 0; } })();
+      if (localTs > fbTs + 2000) return;
       // ★ حدّث فوراً
       window.currentUser.name = fbName;
       currentUser = window.currentUser;
-      try { localStorage.setItem('nour_name_' + username, fbName); } catch(e) {}
+      try {
+        localStorage.setItem('nour_name_' + username, fbName);
+        if (fbTs) localStorage.setItem('nour_name_ts_' + username, String(fbTs));
+      } catch(e) {}
       const el = document.getElementById('userNameDisplay');
       if (el && !el.querySelector('input')) {
         el.innerHTML = '👤 ' + fbName + ' <button onclick="event.stopPropagation();editDisplayName()" title="غيّر اسمك للعرض" style="background:none;border:none;font-size:13px;cursor:pointer;color:var(--gold);opacity:.7;padding:2px 4px;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">✏️</button>';
@@ -1634,15 +1670,24 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       if (!fbData) return;
       const cu = window.currentUser;
       if (!cu || cu.username !== username) return;
-      // ★ خذ الأعلى دايماً (مش بنخسر نقاط)
-      const changed =
-        (fbData.totalHasanat || 0) > (cu.totalHasanat || 0) ||
-        (fbData.totalScore   || 0) > (cu.totalScore   || 0) ||
-        (fbData.totalGames   || 0) > (cu.totalGames   || 0);
+      // ★★ آمن: التصفير الحقيقي بس (كل القيم صفر + طابع زمني أحدث) ينزّل لصفر.
+      //    غير كده ناخد الأعلى (مستحيل نخسر نقاط من كتابة جزئية أو قراءة قديمة).
+      const fH = fbData.totalHasanat || 0, fS = fbData.totalScore || 0, fG = fbData.totalGames || 0;
+      const cH = cu.totalHasanat || 0,   cS = cu.totalScore   || 0,   cG = cu.totalGames   || 0;
+      const fTs = fbData.updatedAt || 0, cTs = cu.updatedAt || 0;
+      const _fbZero = fH === 0 && fS === 0 && fG === 0;
+      let changed = false;
+      if (_fbZero && fTs > cTs && (cH > 0 || cS > 0 || cG > 0)) {
+        // تصفير حقيقي من جهاز تاني
+        cu.totalHasanat = 0; cu.totalScore = 0; cu.totalGames = 0; cu.updatedAt = fTs; changed = true;
+      } else if (fH > cH || fS > cS || fG > cG) {
+        cu.totalHasanat = Math.max(cH, fH);
+        cu.totalScore   = Math.max(cS, fS);
+        cu.totalGames   = Math.max(cG, fG);
+        cu.updatedAt    = Math.max(cTs, fTs);
+        changed = true;
+      }
       if (!changed) return;
-      cu.totalHasanat = Math.max(cu.totalHasanat || 0, fbData.totalHasanat || 0);
-      cu.totalScore   = Math.max(cu.totalScore   || 0, fbData.totalScore   || 0);
-      cu.totalGames   = Math.max(cu.totalGames   || 0, fbData.totalGames   || 0);
       window.currentUser = cu;
       // حفظ في localStorage
       try {
@@ -1651,6 +1696,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
           _lu[username].totalHasanat = cu.totalHasanat;
           _lu[username].totalScore   = cu.totalScore;
           _lu[username].totalGames   = cu.totalGames;
+          _lu[username].updatedAt    = cu.updatedAt || Date.now();
           localStorage.setItem('nour_users', JSON.stringify(_lu));
         }
       } catch(e) {}
@@ -1946,10 +1992,12 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       if (result.committed && result.snapshot.exists()) {
         const newData = result.snapshot.val();
         if (window.currentUser && window.currentUser.username === username) {
-          // خذ الأعلى — Firebase بعد Transaction هو الأصح
+          // ★ fbIncrementScore بيزوّد بس (مفيش تصفير هنا) → ناخد الأعلى لتجنّب وميض النقصان
+          //   عند الإجابات السريعة في اللعب الجماعي. التصفير بيتعامل عبر fbResetUserData + المستمع.
           window.currentUser.totalScore   = Math.max(window.currentUser.totalScore   || 0, newData.totalScore   || 0);
           window.currentUser.totalGames   = Math.max(window.currentUser.totalGames   || 0, newData.totalGames   || 0);
           window.currentUser.totalHasanat = Math.max(window.currentUser.totalHasanat || 0, newData.totalHasanat || 0);
+          window.currentUser.updatedAt    = Math.max(window.currentUser.updatedAt || 0, newData.updatedAt || Date.now());
           // حدّث localStorage بالقيم الجديدة
           try {
             const _llu = JSON.parse(localStorage.getItem('nour_users') || '{}');
@@ -1957,6 +2005,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
               _llu[username].totalScore   = window.currentUser.totalScore;
               _llu[username].totalGames   = window.currentUser.totalGames;
               _llu[username].totalHasanat = window.currentUser.totalHasanat;
+              _llu[username].updatedAt    = window.currentUser.updatedAt;
               localStorage.setItem('nour_users', JSON.stringify(_llu));
             }
           } catch(e) {}
@@ -2051,11 +2100,17 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       const fbScore   = fbData.totalScore   || 0;
       const fbHasanat = fbData.totalHasanat || 0;
       const fbGames   = fbData.totalGames   || 0;
+      // ★★ آمن: لو Firebase تصفير حقيقي (الكل صفر) وأحدث من المحلي → خذ صفر (يحترم التصفير).
+      //    غير كده → الأعلى (مايضيّعش تقدّم محلي/offline ولا ينزّل من كتابة ناقصة).
+      const _fbTs0    = fbData.updatedAt || 0;
+      const _localTs0 = _localData.updatedAt || 0;
+      const _fbZero0  = fbScore === 0 && fbHasanat === 0 && fbGames === 0;
+      const _resetWins = _fbZero0 && _fbTs0 > _localTs0;
       const merged = {
-        totalScore:   Math.max(fbScore,   _localData.totalScore   || 0),
-        totalGames:   Math.max(fbGames,   _localData.totalGames   || 0),
-        totalHasanat: Math.max(fbHasanat, _localData.totalHasanat || 0),
-        streak:       Math.max(fbData.streak || 0, _localData.streak || 0),
+        totalScore:   _resetWins ? 0 : Math.max(fbScore,   _localData.totalScore   || 0),
+        totalGames:   _resetWins ? 0 : Math.max(fbGames,   _localData.totalGames   || 0),
+        totalHasanat: _resetWins ? 0 : Math.max(fbHasanat, _localData.totalHasanat || 0),
+        streak:       _resetWins ? 0 : Math.max(fbData.streak || 0, _localData.streak || 0),
         lastPlay:     fbData.lastPlay || _localData.lastPlay || null,
         // ★ توحيد الاسم: ناخد الأحدث بين Firebase والمحلي (زي النقاط بالظبط)
         name: (() => {
@@ -2072,6 +2127,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
           return _localName || _fbName || _googleName || '';
         })(),
         email: realUsername,
+        updatedAt: Math.max(fbData.updatedAt || 0, _localData.updatedAt || 0),
       };
       // ★ فحص الباسورد من bypassAuth — لو اتغير على جهاز تاني نطرده فوراً
       const _checkPassThenLogin = () => {
@@ -2257,12 +2313,145 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   window.SHOW_GUESTS_IN_RANKING = true;
   // ════════════════════════════════════════════════════════════
 
+  // ════════════════════════════════════════════════════════════
+  // ★★ توحيد مفاتيح لوحة الشرف — يمنع ظهور نفس اللاعب مرتين ★★
+  //   عبر نسخ التطبيق القديمة + دخول جوجل/فيسبوك اتغيّرت طريقة عمل المفتاح
+  //   (حروف كبيرة/@/guest__) فممكن نفس الحساب يبقى ليه أكتر من صفّ.
+  // ════════════════════════════════════════════════════════════
+  window._normLbKey = function(k) {
+    return String(k || '')
+      .replace(/^guest__/, '')
+      .replace(/[@.#$\/\[\]]/g, '_')
+      .toLowerCase();
+  };
+  window._mergeLbEntries = function(entries) {
+    let best = { totalHasanat: 0, totalScore: 0, totalGames: 0, updatedAt: 0,
+                 nameUpdatedAt: 0, mistakesClearedAt: 0, name: null, isGuest: true };
+    let repKey = null;
+    for (const [k, d] of entries) {
+      if (!d) continue;
+      best.totalHasanat = Math.max(best.totalHasanat, d.totalHasanat || 0);
+      best.totalScore   = Math.max(best.totalScore,   d.totalScore   || 0);
+      best.totalGames   = Math.max(best.totalGames,   d.totalGames   || 0);
+      best.updatedAt     = Math.max(best.updatedAt,     d.updatedAt     || 0);
+      best.mistakesClearedAt = Math.max(best.mistakesClearedAt, d.mistakesClearedAt || 0);
+      const dName = (d.name && !String(d.name).includes('@')) ? d.name : null;
+      const dNameTs = d.nameUpdatedAt || 0;
+      if (dName && (dNameTs >= best.nameUpdatedAt || !best.name)) {
+        best.name = dName; best.nameUpdatedAt = Math.max(best.nameUpdatedAt, dNameTs);
+      }
+      if (!d.isGuest) best.isGuest = false;
+      const norm = window._normLbKey(k);
+      if (k === norm && !String(k).startsWith('guest__')) repKey = k;
+      if (repKey === null) repKey = norm;
+    }
+    if (!repKey && entries.length) repKey = window._normLbKey(entries[0][0]);
+    return [repKey, best];
+  };
+  window._dedupeLbData = function(data) {
+    if (!data || typeof data !== 'object') return data || {};
+    const groups = {};
+    for (const k of Object.keys(data)) {
+      const n = window._normLbKey(k);
+      (groups[n] = groups[n] || []).push([k, data[k]]);
+    }
+    const out = {};
+    for (const n of Object.keys(groups)) {
+      const g = groups[n];
+      if (g.length === 1) { out[g[0][0]] = g[0][1]; continue; }
+      const [repKey, merged] = window._mergeLbEntries(g);
+      out[repKey] = merged;
+    }
+    return out;
+  };
+  let _lbCleanupDone = false;
+  window._cleanupMyLbDuplicates = function(username) {
+    if (!username || _lbCleanupDone) return;
+    const canonical = dataKey(username);
+    const canonNorm = window._normLbKey(canonical);
+    // مفاتيح إضافية بتخصّ نفس اللاعب: جزء الإيميل + مفتاح الاسم الحالي
+    const _email = String(username).toLowerCase();
+    const _loc   = _email.includes('@') ? _email.split('@')[0] : _email;
+    const _curName = (window.currentUser && window.currentUser.name && !window.currentUser.name.includes('@'))
+      ? window.currentUser.name : (() => { try { return localStorage.getItem('nour_name_' + username); } catch(e) { return null; } })();
+    const _nameKey = _curName ? String(_curName).replace(/[\s.#$\/\[\]@]/g,'_').toLowerCase() : null;
+    const _isMineKey = (k) => {
+      if (k === canonical) return false; // ده الصفّ الصح — مش تكرار
+      const kl = String(k).toLowerCase();
+      if (window._normLbKey(k) === canonNorm) return true;       // مفتاح الإيميل بصيغة تانية
+      if (_loc && (kl === _loc || window._normLbKey(k) === _loc)) return true; // مفتاح بجزء الإيميل
+      if (_nameKey && (kl === _nameKey || window._normLbKey(k) === _nameKey)) return true; // مفتاح بالاسم الحالي
+      return false;
+    };
+    get(ref(db, LB_PATH)).then(snap => {
+      const data = snap.val() || {};
+      // حسنات الصفّ الصح (للمطابقة بالنقاط مع الصفوف القديمة) — ناخد الأعلى بين Firebase والذاكرة
+      const _myH = Math.max(
+        (data[canonical] && data[canonical].totalHasanat) || 0,
+        (window.currentUser && window.currentUser.username === username && window.currentUser.totalHasanat) || 0
+      );
+      // أسماء قديمة اتغيّر منها اللاعب (متسجّلة محليًا) — نمسح صفوفها كمان
+      const _oldNames = (() => { try { return (JSON.parse(localStorage.getItem('nour_old_names_' + username) || '[]') || []).map(x => String(x).trim().toLowerCase()); } catch(e) { return []; } })();
+      const _isMineFull = (k) => {
+        if (_isMineKey(k)) return true;
+        const _kStr = String(k);
+        const _d = data[k] || {};
+        // اسم قديم اتغيّر منه = نسختي القديمة (زي salama)
+        if (_oldNames.length) {
+          if (_d.name && _oldNames.indexOf(String(_d.name).trim().toLowerCase()) !== -1) return true;
+          if (_oldNames.indexOf(window._normLbKey(k)) !== -1) return true;
+        }
+        // مفتاح قديم بكلمة واحدة (مش مفتاح إيميل) ونفس الحسنات = نسختي القديمة
+        const _isLegacyBare = k !== canonical && !_kStr.includes('_') && !/^u[0-9a-f]{4,}$/i.test(_kStr);
+        if (_isLegacyBare && _myH > 0 && (_d.totalHasanat||0) === _myH) return true;
+        return false;
+      };
+      const dupKeys = Object.keys(data).filter(_isMineFull);
+      if (dupKeys.length === 0) { _lbCleanupDone = true; return; }
+      const all = [[canonical, data[canonical]]].concat(dupKeys.map(k => [k, data[k]]))
+        .filter(([, d]) => d);
+      const [, merged] = window._mergeLbEntries(all);
+      // الاسم النهائي = اسم اللاعب الحالي لو موجود (مش الاسم القديم)
+      const _finalName = _curName || merged.name || username;
+      // طابع زمني للاسم = الأحدث (من الذاكرة المحلية أو المدموج) عشان الاسم الجديد يكسب دايمًا
+      const _localNameTs = (() => { try { return parseInt(localStorage.getItem('nour_name_ts_' + username) || '0', 10) || 0; } catch(e) { return 0; } })();
+      const _finalNameTs = Math.max(merged.nameUpdatedAt || 0, _localNameTs);
+      set(ref(db, LB_PATH + canonical), {
+        name:             _finalName,
+        nameUpdatedAt:    _finalNameTs,
+        totalHasanat:     merged.totalHasanat || 0,
+        totalScore:       merged.totalScore   || 0,
+        totalGames:       merged.totalGames   || 0,
+        isGuest:          merged.isGuest || false,
+        updatedAt:        Date.now(),
+        mistakesClearedAt: merged.mistakesClearedAt || 0,
+      }).then(() => {
+        dupKeys.forEach(k => remove(ref(db, LB_PATH + k)).catch(() => {}));
+        // ★ تأكيد: اكتب الاسم الجديد على كل مسارات الداتا بيز كمان
+        if (typeof window.fbSaveName === 'function' && _finalName && !String(_finalName).includes('@')) {
+          window.fbSaveName(username, _finalName, _finalNameTs);
+        }
+      }).catch(() => {});
+      _lbCleanupDone = true;
+    }).catch(() => {});
+  };
+  window._resetLbCleanup = function() { _lbCleanupDone = false; };
+
   // ─── رفع بيانات اللاعب — "الأحدث يكسب" (LWW) عشان الكسب والتصفير يتوحّدوا ───
   window.fbSaveUser = function(username, data) {
     if (!username) return;
     const isGuest = data.isGuest || false;
     // ★ لو الضيوف متخفيين من الترتيب — مانكتبهمش في لوحة الشرف
     if (isGuest && window.SHOW_GUESTS_IN_RANKING === false) return;
+    // ★ FIX: تأكيد إن الاسم المرفوع هو أحدث اسم من localStorage (مش الاسم القديم)
+    if (!isGuest && typeof window._getStoredName === 'function') {
+      const _lsName = window._getStoredName(username);
+      const _lsTs   = (() => { try { return parseInt(localStorage.getItem('nour_name_ts_' + username) || '0', 10); } catch(e) { return 0; } })();
+      const _datTs  = data.nameUpdatedAt || 0;
+      if (_lsName && !_lsName.includes('@') && _lsTs >= _datTs) {
+        data = { ...data, name: _lsName, nameUpdatedAt: _lsTs };
+      }
+    }
     // ★ للمسجّلين: مفتاح موحّد (lowercase) عشان نفس الشخص = صفّ واحد بس في اللوحة
     const key    = isGuest ? makeKey(username, true) : dataKey(username);
     const oldKey = makeKey(username, isGuest); // المفتاح القديم الحسّاس للأحرف
@@ -2272,6 +2461,13 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       const rawOld = (isGuest ? 'guest__' : '') + String(username).replace(/[\.\#\$\/\[\]]/g, '_');
       if (rawOld !== key) remove(ref(db, LB_PATH + rawOld)).catch(() => {});
     } catch (e) {}
+    // مسح مفتاح الاسم القديم فقط (مش مفاتيح اللاعبين التانيين)
+    if (!isGuest && data.name) {
+      const _nameBasedKey = String(data.name).replace(/[\.\#\$\/\[\]\@\s]/g,'_').toLowerCase();
+      if (_nameBasedKey !== key && _nameBasedKey !== oldKey) {
+        remove(ref(db, LB_PATH + _nameBasedKey)).catch(() => {});
+      }
+    }
 
     const ts = data.updatedAt || Date.now();
     // خلّي currentUser.updatedAt يطابق آخر رفع (للمقارنة وقت القراءة)
@@ -2281,14 +2477,20 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     // transaction: بنقارن الـtimestamp بس ★ دايمًا بناخد الأعلى في النقاط — النقاط مش بتنقص أبدًا
     runTransaction(entryRef, (cur) => {
       if (cur && (cur.updatedAt || 0) > ts) return cur; // فيه أحدث منه — سيبه
+      // احمِ اسم العرض — قارن nameUpdatedAt بـ nameUpdatedAt
+      const _curNameTs = (cur && cur.nameUpdatedAt) || 0;
+      const _newNameTs = data.nameUpdatedAt || 0;
+      const _newName   = data.name || (cur && cur.name) || username;
+      const _safeName  = (_curNameTs > _newNameTs && cur && cur.name && !cur.name.includes('@')) ? cur.name : _newName;
       return {
-        name:             data.name || (cur && cur.name) || username, // ★ الاسم للعرض وليس الإيميل
+        name:             _safeName, // ★ الاسم للعرض وليس الإيميل
         // ★★ ناخد الأعلى بين القديم والجديد — مستحيل تنقص النقاط حتى لو حصل overwrite خطأ
         totalHasanat:     Math.max((cur && cur.totalHasanat) || 0, data.totalHasanat || 0),
         totalScore:       Math.max((cur && cur.totalScore)   || 0, data.totalScore   || 0),
         totalGames:       Math.max((cur && cur.totalGames)   || 0, data.totalGames   || 0),
         isGuest:          isGuest,
         updatedAt:        ts,
+        nameUpdatedAt:    Math.max(_curNameTs, data.nameUpdatedAt || 0), // ★ احتفظ بـ nameUpdatedAt
         mistakesClearedAt: Math.max((cur && cur.mistakesClearedAt) || 0, data.mistakesClearedAt || 0),
       };
     }).catch(e => console.error('fbSaveUser error:', e));
@@ -2317,12 +2519,31 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   window.fbResetLeaderboard = function(username, isGuest) {
     if (!username) return;
     const key = isGuest ? makeKey(username, true) : dataKey(username);
-    set(ref(db, LB_PATH + key), {
-      name: username,
+    // ★ حافظ على الاسم الحقيقي — ما نرجّعهوش للإيميل بعد التصفير
+    const _realName = (window.currentUser && window.currentUser.name && !window.currentUser.name.includes('@'))
+      ? window.currentUser.name
+      : (() => { try { return localStorage.getItem('nour_name_' + username); } catch(e) { return null; } })()
+      || username;
+    const _writeZero = () => set(ref(db, LB_PATH + key), {
+      name: _realName,
+      nameUpdatedAt: (() => { try { return parseInt(localStorage.getItem('nour_name_ts_' + username) || '0', 10) || 0; } catch(e) { return 0; } })(),
       totalScore: 0, totalGames: 0, totalHasanat: 0,
       isGuest: isGuest || false,
       updatedAt: Date.now(),
     }).catch(() => {});
+    // ★★ امسح أي صفوف مكرّرة لنفس اللاعب الأول — عشان الدمج ما يرجّعش نقاط قديمة ★★
+    if (typeof window._normLbKey === 'function') {
+      const canonNorm = window._normLbKey(key);
+      get(ref(db, LB_PATH)).then(snap => {
+        const all = snap.val() || {};
+        Object.keys(all).forEach(k => {
+          if (k !== key && window._normLbKey(k) === canonNorm) remove(ref(db, LB_PATH + k)).catch(() => {});
+        });
+        _writeZero();
+      }).catch(_writeZero);
+    } else {
+      _writeZero();
+    }
   };
 
   // ★ مسح كل بيانات المستخدم من Firebase نهائياً
@@ -2382,6 +2603,72 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     if (key !== keyAlt) remove(ref(db, 'nour_lb/' + keyAlt)).catch(() => {});
   };
 
+  // ─── مساعد: مسح مفتاح واحد من leaderboard بـ key مباشر ───
+  window._fbRemoveLeaderboardKey = function(k) {
+    if (!k) return;
+    remove(ref(db, LB_PATH + k)).catch(() => {});
+  };
+
+  // ─── عرض الحسابات القديمة (مفاتيح بالاسم) عشان تختار اللي تدمجه ───
+  window.findMyOldAccounts = function() {
+    return get(ref(db, LB_PATH)).then(s => {
+      const data = s.val() || {};
+      const out = [];
+      Object.entries(data).forEach(([k, d]) => {
+        const bare = !String(k).includes('_') && !/^u[0-9a-f]{4,}$/i.test(String(k)) && !String(k).startsWith('guest__');
+        if (bare) out.push({ key: k, name: (d && d.name) || k, hasanat: (d && d.totalHasanat) || 0, games: (d && d.totalGames) || 0 });
+      });
+      out.sort((a, b) => b.hasanat - a.hasanat);
+      try { console.table(out); } catch (e) { console.log(out); }
+      return out;
+    });
+  };
+
+  // ─── دمج حساب قديم في الحساب الحالي (يُشغَّل مرة واحدة من الكونسول) ───
+  //     مثال: mergeOldAccount('salama')  — آمن: لازم تحدّد المفتاح بنفسك
+  window.mergeOldAccount = function(oldKey) {
+    const cu = window.currentUser;
+    if (!cu || !cu.username) { console.error('❌ سجّل دخول الأول'); return Promise.reject('no user'); }
+    if (!oldKey) { console.error('❌ اكتب مفتاح الحساب القديم، مثال: mergeOldAccount("salama")'); return Promise.reject('no key'); }
+    const canon = dataKey(cu.username);
+    if (String(oldKey).toLowerCase() === String(canon).toLowerCase()) { console.error('❌ ده حسابك الحالي نفسه'); return Promise.reject('same'); }
+    return Promise.all([
+      get(ref(db, LB_PATH + oldKey)).then(s => s.val()).catch(() => null),
+      get(ref(db, 'users/' + oldKey + '/data')).then(s => s.val()).catch(() => null),
+      get(ref(db, LB_PATH + canon)).then(s => s.val()).catch(() => null),
+      get(ref(db, 'users/' + canon + '/data')).then(s => s.val()).catch(() => null),
+    ]).then(([oldLb, oldData, curLb, curData]) => {
+      const pick = (...vals) => Math.max(0, ...vals.map(v => v || 0));
+      const H = pick(oldLb && oldLb.totalHasanat, oldData && oldData.totalHasanat, curLb && curLb.totalHasanat, curData && curData.totalHasanat, cu.totalHasanat);
+      const S = pick(oldLb && oldLb.totalScore, oldData && oldData.totalScore, curLb && curLb.totalScore, curData && curData.totalScore, cu.totalScore);
+      const G = pick(oldLb && oldLb.totalGames, oldData && oldData.totalGames, curLb && curLb.totalGames, curData && curData.totalGames, cu.totalGames);
+      const name = cu.name || (curLb && curLb.name) || cu.username;
+      const now = Date.now();
+      if (H <= 0) { console.error('❌ الحساب القديم "' + oldKey + '" مالهوش نقاط أو مش موجود'); return Promise.reject('empty'); }
+      return Promise.all([
+        set(ref(db, 'users/' + canon + '/data'), { totalHasanat: H, totalScore: S, totalGames: G, updatedAt: now }),
+        set(ref(db, LB_PATH + canon), { name: name, nameUpdatedAt: now, totalHasanat: H, totalScore: S, totalGames: G, isGuest: false, updatedAt: now }),
+      ]).then(() => Promise.all([
+        remove(ref(db, LB_PATH + oldKey)).catch(() => {}),
+        remove(ref(db, 'users/' + oldKey)).catch(() => {}),
+      ])).then(() => {
+        cu.totalHasanat = H; cu.totalScore = S; cu.totalGames = G; cu.updatedAt = now;
+        window.currentUser = cu;
+        if (typeof saveCurrentUser === 'function') saveCurrentUser();
+        try {
+          const oldName = (oldLb && oldLb.name) || oldKey;
+          const onKey = 'nour_old_names_' + cu.username;
+          let arr = []; try { arr = JSON.parse(localStorage.getItem(onKey) || '[]'); } catch (e) {}
+          if (arr.indexOf(oldName) === -1) { arr.push(oldName); localStorage.setItem(onKey, JSON.stringify(arr)); }
+        } catch (e) {}
+        if (typeof updateHomeStats === 'function') updateHomeStats();
+        if (typeof renderLeaderboard === 'function') renderLeaderboard();
+        console.log('✅ تم الدمج: ' + H + ' نقطة / ' + G + ' جلسة → "' + name + '". واتمسح "' + oldKey + '" نهائيًا.');
+        return { hasanat: H, score: S, games: G };
+      });
+    });
+  };
+
   // ─── جلب يدوي فوري (للزرار ولأول تحميل) ───
   window.fbRenderLeaderboard = function() {
     get(ref(db, LB_PATH)).then(s => {
@@ -2428,48 +2715,24 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     try {
       const users = (typeof window.getUsers === 'function') ? window.getUsers() : {};
       const data = {};
-      Object.entries(users).forEach(([name, d]) => {
+      Object.entries(users).forEach(([key, d]) => {
         if ((d.totalHasanat || 0) > 0)
-          data[name] = { name, totalHasanat: d.totalHasanat||0, totalScore: d.totalScore||0, totalGames: d.totalGames||0, isGuest: d.isGuest||false };
+          data[key] = { name: d.name || d.username || key, totalHasanat: d.totalHasanat||0, totalScore: d.totalScore||0, totalGames: d.totalGames||0, isGuest: d.isGuest||false };
       });
       window._renderLbFromData(data);   // حتى لو فاضي، ده بيشيل رسالة "جاري التحميل"
     } catch (e) { window._renderLbFromData({}); }
   }
-  _attachLbListener();
 
-  // ★ تنظيف تلقائي: مسح الضيوف من الداتا بيز كل ٣ أيام
-  (function _cleanOldGuests() {
-    const _3days = 2 * 24 * 60 * 60 * 1000; // ★ يومين
-    const _now   = Date.now();
-    // مسح من leaderboard
-    get(ref(db, LB_PATH)).then(snap => {
-      if (!snap.exists()) return;
-      Object.entries(snap.val()).forEach(([key, entry]) => {
-        if (!entry) return;
-        const isGuest = entry.isGuest || String(key).startsWith('guest__');
-        if (!isGuest) return;
-        const lastSeen = entry.updatedAt || entry.lastPlay || 0;
-        if (_now - lastSeen > _3days) {
-          remove(ref(db, LB_PATH + key)).catch(() => {});
-        }
-      });
-    }).catch(() => {});
+  // ─── ضمان الـ Auth قبل قراءة الـ leaderboard ───
+  if (auth.currentUser) {
+    _attachLbListener();
+  } else {
+    signInAnonymously(auth)
+      .then(() => _attachLbListener())
+      .catch(() => _attachLbListener());
+  }
 
-    // ★ مسح من users أيضاً
-    get(ref(db, 'users/')).then(snap => {
-      if (!snap.exists()) return;
-      Object.entries(snap.val()).forEach(([key, entry]) => {
-        if (!entry) return;
-        const isGuest = String(key).startsWith('guest__') ||
-          (entry.bypassAuth && entry.bypassAuth.email && String(entry.bypassAuth.email).startsWith('guest'));
-        if (!isGuest) return;
-        const lastSeen = (entry.data && (entry.data.updatedAt || entry.data.lastPlay)) || 0;
-        if (_now - lastSeen > _3days) {
-          remove(ref(db, 'users/' + key)).catch(() => {});
-        }
-      });
-    }).catch(() => {});
-  })();
+  // (guest cleanup removed — guests now appear in leaderboard)
 
   // ─── migration: انقل bيانات nour_lb للمسار الجديد (مرة واحدة) ───
   get(ref(db, 'nour_lb')).then(snap => {
@@ -2487,46 +2750,103 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   }).catch(() => {});
 
   // ─── عرض اللوحة من البيانات — موحد لكل المستخدمين ───
-  window._renderLbFromData = function(data) {
+  window._renderLbFromData = function(rawData) {
     const podiumWrap = document.getElementById('lbPodiumWrap');
     const dotsEl    = document.getElementById('lbDots');
     const lb        = document.getElementById('leaderboard');
     if (!podiumWrap) return;
 
+    // ★★ توحيد فوري بالمفتاح المُطبَّع: يمنع ظهور نفس اللاعب مرتين ★★
+    // (الاسم القديم + الجديد ليهم نفس المفتاح المُطبَّع — فبيتجمّعوا في صفّ واحد)
+    const data = (typeof window._dedupeLbData === 'function') ? window._dedupeLbData(rawData) : (rawData || {});
+
     const toA = n => String(Math.round(n || 0)).replace(/\d/g, d => '٠١٢٣٤٥٦٧٨٩'[d]);
 
-    // ترتيب تنازلي حسب الحسنات (مع احترام مفتاح ظهور الضيوف)
+    // ترتيب تنازلي: الحسنات → الجلسات → النقاط → المفتاح (tiebreakers مستقرة)
     const _showGuests = window.SHOW_GUESTS_IN_RANKING !== false;
     const list = Object.entries(data || {})
       .filter(([k, d]) => d && d.name && (d.totalHasanat || 0) > 0 &&
         (_showGuests || (!d.isGuest && !String(k).startsWith('guest__'))))
-      .sort(([, a], [, b]) => (b.totalHasanat || 0) - (a.totalHasanat || 0));
+      .sort(([ka, a], [kb, b]) => {
+        const dh = (b.totalHasanat || 0) - (a.totalHasanat || 0);
+        if (dh !== 0) return dh;
+        const dg = (b.totalGames || 0) - (a.totalGames || 0);
+        if (dg !== 0) return dg;
+        const ds = (b.totalScore || 0) - (a.totalScore || 0);
+        if (ds !== 0) return ds;
+        return String(ka).localeCompare(String(kb));
+      });
+
+    // ★★ توحيد صفّ اللاعب الحالي بالمفتاح الأساسي فقط — عرض فقط، ومايخفيش أي لاعب تاني ★★
+    // (مفيش مطابقة بالنقاط ولا بالاسم ولا بمفتاح قديم — عشان مانشيلش لاعبين ليهم نفس النقاط)
+    try {
+      const _cu0 = window.currentUser;
+      if (_cu0 && _cu0.username && !_cu0.isGuest) {
+        const _mk0 = window._makeKey;
+        const _norm0 = window._normLbKey || (x => String(x||'').toLowerCase());
+        const _canon0 = (window._dataKey ? window._dataKey(_cu0.username) : String(_cu0.username).toLowerCase());
+        // صفّي = اللي مفتاحه يطبّع لنفس مفتاحي الأساسي فقط
+        const _isMine0 = (k) => {
+          if (_mk0 && (k === _mk0(_cu0.username, false) || k === _mk0(_cu0.username, true))) return true;
+          if (_norm0(k) === _norm0(_canon0)) return true;
+          return false;
+        };
+        const _mineIdx = [];
+        for (let i = 0; i < list.length; i++) if (_isMine0(list[i][0])) _mineIdx.push(i);
+        if (_mineIdx.length >= 1) {
+          // لو نفس المفتاح ظاهر أكتر من مرة (تكرار حقيقي) → اجمعهم في صفّ واحد للعرض
+          const keepI = _mineIdx[0];
+          const keep = list[keepI][1] || {};
+          for (let j = 1; j < _mineIdx.length; j++) {
+            const d = list[_mineIdx[j]][1] || {};
+            keep.totalHasanat = Math.max(keep.totalHasanat || 0, d.totalHasanat || 0);
+            keep.totalScore   = Math.max(keep.totalScore   || 0, d.totalScore   || 0);
+            keep.totalGames   = Math.max(keep.totalGames   || 0, d.totalGames   || 0);
+          }
+          // الاسم المعروض = اسمي الحالي (صفّي أنا)
+          if (_cu0.name && !_cu0.name.includes('@')) keep.name = _cu0.name;
+          // العرض بأحدث قيمة من الذاكرة (مصدر الحقيقة) — عرض فقط، ممنوع نكتب في cu من هنا
+          keep.totalHasanat = Math.max(keep.totalHasanat || 0, _cu0.totalHasanat || 0);
+          keep.totalScore   = Math.max(keep.totalScore   || 0, _cu0.totalScore   || 0);
+          keep.totalGames   = Math.max(keep.totalGames   || 0, _cu0.totalGames   || 0);
+          list[keepI][0] = _canon0;
+          if (_mineIdx.length > 1) {
+            const _rm = new Set(_mineIdx.slice(1));
+            for (let i = list.length - 1; i >= 0; i--) if (_rm.has(i)) list.splice(i, 1);
+          }
+        } else if ((_cu0.totalHasanat || 0) > 0 && _cu0.name && !_cu0.name.includes('@')) {
+          // مالقيتش صفّي في اللوحة → أضيف صفّي من بياناتي (بيضمن ظهوري + شغل الكارت/الميدالية)
+          // ملاحظة: ده بيضيف، مش بيمسح حد — فمأمن
+          list.push([_canon0, {
+            name: _cu0.name,
+            totalHasanat: _cu0.totalHasanat || 0,
+            totalScore:   _cu0.totalScore   || 0,
+            totalGames:   _cu0.totalGames   || 0,
+            isGuest: false,
+            updatedAt: _cu0.updatedAt || Date.now(),
+          }]);
+          list.sort(([ka, a], [kb, b]) => {
+            const dh = (b.totalHasanat || 0) - (a.totalHasanat || 0); if (dh !== 0) return dh;
+            const dg = (b.totalGames || 0) - (a.totalGames || 0);     if (dg !== 0) return dg;
+            const ds = (b.totalScore || 0) - (a.totalScore || 0);     if (ds !== 0) return ds;
+            return String(ka).localeCompare(String(kb));
+          });
+        }
+      }
+    } catch (e) {}
 
     window._lbAllList = list;
 
-    // ★★ توحيد "الأحدث يكسب" — نقرأ صفّ المستخدم من الداتا الخام (حتى لو 0 بعد تصفير) ★★
+    // ★★ مزامنة مسح الغلطات فقط — النقاط بقت تتزامن عبر users/data (مصدر الحقيقة) مش من اللوحة ★★
     try {
       const cu = window.currentUser;
-      if (cu && !(window._recentReset && Date.now() - window._recentReset < 6000)) {
+      if (cu && cu.username) {
         const mk = window._makeKey;
         const myEntry = Object.entries(data || {}).find(([k, d]) =>
-          (mk && (k === mk(cu.username, false) || k === mk(cu.username, true))) ||
-          (d && d.name && d.name === cu.username)
+          (mk && (k === mk(cu.username, false) || k === mk(cu.username, true) || k === mk(cu.username, cu.isGuest || false)))
         );
         if (myEntry) {
           const e = myEntry[1] || {};
-          const eTs = e.updatedAt || 0;
-          // لو إدخال اللوحة أحدث من المحلي → نتبنّاه (كسب أو تصفير)
-          if (eTs > (cu.updatedAt || 0)) {
-            cu.totalHasanat = e.totalHasanat || 0;
-            cu.totalScore   = e.totalScore   || 0;
-            cu.totalGames   = e.totalGames   || 0;
-            cu.updatedAt    = eTs;
-            window.currentUser = cu;
-            if (typeof saveCurrentUser === 'function') saveCurrentUser();
-            const _h = document.getElementById('totalHasanat'); if (_h && typeof formatBigNum === 'function') _h.textContent = formatBigNum(cu.totalHasanat);
-            const _g = document.getElementById('totalGames');   if (_g && typeof toArabicNum === 'function') _g.textContent = toArabicNum(cu.totalGames);
-          }
           // مسح الغلطات الموحّد: لو فيه علامة مسح أحدث من اللي عندنا → امسح محليًا
           const eClr = e.mistakesClearedAt || 0;
           let seen = 0; try { seen = parseInt(localStorage.getItem('nour_mist_cleared_' + cu.username) || '0', 10) || 0; } catch (er) {}
@@ -2568,8 +2888,11 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       if (window._makeKey) {
         if (key === window._makeKey(cu.username, cu.isGuest || false)) return true;
         if (key === window._makeKey(cu.username, false)) return true;
+        if (key === window._makeKey(cu.username, true)) return true;
       }
-      return !!(d && d.name && cu.username && d.name === cu.username);
+      // مقارنة اسم العرض (d.name) مع اسم العرض للمستخدم الحالي (cu.name) — وليس الإيميل
+      const cuDisplayName = cu.name || '';
+      return !!(d && d.name && cuDisplayName && d.name.trim().toLowerCase() === cuDisplayName.trim().toLowerCase());
     };
 
     window._lbTop3Data = top3.map(([key, d], i) =>
@@ -2596,8 +2919,8 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       `<div class="lb-dot${i===0?' active':''}" onclick="lbGoTo(${i})"></div>`
     ).join('');
 
-    // نسخة المرجع: المنصة بس — مفيش قائمة باقي اللاعبين
-    if (lb) lb.innerHTML = '';
+    // ★ نسخة المرجع: المنصة المتحركة بس — مفيش قائمة لاعبين تحتها (الترتيب الكامل في المودال)
+    if (lb) { lb.innerHTML = ''; lb.style.display = 'none'; }
 
     // rotation للـ top3
     if (window.lbPodiumTimer) { clearInterval(window.lbPodiumTimer); window.lbPodiumTimer = null; }
@@ -2627,10 +2950,13 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     if (!cu || cu.isGuest) { rankEl.innerHTML = ''; return; }
 
     const toA = n => String(Math.round(n || 0)).replace(/\d/g, d => '٠١٢٣٤٥٦٧٨٩'[d]);
+    const cuDisplayName2 = cu.name || '';
     const checkFn = isMyEntryFn || ((key, d) => {
       const mk1 = window._makeKey ? window._makeKey(cu.username, false) : cu.username;
       const mk2 = window._makeKey ? window._makeKey(cu.username, true)  : cu.username;
-      return key === mk1 || key === mk2 || (d && d.name === cu.username);
+      const mk3 = window._makeKey ? window._makeKey(cu.username, cu.isGuest || false) : cu.username;
+      return key === mk1 || key === mk2 || key === mk3 ||
+        (d && d.name && cuDisplayName2 && d.name.trim().toLowerCase() === cuDisplayName2.trim().toLowerCase());
     });
 
     const myIdx = list.findIndex(([k, d]) => checkFn(k, d));
@@ -2785,8 +3111,8 @@ function _callWhenReady(fn, args) {
       <div class="logo-title">نـور</div>
       <div class="logo-sub">تحدي حفظ القرآن الكريم</div>
       <div style="display:inline-block;margin-top:6px;padding:3px 12px;background:rgba(201,151,58,0.12);border:1px solid rgba(201,151,58,0.35);border-radius:20px;font-size:10px;color:rgba(245,217,139,0.7);letter-spacing:0.5px;">★ الموقع الرسمي الوحيد ★</div>
-      <div style="margin-top:6px;font-size:10px;color:rgba(245,217,139,0.4);">الصوت: الشيخ مشاري بن راشد العفاسي — جميع الحقوق محفوظة</div>
-      <div style="margin-top:4px;font-size:10px;"><a href="privacy-policy.html" target="_blank" style="color:rgba(201,151,58,0.4);text-decoration:none;">سياسة الخصوصية</a></div>
+      <div style="margin-top:6px;font-size:10px;color:rgba(245,217,139,0.55);">🔊 الصوت: الشيخ مشاري بن راشد العفاسي — مقدَّم من <a href="https://everyayah.com" target="_blank" rel="noopener" style="color:rgba(201,151,58,0.8);text-decoration:underline;">everyayah.com</a></div>
+      <div style="margin-top:4px;font-size:10px;"><a href="privacy-policy.html" target="_blank" style="color:rgba(201,151,58,0.4);text-decoration:none;">سياسة الخصوصية</a> <span style="color:rgba(245,217,139,0.35);">· v47</span></div>
     </div>
 
     <!-- USER BAR -->
@@ -2844,7 +3170,7 @@ function _callWhenReady(fn, args) {
       <!-- المنصة المتحركة للمراكز الـ٣ -->
       <div class="lb-podium-wrap" id="lbPodiumWrap"></div>
       <div class="lb-dots" id="lbDots"></div>
-      <div class="lb-rest" id="leaderboard" style="display:none;"></div>
+      <div class="lb-rest" id="leaderboard"></div>
     </div>
 
     <!-- ★ كارت الترتيب العام (نفس ترتيب لوحة الشرف، مؤشر شخصي واضح) -->
@@ -3423,6 +3749,12 @@ let currentUser = null;
 // ─── دخول تلقائي فوري لو في مستخدم محفوظ ───────────────────
 (function attemptAutoLogin() {
   try {
+    // ★ FIX: لو المستخدم عمل logout للتو — ما نعملش auto-login ونمسح العلامة
+    if (sessionStorage.getItem('nour_did_logout') === '1') {
+      sessionStorage.removeItem('nour_did_logout');
+      localStorage.removeItem('nour_last_user'); // تأكيد إضافي
+      return;
+    }
     const lastUser = localStorage.getItem('nour_last_user');
     if (!lastUser) return;
     const users = JSON.parse(localStorage.getItem('nour_users') || '{}');
@@ -3683,14 +4015,20 @@ function doLogin() {
           }
         };
         // ★ ادخل فوراً بالبيانات المحلية — الـ Firebase data تيجي في الخلفية
-        _finishFresh(users[user] ? (users[user].name || user) : user, users[user] || localData, null);
+        // ★ FIX: أولوية الاسم: nour_name_ المباشر → nour_users.name → username (مش الـ email)
+        const _storedNameOnLogin = (typeof window._getStoredName === 'function') ? window._getStoredName(user) : null;
+        const _initialName = (_storedNameOnLogin && !_storedNameOnLogin.includes('@')) ? _storedNameOnLogin
+          : (users[user] && users[user].name && !users[user].name.includes('@')) ? users[user].name
+          : null; // لو ما فيش اسم محفوظ، سيبه فاضي وFirebase هيجيبه
+        _finishFresh(_initialName || user, users[user] || localData, null);
 
-        // ★ جيب بيانات Firebase في الخلفية وحدّث لو فيه فرق
+        // ★ جيب اسم العرض الحقيقي من Firebase في الخلفية وحدّث الـ UI فوراً
         if (typeof window.fbGetAccount === 'function') {
           window.fbGetAccount(user, (realName, fbData) => {
             if (fbData && window.currentUser && window.currentUser.username === user) {
               if (typeof window.fbSaveUser === 'function') window.fbSaveUser(user, { ...fbData, isGuest: false });
             }
+            // ★ FIX: fbGetAccount دلوقتي بيحدّث الـ UI من الـ leaderboard تلقائياً
           });
         }
       },
@@ -4210,14 +4548,29 @@ function loginSuccess(username, data, isGuest=false) {
   if (window.currentUser && window.currentUser.username === username) {
     const cu = window.currentUser;
     if (data) {
-      cu.totalScore   = Math.max(cu.totalScore   || 0, data.totalScore   || 0);
-      cu.totalGames   = Math.max(cu.totalGames   || 0, data.totalGames   || 0);
-      cu.totalHasanat = Math.max(cu.totalHasanat || 0, data.totalHasanat || 0);
-      cu.streak       = Math.max(cu.streak       || 0, data.streak       || 0);
+      // ★ آمن: لو البيانات الجديدة تصفير حقيقي (الكل صفر) وأحدث → خذها (يحترم التصفير)؛
+      //   غير كده الأعلى (مايضيّعش نقاط من نداء fallback/افتراضي بطابع زمني)
+      const _dTs = data.updatedAt || 0, _cTs = cu.updatedAt || 0;
+      const _dZero = (data.totalScore||0)===0 && (data.totalHasanat||0)===0 && (data.totalGames||0)===0;
+      if (_dZero && _dTs > _cTs && ((cu.totalHasanat||0)>0 || (cu.totalScore||0)>0 || (cu.totalGames||0)>0)) {
+        cu.totalScore = 0; cu.totalGames = 0; cu.totalHasanat = 0; cu.streak = 0; cu.updatedAt = _dTs;
+      } else {
+        cu.totalScore   = Math.max(cu.totalScore   || 0, data.totalScore   || 0);
+        cu.totalGames   = Math.max(cu.totalGames   || 0, data.totalGames   || 0);
+        cu.totalHasanat = Math.max(cu.totalHasanat || 0, data.totalHasanat || 0);
+        cu.streak       = Math.max(cu.streak       || 0, data.streak       || 0);
+        if (_dTs > _cTs) cu.updatedAt = _dTs;
+      }
       if (data.lastPlay) cu.lastPlay = data.lastPlay;
       if (data.password) cu.password = data.password;
       // ★ الاسم: خذ الاسم الجديد لو أحسن من الموجود
-      if (data.name && !data.name.includes('@') && data.name.trim()) cu.name = data.name.trim();
+      // ★ FIX: الاسم — خذ الجديد بس لو Firebase أحدث من المحلي
+      if (data.name && !data.name.includes('@') && data.name.trim()) {
+        const _localTs = (() => { try { return parseInt(localStorage.getItem('nour_name_ts_' + username) || '0', 10); } catch(e) { return 0; } })();
+        const _dataTs  = data.nameUpdatedAt || 0;
+        // لو مفيش اسم محلي أو Firebase أحدث → خذ من Firebase
+        if (!cu.name || !cu.name.trim() || _dataTs > _localTs) cu.name = data.name.trim();
+      }
       const _lu = getUsers();
       if (_lu[username]) {
         _lu[username].totalScore   = cu.totalScore;
@@ -4237,6 +4590,13 @@ function loginSuccess(username, data, isGuest=false) {
   if (window.currentUser && window.currentUser.username !== username
       && !window.currentUser._pendingVerify && !window._registering) return;
   currentUser = { username, isGuest, ...(data || {}) };
+  // ★ FIX: أولوية اسم العرض — localStorage دايماً أحدث من Firebase لو اتغيّر محلياً
+  const _freshLocalName = (typeof window._getStoredName === 'function') ? window._getStoredName(username) : null;
+  const _freshLocalTs   = (() => { try { return parseInt(localStorage.getItem('nour_name_ts_' + username) || '0', 10); } catch(e) { return 0; } })();
+  const _freshDataTs    = (data && data.nameUpdatedAt) || 0;
+  if (_freshLocalName && !_freshLocalName.includes('@') && _freshLocalTs >= _freshDataTs) {
+    currentUser.name = _freshLocalName;
+  }
   window.currentUser = currentUser;
   _finishLogin(username, isGuest);
 }
@@ -4287,6 +4647,19 @@ function _saveNameEdit() {
 
   const _email = currentUser.username;
 
+  // ★ سجّل الاسم القديم عشان نقدر نمسح صفّه من لوحة الشرف بعدين
+  try {
+    const _oldName = (currentUser.name || '').trim();
+    if (_oldName && _oldName.toLowerCase() !== n.toLowerCase() && !_oldName.includes('@')) {
+      const _onKey = 'nour_old_names_' + _email;
+      let _arr = []; try { _arr = JSON.parse(localStorage.getItem(_onKey) || '[]'); } catch(e) {}
+      if (_arr.indexOf(_oldName) === -1) { _arr.push(_oldName); localStorage.setItem(_onKey, JSON.stringify(_arr)); }
+    }
+  } catch(e) {}
+
+  // ★ timestamp موحّد — نفس الرقم في localStorage وفي Firebase عشان الـ listener ما يرفضش التحديث
+  const _nameTs = Date.now();
+
   // ★ ١. حدّث الـ UI فوراً (قبل أي حاجة)
   currentUser.name = n;
   window.currentUser = currentUser;
@@ -4295,10 +4668,10 @@ function _saveNameEdit() {
   _cancelNameEdit();
   showToast('\u2705 تم تغيير الاسم: ' + n);
 
-  // ★ ٢. حفظ في localStorage
+  // ★ ٢. حفظ في localStorage بنفس الـ timestamp اللي هيتبعت لـ Firebase
   try {
     localStorage.setItem('nour_name_' + _email, n);
-    localStorage.setItem('nour_name_ts_' + _email, String(Date.now()));
+    localStorage.setItem('nour_name_ts_' + _email, String(_nameTs));
     const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
     if (!_lu[_email]) _lu[_email] = {};
     _lu[_email].name = n;
@@ -4306,14 +4679,24 @@ function _saveNameEdit() {
   } catch(e) {}
   saveCurrentUser();
 
-  // ★ ٣. حفظ في Firebase في الخلفية
-  if (typeof window.fbSaveName === 'function') window.fbSaveName(_email, n);
+  // ★ ٣. حفظ في Firebase في الخلفية بنفس الـ timestamp
+  if (typeof window.fbSaveName === 'function') window.fbSaveName(_email, n, _nameTs);
   if (typeof window.fbSaveUser === 'function') window.fbSaveUser(_email, {
     name: n, isGuest: false,
+    nameUpdatedAt: _nameTs,
     totalHasanat: currentUser.totalHasanat||0,
     totalScore: currentUser.totalScore||0,
     totalGames: currentUser.totalGames||0,
   });
+
+  // ★ ٤. توحيد دائم: امسح كل صفوف اللاعب المكرّرة (أي مفتاح بيطبّع لنفس مفتاح اللاعب)
+  //    بأمان — مايلمسش لاعبين تانيين حتى لو ليهم نفس الاسم. مرتين عشان نضمن كتابة Firebase خلصت.
+  if (typeof window._cleanupMyLbDuplicates === 'function') {
+    if (typeof window._resetLbCleanup === 'function') window._resetLbCleanup();
+    setTimeout(() => window._cleanupMyLbDuplicates(_email), 1200);
+    setTimeout(() => { if (typeof window._resetLbCleanup === 'function') window._resetLbCleanup(); window._cleanupMyLbDuplicates(_email); }, 3500);
+  }
+
   if (typeof renderLeaderboard === 'function') renderLeaderboard();
 }
 function _cancelNameEdit() {
@@ -4369,6 +4752,9 @@ window.doDeleteAccount = doDeleteAccount;
 
 
 function _finishLogin(username, isGuest) {
+  // ★ FIX: امسح الاسم القديم فوراً قبل أي حاجة تانية — يمنع ظهور اسم يوزر قديم
+  const _elClear = document.getElementById('userNameDisplay');
+  if (_elClear) _elClear.innerHTML = '👤 ...';
   // ★ إخفاء loginScreen بكل الطرق
   const _lsEl = document.getElementById('loginScreen');
   if (_lsEl) {
@@ -4393,7 +4779,7 @@ function _finishLogin(username, isGuest) {
   const _disp = _displayName(currentUser || { username });
   const _el = document.getElementById('userNameDisplay');
   _el.innerHTML = '👤 ' + _disp + ' <button onclick="event.stopPropagation();editDisplayName()" title="غيّر اسمك للعرض" style="background:none;border:none;font-size:13px;cursor:pointer;color:var(--gold);opacity:.7;padding:2px 4px;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">✏️</button>';
-  if (typeof window.fbSignInAnon === 'function' && !isGuest) window.fbSignInAnon();
+  if (typeof window.fbSignInAnon === 'function') window.fbSignInAnon();
   if (typeof window.fbWatchName     === 'function' && !isGuest && username && !username.includes('ضيف')) window.fbWatchName(username);
   if (typeof window.fbWatchUserData  === 'function' && !isGuest && username && !username.includes('ضيف')) window.fbWatchUserData(username);
   // ★ احفظ وقت الـ login + ابدأ مراقبة تغيير الباسورد
@@ -4401,6 +4787,10 @@ function _finishLogin(username, isGuest) {
   if (typeof window.fbWatchPassChange === 'function' && !isGuest && username && !username.includes('ضيف')) window.fbWatchPassChange(username);
   if (!isGuest) {
     try { localStorage.setItem('nour_last_user', username); } catch(e) {}
+    // ★★ نظّف صفوف اللاعب المكرّرة من لوحة الشرف (اسم قديم + جديد / جوجل + إيميل) ★★
+    if (username && username.includes('@') && typeof window._cleanupMyLbDuplicates === 'function') {
+      setTimeout(() => { if (!window._loggedOut) window._cleanupMyLbDuplicates(username); }, 2500);
+    }
   }
   checkStreak();
   renderLevels();
@@ -4465,16 +4855,25 @@ function doLogout() {
   if (typeof window.fbUnwatchMistakes === 'function') window.fbUnwatchMistakes();
   if (typeof window.fbUnwatchUserData  === 'function') window.fbUnwatchUserData();
   if (typeof window.fbUnwatchPassChange === 'function') window.fbUnwatchPassChange();
+  if (typeof window._resetLbCleanup === 'function') window._resetLbCleanup();
   saveCurrentUser();
   try { clearTimeout(window._autoLoginFallbackTimer); } catch(e) {}
   currentUser = null;
   window.currentUser = null;
   window._pendingAutoLogin = null;
   window._lbAllList = null;
+  // ★ FIX: امسح nour_last_user وضع علامة في sessionStorage تمنع auto-login بعد الـ reload
   try { localStorage.removeItem('nour_last_user'); } catch(e) {}
-  if (typeof window.fbLogout === 'function') window.fbLogout();
-  // ★ reload بعد الخروج — أبسط وأضمن حل لمشكلة الـ state
-  setTimeout(() => { location.reload(); }, 100);
+  try { sessionStorage.setItem('nour_did_logout', '1'); } catch(e) {}
+  // ★ استنّى signOut يخلص فعلاً قبل الـ reload — عشان الجلسة تتمسح ومايرجعش يدخل تلقائي
+  let _reloaded = false;
+  const _doReload = () => { if (_reloaded) return; _reloaded = true; try { location.reload(); } catch(e) {} };
+  try {
+    const _p = (typeof window.fbLogout === 'function') ? window.fbLogout() : null;
+    if (_p && typeof _p.then === 'function') _p.then(_doReload).catch(_doReload);
+  } catch(e) {}
+  // fallback: لو signOut اتأخر، اعمل reload بعد فترة قصيرة على أي حال
+  setTimeout(_doReload, 1200);
   return;
   // ★ أظهر loginScreen مباشرة — reset كامل لكل الـ styles
   const _lsOut = document.getElementById('loginScreen');
@@ -4512,6 +4911,7 @@ function saveCurrentUser() {
     totalHasanat: currentUser.totalHasanat,
     streak:       currentUser.streak || 0,
     lastPlay:     currentUser.lastPlay,
+    updatedAt:    currentUser.updatedAt || Date.now(),
     isGuest:      currentUser.isGuest || false,
   };
   saveUsers(users);
@@ -4530,6 +4930,7 @@ function saveCurrentUser() {
   // رفع على Leaderboard — كل المستخدمين (مسجلين وضيوف) بشرط وجود نقاط
   if (typeof window.fbSaveUser === 'function' && (currentUser.totalScore || 0) > 0) {
     window.fbSaveUser(currentUser.username, {
+      name:         currentUser.name || currentUser.username,
       totalHasanat: currentUser.totalHasanat,
       totalScore:   currentUser.totalScore,
       totalGames:   currentUser.totalGames,
@@ -4749,9 +5150,9 @@ function renderLeaderboard() {
   // fallback محلي فقط لو Firebase مش متاح
   const users = getUsers();
   const data = {};
-  Object.entries(users).forEach(([name, d]) => {
+  Object.entries(users).forEach(([key, d]) => {
     if ((d.totalHasanat || 0) > 0) {
-      data[name] = { name, totalHasanat: d.totalHasanat||0, totalScore: d.totalScore||0, totalGames: d.totalGames||0, isGuest: d.isGuest||false };
+      data[key] = { name: d.name || d.username || key, totalHasanat: d.totalHasanat||0, totalScore: d.totalScore||0, totalGames: d.totalGames||0, isGuest: d.isGuest||false };
     }
   });
   if (typeof window._renderLbFromData === 'function') {
@@ -7183,14 +7584,13 @@ function showResults() {
   // رفع على Leaderboard — أي حد عنده نقاط
   if (typeof window.fbSaveUser === 'function' && (currentUser.totalScore || 0) > 0) {
     window.fbSaveUser(currentUser.username, {
+      name:         currentUser.name || currentUser.username,
       totalHasanat: currentUser.totalHasanat,
       totalScore:   currentUser.totalScore,
       totalGames:   currentUser.totalGames,
       isGuest:      currentUser.isGuest || false,
     });
   }
-
-  const levelUpBox = document.getElementById('levelUpBox');
   levelUpBox.classList.remove('show');
 
   let emoji, title, msg;
@@ -8176,15 +8576,50 @@ function updateGlobalRankChip() {
   const cu = window.currentUser;
   const list = window._lbAllList;
   const hide = () => { if (chip) chip.style.display = 'none'; if (card) card.style.display = 'none'; };
-  if (!cu || !Array.isArray(list) || list.length === 0) { hide(); return; }
+  if (!cu) { hide(); return; }
+  if (cu.isGuest) {
+    const myHasanat = cu.totalHasanat || 0;
+    if (myHasanat <= 0) { hide(); return; }
+    const lbList = Array.isArray(list) ? list : [];
+    const rank = lbList.filter(([,d]) => (d && d.totalHasanat||0) > myHasanat).length + 1;
+    const total = lbList.length + 1;
+    if (chip) { chip.textContent = rank===1?'🥇':rank===2?'🥈':rank===3?'🥉':('#'+toArabicNum(rank)); chip.style.display='inline-flex'; }
+    if (card) {
+      const t=document.getElementById('grcTitle'),mine=document.getElementById('grcMine');
+      if(t) t.textContent='🏆 ترتيبك التقريبي';
+      if(mine) mine.style.display='';
+      const rankEl=document.getElementById('grcRank'),subEl=document.getElementById('grcSub'),msgEl=document.getElementById('grcMsg');
+      if(rankEl) rankEl.textContent=toArabicNum(rank);
+      if(subEl) subEl.innerHTML='من بين <b style="color:var(--gold-light);">'+formatBigNum(total)+'</b> لاعب • <b style="color:var(--gold-light);">'+formatBigNum(myHasanat)+'</b> نقطة';
+      if(msgEl) msgEl.textContent='🕊️ سجّل دخولك لتظهر في الترتيب الرسمي';
+      card.style.display='';
+    }
+    return;
+  }
+  const _listArr = Array.isArray(list) ? list : [];
   const mk = window._makeKey;
 
-  const idx = list.findIndex(([k, d]) =>
-    (mk && (k === mk(cu.username, false) || k === mk(cu.username, true))) ||
-    (d && d.name && d.name === cu.username)
+  const cuDisplayName = cu.name || '';
+  const _normK = window._normLbKey || (x => String(x||'').toLowerCase());
+  const _canonK = window._dataKey ? window._dataKey(cu.username) : cu.username;
+  const _emailLoc = String(cu.username||'').toLowerCase().includes('@') ? String(cu.username).toLowerCase().split('@')[0] : '';
+  const idx = _listArr.findIndex(([k, d]) =>
+    (mk && (k === mk(cu.username, false) || k === mk(cu.username, true) || k === mk(cu.username, cu.isGuest || false))) ||
+    (_normK(k) === _normK(_canonK)) ||
+    (_emailLoc && (String(k).toLowerCase() === _emailLoc || _normK(k) === _emailLoc)) ||
+    (d && d.name && cuDisplayName && d.name.trim().toLowerCase() === cuDisplayName.trim().toLowerCase())
   );
-  if (idx < 0) { hide(); return; }
-  const rank = idx + 1, total = list.length;
+  let rank, total, myHasanat;
+  if (idx >= 0) {
+    rank = idx + 1; total = _listArr.length;
+    myHasanat = (_listArr[idx][1] && _listArr[idx][1].totalHasanat) || 0;
+  } else {
+    // ★ مش لاقي صفّي في اللوحة → احسب ترتيبي من نقاطي مباشرة (الكارت/الميدالية ما يختفوش)
+    myHasanat = cu.totalHasanat || 0;
+    if (myHasanat <= 0) { hide(); return; }
+    rank = _listArr.filter(([,d]) => ((d && d.totalHasanat) || 0) > myHasanat).length + 1;
+    total = _listArr.length + (idx >= 0 ? 0 : 1);
+  }
 
 
   // الدايرة الشيك جنب المستوى (الترتيب العام)
@@ -8200,7 +8635,6 @@ function updateGlobalRankChip() {
     const mine = document.getElementById('grcMine');
     if (t) t.textContent = '🏆 ترتيبك العام';
     if (mine) mine.style.display = '';
-    const myHasanat = (list[idx][1] && list[idx][1].totalHasanat) || 0;
     const rankEl = document.getElementById('grcRank');
     const subEl  = document.getElementById('grcSub');
     const msgEl  = document.getElementById('grcMsg');
@@ -8257,9 +8691,10 @@ function openFullRank() {
     body.innerHTML = '<div style="text-align:center;color:rgba(245,217,139,0.4);padding:34px 16px;font-size:13px;">لسه مفيش لاعبين سجّلوا نقاط 🌱</div>';
   } else {
     const cu = window.currentUser, mk = window._makeKey;
+    const cuDisplayName = (cu && cu.name) || '';
     const isMe = (k, d) => cu && (
-      (mk && (k === mk(cu.username, false) || k === mk(cu.username, true))) ||
-      (d && d.name && d.name === cu.username)
+      (mk && (k === mk(cu.username, false) || k === mk(cu.username, true) || k === mk(cu.username, cu.isGuest || false))) ||
+      (d && d.name && cuDisplayName && d.name.trim().toLowerCase() === cuDisplayName.trim().toLowerCase())
     );
     const medals = ['🥇', '🥈', '🥉'];
     body.innerHTML = list.map(([k, d], i) => {
@@ -9291,7 +9726,11 @@ function _bankMultiPoints(earned) {
   _cu.totalScore   = (_cu.totalScore   || 0) + earned;
   currentUser = _cu; window.currentUser = _cu;
   // ★ مسجّل (حتى لو دخل بـ bypass) — يستخدم fbIncrementScore الـ atomic
-  const _isRegistered = !_cu.isGuest && _cu.email && _cu.email.includes('@');
+  // ★ مسجّل = مش ضيف وإيميله فيه @ — نعتمد على username (أضمن من email الاختياري)
+  const _isRegistered = !_cu.isGuest && (
+    (_cu.email && _cu.email.includes('@')) ||
+    (_cu.username && String(_cu.username).includes('@'))
+  );
   if (_isRegistered && typeof window.fbIncrementScore === 'function') {
     window.fbIncrementScore(_cu.username, earned, earned, 0);
   } else if (typeof window.fbSaveUser === 'function') {
