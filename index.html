@@ -2974,11 +2974,32 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
 
     const toA = n => String(Math.round(n || 0)).replace(/\d/g, d => '٠١٢٣٤٥٦٧٨٩'[d]);
 
+    // ★★ توحيد ثانٍ بالاسم المعروض — يمنع ظهور نفس الشخص بالاسم القديم والجديد ★★
+    // لو صفّان عندهم نفس d.name بالظبط (case-insensitive) → خد الأعلى نقطةً وتجاهل الثاني
+    // هذا يحل مشكلة: اسم قديم "Salama" لم يُمسح بعد من Firebase، والجديد "سلامة" — كلاهما يظهر
+    // ملاحظة: مش بنمسح من Firebase هنا — بنتجاهل التكرار في العرض فقط (المسح بيحصل async)
+    const _nameToKey = {};   // اسم_lowercase → أول مفتاح شفناه (الأعلى نقطةً بعد sort)
+    // أولاً: نحسب أعلى نقاط لكل اسم
+    for (const [k, d] of Object.entries(data || {})) {
+      if (!d || !d.name || d.name.includes('@')) continue;
+      const _nm = d.name.trim().toLowerCase();
+      if (!_nameToKey[_nm] || (d.totalHasanat || 0) > ((data[_nameToKey[_nm]] && data[_nameToKey[_nm]].totalHasanat) || 0)) {
+        _nameToKey[_nm] = k;
+      }
+    }
+    // ثانياً: filter يشيل أي صف ليس هو الأفضل لاسمه (يشيل التكرار)
+    const _winnerKeys = new Set(Object.values(_nameToKey));
+
     // ترتيب تنازلي: الحسنات → الجلسات → النقاط → المفتاح (tiebreakers مستقرة)
     const _showGuests = window.SHOW_GUESTS_IN_RANKING !== false;
     const list = Object.entries(data || {})
-      .filter(([k, d]) => d && d.name && (d.totalHasanat || 0) > 0 &&
-        (_showGuests || (!d.isGuest && !String(k).startsWith('guest__'))))
+      .filter(([k, d]) => {
+        if (!d || !d.name || (d.totalHasanat || 0) <= 0) return false;
+        if (!_showGuests && (d.isGuest || String(k).startsWith('guest__'))) return false;
+        // لو الاسم مش إيميل: تحقق إنه هو الفائز (مش مكرّر)
+        if (!d.name.includes('@') && !_winnerKeys.has(k)) return false;
+        return true;
+      })
       .sort(([ka, a], [kb, b]) => {
         const dh = (b.totalHasanat || 0) - (a.totalHasanat || 0);
         if (dh !== 0) return dh;
@@ -2989,24 +3010,35 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         return String(ka).localeCompare(String(kb));
       });
 
-    // ★★ توحيد صفّ اللاعب الحالي بالمفتاح الأساسي فقط — عرض فقط، ومايخفيش أي لاعب تاني ★★
-    // (مفيش مطابقة بالنقاط ولا بالاسم ولا بمفتاح قديم — عشان مانشيلش لاعبين ليهم نفس النقاط)
+    // ★★ توحيد صفّ اللاعب الحالي — يشمل الأسماء القديمة + مفاتيح قديمة + إيميل ★★
     try {
       const _cu0 = window.currentUser;
       if (_cu0 && _cu0.username && !_cu0.isGuest) {
         const _mk0 = window._makeKey;
         const _norm0 = window._normLbKey || (x => String(x||'').toLowerCase());
         const _canon0 = (window._dataKey ? window._dataKey(_cu0.username) : String(_cu0.username).toLowerCase());
-        // صفّي = اللي مفتاحه يطبّع لنفس مفتاحي الأساسي فقط
-        const _isMine0 = (k) => {
+        const _cuName0 = (_cu0.name && !_cu0.name.includes('@')) ? _cu0.name.trim().toLowerCase() : null;
+        // جمّع أسمائي القديمة من localStorage
+        const _myOldNames0 = (() => {
+          try { return (JSON.parse(localStorage.getItem('nour_old_names_' + _cu0.username) || '[]') || []).map(x => String(x).trim().toLowerCase()); }
+          catch(e) { return []; }
+        })();
+        // صفّي = أي صف مفتاحه يطابق مفتاحي، أو اسمه يطابق اسمي الحالي، أو اسمه من أسمائي القديمة
+        const _isMine0 = (k, d) => {
           if (_mk0 && (k === _mk0(_cu0.username, false) || k === _mk0(_cu0.username, true))) return true;
           if (_norm0(k) === _norm0(_canon0)) return true;
+          // مطابقة بالاسم المعروض (يحل مشكلة الاسم القديم/الجديد بمفاتيح مختلفة)
+          if (d && d.name && !d.name.includes('@')) {
+            const _dName = d.name.trim().toLowerCase();
+            if (_cuName0 && _dName === _cuName0) return true;
+            if (_myOldNames0.length && _myOldNames0.indexOf(_dName) !== -1) return true;
+          }
           return false;
         };
         const _mineIdx = [];
-        for (let i = 0; i < list.length; i++) if (_isMine0(list[i][0])) _mineIdx.push(i);
+        for (let i = 0; i < list.length; i++) if (_isMine0(list[i][0], list[i][1])) _mineIdx.push(i);
         if (_mineIdx.length >= 1) {
-          // لو نفس المفتاح ظاهر أكتر من مرة (تكرار حقيقي) → اجمعهم في صفّ واحد للعرض
+          // دمّج كل صفوفي في صف واحد بأعلى نقاط واسمي الحالي
           const keepI = _mineIdx[0];
           const keep = list[keepI][1] || {};
           for (let j = 1; j < _mineIdx.length; j++) {
@@ -3015,9 +3047,8 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
             keep.totalScore   = Math.max(keep.totalScore   || 0, d.totalScore   || 0);
             keep.totalGames   = Math.max(keep.totalGames   || 0, d.totalGames   || 0);
           }
-          // الاسم المعروض = اسمي الحالي (صفّي أنا)
-          if (_cu0.name && !_cu0.name.includes('@')) keep.name = _cu0.name;
-          // العرض بأحدث قيمة من الذاكرة (مصدر الحقيقة) — عرض فقط، ممنوع نكتب في cu من هنا
+          // الاسم المعروض = اسمي الحالي دائماً
+          if (_cuName0) keep.name = _cu0.name;
           keep.totalHasanat = Math.max(keep.totalHasanat || 0, _cu0.totalHasanat || 0);
           keep.totalScore   = Math.max(keep.totalScore   || 0, _cu0.totalScore   || 0);
           keep.totalGames   = Math.max(keep.totalGames   || 0, _cu0.totalGames   || 0);
@@ -3112,7 +3143,8 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     );
 
     const [, d0, emoji0, color0, border0, isMe0] = window._lbTop3Data[0];
-    const name0 = (d0 && d0.name) ? d0.name : 'لاعب';
+    const _rawName0 = (d0 && d0.name) ? d0.name : '';
+    const name0 = _rawName0.includes('@') ? (_rawName0.split('@')[0] || 'لاعب') : (_rawName0 || 'لاعب');
 
     podiumWrap.innerHTML = `<div class="lb-podium-slide active" id="lbSlide0"
          style="background:${color0};border-color:${border0};transition:opacity 0.35s ease,transform 0.35s ease;">
@@ -8926,17 +8958,25 @@ function openFullRank() {
     body.innerHTML = '<div style="text-align:center;color:rgba(245,217,139,0.4);padding:34px 16px;font-size:13px;">لسه مفيش لاعبين سجّلوا نقاط 🌱</div>';
   } else {
     const cu = window.currentUser, mk = window._makeKey;
-    const cuDisplayName = (cu && cu.name) || '';
-    const isMe = (k, d) => cu && (
-      (mk && (k === mk(cu.username, false) || k === mk(cu.username, true) || k === mk(cu.username, cu.isGuest || false))) ||
-      (d && d.name && cuDisplayName && d.name.trim().toLowerCase() === cuDisplayName.trim().toLowerCase())
-    );
+    const cuDisplayName = (cu && cu.name && !cu.name.includes('@')) ? cu.name.trim().toLowerCase() : '';
+    const _myOldNmsRank = (() => { try { return (JSON.parse(localStorage.getItem('nour_old_names_' + (cu && cu.username) || '[]') || '[]') || []).map(x => String(x).trim().toLowerCase()); } catch(e) { return []; } })();
+    const isMe = (k, d) => {
+      if (!cu) return false;
+      if (mk && (k === mk(cu.username, false) || k === mk(cu.username, true) || k === mk(cu.username, cu.isGuest || false))) return true;
+      if (d && d.name && !d.name.includes('@')) {
+        const _dNm = d.name.trim().toLowerCase();
+        if (cuDisplayName && _dNm === cuDisplayName) return true;
+        if (_myOldNmsRank.length && _myOldNmsRank.indexOf(_dNm) !== -1) return true;
+      }
+      return false;
+    };
     const medals = ['🥇', '🥈', '🥉'];
     body.innerHTML = list.map(([k, d], i) => {
       const me = isMe(k, d);
       const cls = 'rank-row' + (i < 3 ? ' top' : '') + (me ? ' me' : '');
       const rk = i < 3 ? medals[i] : '#' + toArabicNum(i + 1);
-      const nm = (d && d.name) ? d.name : 'لاعب';
+      const rawNm = (d && d.name) ? d.name : '';
+      const nm = rawNm.includes('@') ? (rawNm.split('@')[0] || 'لاعب') : (rawNm || 'لاعب');
       const pts = formatBigNum((d && d.totalHasanat) || 0);
       const meTag = me ? ' <span style="color:var(--gold);font-size:11px;font-weight:700;">(أنت)</span>' : '';
       return `<div class="${cls}"><span class="rk">${rk}</span><span class="nm">${nm}${meTag}</span><span class="pts">${pts} ⭐</span></div>`;
