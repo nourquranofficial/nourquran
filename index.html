@@ -1637,6 +1637,78 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     }).catch(() => {});
   };
 
+  // ★ مسح فوري وصريح للاسم القديم من leaderboard/ على كل الأجهزة
+  //   يُستدعى مباشرة من _saveNameEdit عند تغيير الاسم — مستقل عن _cleanupMyLbDuplicates
+  window._fbDeleteOldNameFromLb = function(username, oldName, newNameTs, newName) {
+    if (!username || !oldName || String(oldName).includes('@')) return;
+    const canonKey = dataKey(username);
+    // كل المفاتيح المحتملة للاسم القديم
+    const _makeOldKey = (nm) => String(nm).replace(/[\s.#$\/\[\]@]/g, '_').toLowerCase();
+    const oldNameKey = _makeOldKey(oldName);
+    const keysToDelete = new Set();
+    keysToDelete.add(oldNameKey);
+    // نسخة بـ guest__ prefix (احتياط)
+    keysToDelete.add('guest__' + oldNameKey);
+    // نسخة بدون تطبيع (الاسم مباشرة)
+    const rawOldKey = String(oldName).trim().toLowerCase();
+    if (rawOldKey !== oldNameKey) keysToDelete.add(rawOldKey);
+
+    const _doDelete = () => {
+      get(ref(db, LB_PATH)).then(snap => {
+        const data = snap.val() || {};
+        const dels = [];
+        keysToDelete.forEach(k => {
+          // تأكّد إن المفتاح ده مش مفتاح الحساب الأصلي ومش مفتاح لاعب تاني
+          if (k === canonKey) return;
+          const entry = data[k];
+          if (!entry) return; // مش موجود أصلاً
+          // تحقق: الصفّ ده بيخصّ نفس اللاعب (نفس النقاط أو الاسم مطابق للاسم القديم)
+          const entryName = String(entry.name || '').trim().toLowerCase();
+          const entryH    = entry.totalHasanat || 0;
+          const myH       = (window.currentUser && window.currentUser.username === username)
+                            ? (window.currentUser.totalHasanat || 0) : 0;
+          const isMyOld = (entryName === String(oldName).trim().toLowerCase()) ||
+                          (myH > 0 && entryH === myH);
+          if (!isMyOld) return; // مش الصفّ بتاعي — لا تمسح
+          dels.push(remove(ref(db, LB_PATH + k)).catch(() => {}));
+        });
+        // كمان: ابحث في كل لوحة الشرف عن أي صفّ اسمه = الاسم القديم بالظبط وبيخصّني
+        Object.keys(data).forEach(k => {
+          if (k === canonKey || keysToDelete.has(k)) return;
+          const d = data[k];
+          if (!d) return;
+          const dName = String(d.name || '').trim().toLowerCase();
+          if (dName !== String(oldName).trim().toLowerCase()) return;
+          // تأكّد إنه صفّي (نفس النقاط أو normKey متطابق)
+          const kNorm = window._normLbKey ? window._normLbKey(k) : k;
+          const myNorm = window._normLbKey ? window._normLbKey(canonKey) : canonKey;
+          const myH2 = (window.currentUser && window.currentUser.username === username)
+                       ? (window.currentUser.totalHasanat || 0) : 0;
+          if (kNorm === myNorm || (myH2 > 0 && (d.totalHasanat || 0) === myH2)) {
+            dels.push(remove(ref(db, LB_PATH + k)).catch(() => {}));
+          }
+        });
+        if (dels.length) {
+          // بعد المسح: اكتب الاسم الجديد على الصفّ الأصلي للتأكيد
+          Promise.all(dels).then(() => {
+            if (newName && newNameTs) {
+              set(ref(db, LB_PATH + canonKey + '/name'), newName).catch(() => {});
+              set(ref(db, LB_PATH + canonKey + '/nameUpdatedAt'), newNameTs).catch(() => {});
+            }
+          });
+        }
+      }).catch(() => {});
+    };
+
+    // شغّل فوراً ومرة تانية بعد كده للتأكيد
+    if (auth.currentUser) {
+      _doDelete();
+      setTimeout(_doDelete, 2500);
+    } else {
+      signInAnonymously(auth).then(() => { _doDelete(); setTimeout(_doDelete, 2500); }).catch(() => {});
+    }
+  };
+
   // ★ listener لتحديث الاسم لحظياً على كل الأجهزة
   let _nameUnsub = null;
   window.fbWatchName = function(username) {
@@ -1655,16 +1727,26 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       // ★ FIX: لو المحلي أحدث من Firebase بأكتر من ثانيتين → احتفظ بالمحلي
       const localTs = (() => { try { return parseInt(localStorage.getItem('nour_name_ts_' + username) || '0', 10); } catch(e) { return 0; } })();
       if (localTs > fbTs + 2000) return;
+      // ★ احفظ الاسم القديم قبل التحديث عشان نمسحه من لوحة الشرف
+      const _prevName = window.currentUser.name;
       // ★ حدّث فوراً
       window.currentUser.name = fbName;
       currentUser = window.currentUser;
       try {
         localStorage.setItem('nour_name_' + username, fbName);
         if (fbTs) localStorage.setItem('nour_name_ts_' + username, String(fbTs));
+        const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
+        if (_lu[username]) { _lu[username].name = fbName; localStorage.setItem('nour_users', JSON.stringify(_lu)); }
       } catch(e) {}
       const el = document.getElementById('userNameDisplay');
       if (el && !el.querySelector('input')) {
         el.innerHTML = '👤 ' + fbName + ' <button onclick="event.stopPropagation();editDisplayName()" title="غيّر اسمك للعرض" style="background:none;border:none;font-size:13px;cursor:pointer;color:var(--gold);opacity:.7;padding:2px 4px;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">✏️</button>';
+      }
+      // ★ مسح الاسم القديم من لوحة الشرف على هذا الجهاز أيضاً
+      if (_prevName && _prevName.trim() && !_prevName.includes('@') &&
+          _prevName.trim().toLowerCase() !== fbName.trim().toLowerCase() &&
+          typeof window._fbDeleteOldNameFromLb === 'function') {
+        setTimeout(() => window._fbDeleteOldNameFromLb(username, _prevName.trim(), fbTs, fbName), 800);
       }
     });
   };
@@ -2475,12 +2557,24 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       const rawOld = (isGuest ? 'guest__' : '') + String(username).replace(/[\.\#\$\/\[\]]/g, '_');
       if (rawOld !== key) remove(ref(db, LB_PATH + rawOld)).catch(() => {});
     } catch (e) {}
-    // مسح مفتاح الاسم القديم فقط (مش مفاتيح اللاعبين التانيين)
+    // مسح مفتاح الاسم القديم: نمسح أي مفتاح غير الكانوني ليه نفس النقاط أو اسم قديم
+    // ★ مسح مفتاح الاسم الجديد لو مختلف عن المفتاح الكانوني (حماية من تكرار المفتاح الجديد)
     if (!isGuest && data.name) {
       const _nameBasedKey = String(data.name).replace(/[\.\#\$\/\[\]\@\s]/g,'_').toLowerCase();
       if (_nameBasedKey !== key && _nameBasedKey !== oldKey) {
         remove(ref(db, LB_PATH + _nameBasedKey)).catch(() => {});
       }
+    }
+    // ★ مسح مفتاح الاسم القديم (محفوظ في localStorage) لو مختلف عن المفتاح الكانوني
+    if (!isGuest) {
+      try {
+        const _storedOldNames = JSON.parse(localStorage.getItem('nour_old_names_' + username) || '[]') || [];
+        _storedOldNames.forEach(_oName => {
+          if (!_oName || String(_oName).includes('@')) return;
+          const _oKey = String(_oName).replace(/[\.\#\$\/\[\]\@\s]/g,'_').toLowerCase();
+          if (_oKey !== key && _oKey !== oldKey) remove(ref(db, LB_PATH + _oKey)).catch(() => {});
+        });
+      } catch(e) {}
     }
 
     const ts = data.updatedAt || Date.now();
@@ -4765,17 +4859,19 @@ function _saveNameEdit() {
 
   const _email = currentUser.username;
 
-  // ★ سجّل الاسم القديم عشان نقدر نمسح صفّه من لوحة الشرف بعدين
-  try {
-    const _oldName = (currentUser.name || '').trim();
-    if (_oldName && _oldName.toLowerCase() !== n.toLowerCase() && !_oldName.includes('@')) {
+  // ─── حفظ الاسم القديم قبل أي تغيير ───
+  const _oldName = (currentUser.name || '').trim();
+  const _nameChanged = _oldName && _oldName.toLowerCase() !== n.toLowerCase() && !_oldName.includes('@');
+
+  // ★ سجّل الاسم القديم محلياً وفي Firebase عشان نمسحه من لوحة الشرف على كل الأجهزة
+  if (_nameChanged) {
+    try {
       const _onKey = 'nour_old_names_' + _email;
       let _arr = []; try { _arr = JSON.parse(localStorage.getItem(_onKey) || '[]'); } catch(e) {}
       if (_arr.indexOf(_oldName) === -1) { _arr.push(_oldName); localStorage.setItem(_onKey, JSON.stringify(_arr)); }
-      // ★ R1: سجّل الاسم القديم في Firebase كمان → الدمج التلقائي يشتغل على كل الأجهزة
-      if (typeof window._fbAddOldName === 'function') window._fbAddOldName(_email, _oldName);
-    }
-  } catch(e) {}
+    } catch(e) {}
+    if (typeof window._fbAddOldName === 'function') window._fbAddOldName(_email, _oldName);
+  }
 
   // ★ timestamp موحّد — نفس الرقم في localStorage وفي Firebase عشان الـ listener ما يرفضش التحديث
   const _nameTs = Date.now();
@@ -4799,7 +4895,7 @@ function _saveNameEdit() {
   } catch(e) {}
   saveCurrentUser();
 
-  // ★ ٣. حفظ في Firebase في الخلفية بنفس الـ timestamp
+  // ★ ٣. حفظ في Firebase بالاسم الجديد فوراً في كل المسارات
   if (typeof window.fbSaveName === 'function') window.fbSaveName(_email, n, _nameTs);
   if (typeof window.fbSaveUser === 'function') window.fbSaveUser(_email, {
     name: n, isGuest: false,
@@ -4809,12 +4905,24 @@ function _saveNameEdit() {
     totalGames: currentUser.totalGames||0,
   });
 
-  // ★ ٤. توحيد دائم: امسح كل صفوف اللاعب المكرّرة (أي مفتاح بيطبّع لنفس مفتاح اللاعب)
-  //    بأمان — مايلمسش لاعبين تانيين حتى لو ليهم نفس الاسم. مرتين عشان نضمن كتابة Firebase خلصت.
+  // ★ ٤. مسح الاسم القديم من لوحة الشرف فوراً وبشكل صريح (مش اعتماد على cleanup بس)
+  //     يمسح صفّ الاسم القديم من leaderboard/ سواء كانت مفاتيحه بأي صيغة
+  if (_nameChanged && typeof window._fbDeleteOldNameFromLb === 'function') {
+    window._fbDeleteOldNameFromLb(_email, _oldName, _nameTs, n);
+  }
+
+  // ★ ٥. توحيد شامل: امسح كل صفوف اللاعب المكرّرة (reset الـ flag عشان يشتغل من جديد)
+  //    بيتنفذ مرتين بفارق وقت للتأكيد بعد اكتمال كتابة Firebase
+  if (typeof window._resetLbCleanup === 'function') window._resetLbCleanup();
   if (typeof window._cleanupMyLbDuplicates === 'function') {
-    if (typeof window._resetLbCleanup === 'function') window._resetLbCleanup();
-    setTimeout(() => window._cleanupMyLbDuplicates(_email), 1200);
-    setTimeout(() => { if (typeof window._resetLbCleanup === 'function') window._resetLbCleanup(); window._cleanupMyLbDuplicates(_email); }, 3500);
+    setTimeout(() => {
+      if (typeof window._resetLbCleanup === 'function') window._resetLbCleanup();
+      window._cleanupMyLbDuplicates(_email);
+    }, 1500);
+    setTimeout(() => {
+      if (typeof window._resetLbCleanup === 'function') window._resetLbCleanup();
+      window._cleanupMyLbDuplicates(_email);
+    }, 4000);
   }
 
   if (typeof renderLeaderboard === 'function') renderLeaderboard();
