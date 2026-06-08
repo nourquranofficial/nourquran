@@ -1323,109 +1323,75 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     const fbEmail = toFbEmail(email);
     const _key    = dataKey(email);
 
-    // ★ تحقق محلي فوري — لو الباسورد صح في localStorage ادخل على طول
-    try {
-      const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
-      if (_lu[email] && _lu[email].password === safe_btoa(password)) {
-        onSuccess();
-        // تحقق من Firebase في الخلفية بدون ما يوقف الدخول
-        signInWithEmailAndPassword(window._firebaseAuth || auth, fbEmail, padPass(password)).catch(() => {});
-        return;
-      }
-    } catch(e) {}
-
-    // ★ timeout 5 ثواني — لو Firebase ما ردّش نرجع للـ local fallback
-    let _fbLoginDone = false;
-    const _fbLoginTimeout = setTimeout(() => {
-      if (_fbLoginDone) return;
-      _fbLoginDone = true;
-      onError('انتهت مهلة الاتصال بالخادم — تأكد من الإنترنت وحاول مرة ثانية');
-    }, 5000);
-
-    // ★ المنطق: bypassAuth هي المصدر الحقيقي للباسورد لو موجودة
-    //   لو مش موجودة → Firebase Auth هو المصدر
-    get(ref(db, 'users/' + _key + '/bypassAuth')).then((snap) => {
-      if (_fbLoginDone) return; _fbLoginDone = true; clearTimeout(_fbLoginTimeout);
-      if (snap.exists()) {
-        const bpa = snap.val();
-        if (bpa && bpa.passHash === safe_btoa(padPass(password))) {
-          // ★ الباسورد صح — حدّث localStorage فوراً
-          try {
-            const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
-            if (!_lu[email]) _lu[email] = {};
-            _lu[email].password = safe_btoa(password);
-            _lu[email].email = email;
-            localStorage.setItem('nour_users', JSON.stringify(_lu));
-          } catch(e) {}
-          // حاول تسجيل الدخول بـ Firebase Auth — لو نجح ممتاز، لو لأ ادخّل على كل حال
-          signInWithEmailAndPassword(auth, fbEmail, padPass(password))
-            .then(() => onSuccess())
-            .catch(() => {
-              // Firebase Auth ما اتحدثش — ادخّل بدونه
-              onSuccess();
-            });
-        } else {
-          // ★ الباسورد غلط — حتى لو Firebase Auth يقبله بالقديم → ارفض
-          onError('الإيميل أو كلمة المرور خاطئة');
-        }
-      } else {
-        // مفيش bypassAuth → Firebase Auth هو المصدر، وبنكتب bypassAuth للمرات الجاية
-        signInWithEmailAndPassword(auth, fbEmail, padPass(password))
-          .then(() => {
-            // ★ اكتب bypassAuth للمرة الأولى عشان كل الأجهزة تعرف الباسورد الصح
-            set(ref(db, 'users/' + _key + '/bypassAuth'), {
-              email, passHash: safe_btoa(padPass(password)), updatedAt: Date.now(), changedAt: 0,
-            }).catch(() => {});
-            try {
-              const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
-              if (!_lu[email]) _lu[email] = {};
-              _lu[email].password = safe_btoa(password);
-              localStorage.setItem('nour_users', JSON.stringify(_lu));
-            } catch(e) {}
-            onSuccess();
-          })
-          .catch((e) => {
-            if (e.code === 'auth/too-many-requests') {
-              try {
-                const users = JSON.parse(localStorage.getItem('nour_users') || '{}');
-                if (users[email] && users[email].password === safe_btoa(password)) { onSuccess(); return; }
-              } catch(ex) {}
-              onError('الحساب محجوب مؤقتاً من Firebase، حاول بعد قليل');
-            } else if (e.code === 'auth/user-not-found') {
-              onError('الإيميل ده مش مسجّل — أنشئ حساباً جديداً');
-            } else if (e.code === 'auth/operation-not-allowed' || e.code === 'auth/configuration-not-found') {
-              onError('⛔ خدمة الحسابات مش مفعّلة في Firebase (Authentication ← Email/Password ← Enable).');
-            } else if (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential' || e.code === 'auth/invalid-login-credentials') {
-              onError('الإيميل أو كلمة المرور خاطئة');
-            } else if (e.code === 'auth/network-request-failed') {
-              onError('في مشكلة في الإنترنت — اتأكد من اتصالك');
-            } else {
-              onError('تعذّر الدخول: ' + (e.code || 'خطأ غير معروف'));
-            }
-          });
-      }
-    }).catch(() => {
-      if (_fbLoginDone) return; _fbLoginDone = true; clearTimeout(_fbLoginTimeout);
-      // Firebase مش متاح — جرّب محلياً أولاً ثم Firebase Auth
+    // ★ offline fallback فقط — لو اللوكال عنده الباسورد الصح
+    //   (بيشتغل لو Firebase مش متاح خالص)
+    const _tryLocalFallback = () => {
       try {
-        const _localUsers = JSON.parse(localStorage.getItem('nour_users') || '{}');
-        const _lu = _localUsers[email];
-        if (_lu && _lu.password === safe_btoa(password)) {
-          onSuccess(); return; // ✅ offline fallback من localStorage
+        const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
+        if (_lu[email] && _lu[email].password === safe_btoa(password)) {
+          onSuccess(); return true;
         }
       } catch(e) {}
-      signInWithEmailAndPassword(auth, fbEmail, padPass(password))
-        .then(() => onSuccess())
-        .catch((e) => {
-          if (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential' || e.code === 'auth/invalid-login-credentials') {
-            onError('الإيميل أو كلمة المرور خاطئة');
-          } else if (e.code === 'auth/network-request-failed') {
+      return false;
+    };
+
+    // ★ Firebase Auth هو المصدر الوحيد للحقيقة — مباشر على كل الأجهزة
+    let _done = false;
+    const _timeout = setTimeout(() => {
+      if (_done) return;
+      _done = true;
+      // انتهت المهلة — جرّب local fallback
+      if (!_tryLocalFallback()) {
+        onError('انتهت مهلة الاتصال — تأكد من الإنترنت وحاول مرة ثانية');
+      }
+    }, 8000);
+
+    signInWithEmailAndPassword(auth, fbEmail, padPass(password))
+      .then(() => {
+        if (_done) return; _done = true; clearTimeout(_timeout);
+        // ✅ حدّث localStorage بالباسورد الصح
+        try {
+          const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
+          if (!_lu[email]) _lu[email] = {};
+          _lu[email].password = safe_btoa(password);
+          _lu[email].email = email;
+          localStorage.setItem('nour_users', JSON.stringify(_lu));
+        } catch(e) {}
+        // ★ حدّث bypassAuth في Firebase عشان كل الأجهزة تعرف الباسورد الصح
+        set(ref(db, 'users/' + _key + '/bypassAuth'), {
+          email,
+          passHash: safe_btoa(padPass(password)),
+          passEnc:  safe_btoa(password),
+          updatedAt: Date.now(),
+          changedAt: 0,
+        }).catch(() => {});
+        onSuccess();
+      })
+      .catch((e) => {
+        if (_done) return; _done = true; clearTimeout(_timeout);
+        if (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential' || e.code === 'auth/invalid-login-credentials') {
+          onError('الإيميل أو كلمة المرور خاطئة');
+        } else if (e.code === 'auth/user-not-found' || e.code === 'auth/user-disabled') {
+          onError('الإيميل ده مش مسجّل — أنشئ حساباً جديداً');
+        } else if (e.code === 'auth/too-many-requests') {
+          // Firebase حجب الحساب مؤقتاً — جرّب local fallback
+          if (!_tryLocalFallback()) {
+            onError('الحساب محجوب مؤقتاً، حاول بعد دقائق أو غيّر الشبكة');
+          }
+        } else if (e.code === 'auth/network-request-failed') {
+          // مفيش نت — جرّب local fallback
+          if (!_tryLocalFallback()) {
             onError('في مشكلة في الإنترنت — اتأكد من اتصالك');
-          } else {
+          }
+        } else if (e.code === 'auth/operation-not-allowed' || e.code === 'auth/configuration-not-found') {
+          onError('⛔ خدمة الحسابات مش مفعّلة في Firebase (Authentication ← Email/Password ← Enable).');
+        } else {
+          // أي خطأ تاني — جرّب local fallback كـ safety net
+          if (!_tryLocalFallback()) {
             onError('الإيميل أو كلمة المرور خاطئة');
           }
-        });
-    });
+        }
+      });
   };
 
   // ★ تغيير كلمة المرور — يحفظ في Firebase DB ويدخّل فوراً
