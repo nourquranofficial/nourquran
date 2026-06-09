@@ -2202,11 +2202,16 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       const _localTs0 = _localData.updatedAt || 0;
       const _fbZero0  = fbScore === 0 && fbHasanat === 0 && fbGames === 0;
       const _resetWins = _fbZero0 && _fbTs0 > _localTs0;
+      // ★★ حارس الحفظ: اقرأ أعلى قيم من آخر saveCurrentUser على هذا الجهاز
+      const _guard0 = (function(){ try { return JSON.parse(localStorage.getItem('nour_save_guard_' + realUsername) || 'null'); } catch(e){ return null; } })() || {};
+      // لا تطبّق الحارس لو Firebase أرسل تصفير حقيقي أحدث منه
+      const _guardTs0 = _guard0.updatedAt || 0;
+      const _useGuard0 = !(_fbZero0 && _fbTs0 > _guardTs0);
       const merged = {
-        totalScore:   _resetWins ? 0 : Math.max(fbScore,   _localData.totalScore   || 0),
-        totalGames:   _resetWins ? 0 : Math.max(fbGames,   _localData.totalGames   || 0),
-        totalHasanat: _resetWins ? 0 : Math.max(fbHasanat, _localData.totalHasanat || 0),
-        streak:       _resetWins ? 0 : Math.max(fbData.streak || 0, _localData.streak || 0),
+        totalScore:   _resetWins ? 0 : Math.max(fbScore,   _localData.totalScore   || 0, _useGuard0 ? (_guard0.totalScore   || 0) : 0),
+        totalGames:   _resetWins ? 0 : Math.max(fbGames,   _localData.totalGames   || 0, _useGuard0 ? (_guard0.totalGames   || 0) : 0),
+        totalHasanat: _resetWins ? 0 : Math.max(fbHasanat, _localData.totalHasanat || 0, _useGuard0 ? (_guard0.totalHasanat || 0) : 0),
+        streak:       _resetWins ? 0 : Math.max(fbData.streak || 0, _localData.streak || 0, _useGuard0 ? (_guard0.streak || 0) : 0),
         lastPlay:     fbData.lastPlay || _localData.lastPlay || null,
         // ★ توحيد الاسم: ناخد الأحدث بين Firebase والمحلي (زي النقاط بالظبط)
         name: (() => {
@@ -2223,7 +2228,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
           return _localName || _fbName || _googleName || '';
         })(),
         email: realUsername,
-        updatedAt: Math.max(fbData.updatedAt || 0, _localData.updatedAt || 0),
+        updatedAt: Math.max(fbData.updatedAt || 0, _localData.updatedAt || 0, _useGuard0 ? _guardTs0 : 0),
       };
       // ★ فحص الباسورد من bypassAuth — لو اتغير على جهاز تاني نطرده فوراً
       const _checkPassThenLogin = () => {
@@ -4234,11 +4239,13 @@ function doLogin() {
           // عشان لو المستخدم عمل save للنقاط قبل ما يسجّل خروج، نلاقيها محدّثة
           const _freshUsers = (function(){ try { return JSON.parse(localStorage.getItem('nour_users') || '{}'); } catch(e) { return {}; } })();
           const lData = _freshUsers[user] || users[user] || {};
+          // ★★ حارس الحفظ: اقرأ أعلى قيم محفوظة من آخر saveCurrentUser
+          const _guard2 = (function(){ try { return JSON.parse(localStorage.getItem('nour_save_guard_' + user) || 'null'); } catch(e){ return null; } })() || {};
           const merged = {
-            totalScore:   Math.max((fbData && fbData.totalScore)   || 0, lData.totalScore   || 0),
-            totalGames:   Math.max((fbData && fbData.totalGames)   || 0, lData.totalGames   || 0),
-            totalHasanat: Math.max((fbData && fbData.totalHasanat) || 0, lData.totalHasanat || 0),
-            streak:       Math.max((fbData && fbData.streak)       || 0, lData.streak       || 0),
+            totalScore:   Math.max((fbData && fbData.totalScore)   || 0, lData.totalScore   || 0, _guard2.totalScore   || 0),
+            totalGames:   Math.max((fbData && fbData.totalGames)   || 0, lData.totalGames   || 0, _guard2.totalGames   || 0),
+            totalHasanat: Math.max((fbData && fbData.totalHasanat) || 0, lData.totalHasanat || 0, _guard2.totalHasanat || 0),
+            streak:       Math.max((fbData && fbData.streak)       || 0, lData.streak       || 0, _guard2.streak       || 0),
             lastPlay:     (fbData && fbData.lastPlay) || lData.lastPlay || null,
             // ★ الاسم: المسار المستقل أولاً، ثم localStorage، ثم data
             name: (typeof window._getStoredName === 'function' ? window._getStoredName(user) : null) || fbNameOverride || lData.name || (fbData && fbData.name) || '',
@@ -4863,6 +4870,25 @@ function loginSuccess(username, data, isGuest=false) {
     }
   } catch(e) {}
 
+  // ★★★ حارس الحفظ: القيمة الأعلى محفوظة من آخر saveCurrentUser — ضمان أقوى من nour_users
+  // بيحمي من سيناريو: المستخدم لعب → خرج → رجع → Firebase رجع قيم قديمة (قبل ما الكتابة تكتمل)
+  try {
+    const _guard = JSON.parse(localStorage.getItem('nour_save_guard_' + username) || 'null');
+    if (_guard && typeof _guard === 'object') {
+      const _gTs = _guard.updatedAt || 0;
+      const _dataTs2 = (data && data.updatedAt) || 0;
+      const _dataZero2 = (data && (data.totalScore||0)===0 && (data.totalHasanat||0)===0 && (data.totalGames||0)===0);
+      // لا تطبّق الحارس على تصفير حقيقي من Firebase (أحدث من الحارس)
+      if (!(_dataZero2 && _dataTs2 > _gTs)) {
+        currentUser.totalScore   = Math.max(currentUser.totalScore   || 0, _guard.totalScore   || 0);
+        currentUser.totalGames   = Math.max(currentUser.totalGames   || 0, _guard.totalGames   || 0);
+        currentUser.totalHasanat = Math.max(currentUser.totalHasanat || 0, _guard.totalHasanat || 0);
+        currentUser.streak       = Math.max(currentUser.streak       || 0, _guard.streak       || 0);
+        currentUser.updatedAt    = Math.max(currentUser.updatedAt    || 0, _gTs);
+      }
+    }
+  } catch(e) {}
+
   // ★ FIX: أولوية اسم العرض — localStorage دايماً أحدث من Firebase لو اتغيّر محلياً
   const _freshLocalName = (typeof window._getStoredName === 'function') ? window._getStoredName(username) : null;
   const _freshLocalTs   = (() => { try { return parseInt(localStorage.getItem('nour_name_ts_' + username) || '0', 10); } catch(e) { return 0; } })();
@@ -5209,8 +5235,9 @@ function doLogout() {
 function saveCurrentUser() {
   if (!currentUser) return Promise.resolve();
 
-  // ★ تحديث updatedAt دايماً قبل الحفظ
-  currentUser.updatedAt = currentUser.updatedAt || Date.now();
+  // ★ دايماً اطبع timestamp جديد — ده يضمن إن Firebase يقبل القيمة كـ "أحدث"
+  // (لو تركنا currentUser.updatedAt القديم، Firebase ممكن يرفض التحديث أو الـ listener يعتبره قديم)
+  currentUser.updatedAt = Date.now();
 
   // حفظ محلي كـ cache — فوري ومتزامن
   const users = getUsers();
@@ -5227,6 +5254,19 @@ function saveCurrentUser() {
     isGuest:      currentUser.isGuest || false,
   };
   saveUsers(users);
+
+  // ★★ FIX: اكتب حارس الحفظ في localStorage — يضمن إن loginSuccess دايماً ياخد الأعلى
+  // حتى لو Firebase رجع قيم قديمة (race condition بين doLogout والـ reload)
+  try {
+    const _gKey = 'nour_save_guard_' + currentUser.username;
+    localStorage.setItem(_gKey, JSON.stringify({
+      totalScore:   currentUser.totalScore   || 0,
+      totalGames:   currentUser.totalGames   || 0,
+      totalHasanat: currentUser.totalHasanat || 0,
+      streak:       currentUser.streak       || 0,
+      updatedAt:    currentUser.updatedAt,
+    }));
+  } catch(e) {}
 
   const _promises = [];
 
@@ -11135,6 +11175,18 @@ window.addEventListener('pageshow', function(e) {
         _syncField('totalScore');
         _syncField('totalGames');
         _syncField('totalHasanat');
+        // ★ بفحص حارس الحفظ برضو (في حالة bfcache)
+        try {
+          const _pg = JSON.parse(localStorage.getItem('nour_save_guard_' + window.currentUser.username) || 'null');
+          if (_pg) {
+            ['totalScore','totalGames','totalHasanat'].forEach(f => {
+              if ((_pg[f]||0) > (window.currentUser[f]||0)) {
+                window.currentUser[f] = _pg[f]||0;
+                if (typeof currentUser !== 'undefined') currentUser[f] = _pg[f]||0;
+              }
+            });
+          }
+        } catch(e2) {}
         // اكتب القيم المحدّثة في localStorage
         _llu[window.currentUser.username] = {
           ..._ld,
