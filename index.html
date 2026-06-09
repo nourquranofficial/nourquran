@@ -1596,7 +1596,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     if (!username) return;
     const key = dataKey(username);
     const { password, ...cleanData } = data;
-    update(ref(db, 'users/' + key + '/data'), { ...cleanData, updatedAt: Date.now() }).catch(() => {});
+    return update(ref(db, 'users/' + key + '/data'), { ...cleanData, updatedAt: Date.now() }).catch(() => {});
   };
 
   // ★ حفظ الاسم في Firebase — مكانين للضمان
@@ -5130,7 +5130,11 @@ function doLogout() {
   if (typeof window.fbUnwatchUserData  === 'function') window.fbUnwatchUserData();
   if (typeof window.fbUnwatchPassChange === 'function') window.fbUnwatchPassChange();
   if (typeof window._resetLbCleanup === 'function') window._resetLbCleanup();
-  saveCurrentUser();
+
+  // ★★ FIX الجذري: استنّى Firebase يكتب البيانات قبل الـ reload
+  // بكده النقاط المحدّثة بتوصل لـ Firebase قبل ما الصفحة تتحمّل تاني
+  const _saveDone = saveCurrentUser(); // بترجّع promise دلوقتي
+
   try { clearTimeout(window._autoLoginFallbackTimer); } catch(e) {}
   currentUser = null;
   window.currentUser = null;
@@ -5139,15 +5143,24 @@ function doLogout() {
   // ★ FIX: امسح nour_last_user وضع علامة في sessionStorage تمنع auto-login بعد الـ reload
   try { localStorage.removeItem('nour_last_user'); } catch(e) {}
   try { sessionStorage.setItem('nour_did_logout', '1'); } catch(e) {}
-  // ★ استنّى signOut يخلص فعلاً قبل الـ reload — عشان الجلسة تتمسح ومايرجعش يدخل تلقائي
+
   let _reloaded = false;
   const _doReload = () => { if (_reloaded) return; _reloaded = true; try { location.reload(); } catch(e) {} };
-  try {
-    const _p = (typeof window.fbLogout === 'function') ? window.fbLogout() : null;
-    if (_p && typeof _p.then === 'function') _p.then(_doReload).catch(_doReload);
-  } catch(e) {}
-  // fallback: لو signOut اتأخر، اعمل reload بعد فترة قصيرة على أي حال
-  setTimeout(_doReload, 1200);
+
+  // ★ انتظر كتابة Firebase تكتمل (أو 2 ثانية كحد أقصى) ثم اعمل signOut ثم reload
+  const _afterSave = () => {
+    try {
+      const _p = (typeof window.fbLogout === 'function') ? window.fbLogout() : null;
+      if (_p && typeof _p.then === 'function') _p.then(_doReload).catch(_doReload);
+      else _doReload();
+    } catch(e) { _doReload(); }
+    // fallback: لو signOut اتأخر، اعمل reload بعد فترة قصيرة على أي حال
+    setTimeout(_doReload, 1500);
+  };
+
+  // انتظر الـ save promise (أو 2 ثانية كحد أقصى حماية من تعليق الـ UI)
+  const _saveTimeout = setTimeout(_afterSave, 2000);
+  Promise.resolve(_saveDone).then(() => { clearTimeout(_saveTimeout); _afterSave(); }).catch(() => { clearTimeout(_saveTimeout); _afterSave(); });
   return;
   // ★ أظهر loginScreen مباشرة — reset كامل لكل الـ styles
   const _lsOut = document.getElementById('loginScreen');
@@ -5172,9 +5185,9 @@ function doLogout() {
 }
 
 function saveCurrentUser() {
-  if (!currentUser) return;
+  if (!currentUser) return Promise.resolve();
 
-  // حفظ محلي كـ cache
+  // حفظ محلي كـ cache — فوري ومتزامن
   const users = getUsers();
   users[currentUser.username] = {
     ...(users[currentUser.username] || {}),
@@ -5190,15 +5203,18 @@ function saveCurrentUser() {
   };
   saveUsers(users);
 
-  // رفع على Firebase DB — للمستخدمين المسجلين فقط
+  const _promises = [];
+
+  // ★ رفع على Firebase DB — للمستخدمين المسجلين فقط — نرجّع الـ promise عشان doLogout يستناها
   if (!currentUser.isGuest && typeof window.fbSaveFullUserData === 'function') {
-    window.fbSaveFullUserData(currentUser.username, {
+    const _p = window.fbSaveFullUserData(currentUser.username, {
       totalScore:   currentUser.totalScore,
       totalGames:   currentUser.totalGames,
       totalHasanat: currentUser.totalHasanat,
       streak:       currentUser.streak || 0,
       lastPlay:     currentUser.lastPlay,
     });
+    if (_p && typeof _p.then === 'function') _promises.push(_p);
   }
 
   // رفع على Leaderboard — كل المستخدمين (مسجلين وضيوف) بشرط وجود نقاط
@@ -5211,6 +5227,9 @@ function saveCurrentUser() {
       isGuest:      currentUser.isGuest || false,
     });
   }
+
+  // ★ رجّع promise يكتمل لما Firebase يكتب — أو فوراً لو مفيش إنترنت
+  return _promises.length > 0 ? Promise.all(_promises).catch(() => {}) : Promise.resolve();
 }
 
 // ============================================================
