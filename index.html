@@ -4841,6 +4841,28 @@ function loginSuccess(username, data, isGuest=false) {
   if (window.currentUser && window.currentUser.username !== username
       && !window.currentUser._pendingVerify && !window._registering) return;
   currentUser = { username, isGuest, ...(data || {}) };
+
+  // ★★ CRITICAL FIX: دمج مع localStorage — لا نخسر نقاط لو Firebase أرجع قيم أقل
+  // (حالة شائعة: Firebase Transaction اتأخرت — بيرجع الأرقام القديمة)
+  try {
+    const _llu = JSON.parse(localStorage.getItem('nour_users') || '{}');
+    const _ld = _llu[username] || {};
+    const _localTs = _ld.updatedAt || 0;
+    const _dataTs  = (data && data.updatedAt) || 0;
+    const _dataZero = (data && (data.totalScore||0)===0 && (data.totalHasanat||0)===0 && (data.totalGames||0)===0);
+    // التصفير الحقيقي: Firebase أحدث + كل القيم صفر → احترمه
+    if (_dataZero && _dataTs > _localTs) {
+      // خذ قيم صفر من Firebase — تصفير حقيقي
+    } else {
+      // خذ الأعلى من Firebase والـ localStorage
+      currentUser.totalScore   = Math.max(currentUser.totalScore   || 0, _ld.totalScore   || 0);
+      currentUser.totalGames   = Math.max(currentUser.totalGames   || 0, _ld.totalGames   || 0);
+      currentUser.totalHasanat = Math.max(currentUser.totalHasanat || 0, _ld.totalHasanat || 0);
+      currentUser.streak       = Math.max(currentUser.streak       || 0, _ld.streak       || 0);
+      currentUser.updatedAt    = Math.max(currentUser.updatedAt    || 0, _localTs);
+    }
+  } catch(e) {}
+
   // ★ FIX: أولوية اسم العرض — localStorage دايماً أحدث من Firebase لو اتغيّر محلياً
   const _freshLocalName = (typeof window._getStoredName === 'function') ? window._getStoredName(username) : null;
   const _freshLocalTs   = (() => { try { return parseInt(localStorage.getItem('nour_name_ts_' + username) || '0', 10); } catch(e) { return 0; } })();
@@ -5187,18 +5209,21 @@ function doLogout() {
 function saveCurrentUser() {
   if (!currentUser) return Promise.resolve();
 
+  // ★ تحديث updatedAt دايماً قبل الحفظ
+  currentUser.updatedAt = currentUser.updatedAt || Date.now();
+
   // حفظ محلي كـ cache — فوري ومتزامن
   const users = getUsers();
   users[currentUser.username] = {
     ...(users[currentUser.username] || {}),
     name:         currentUser.name || '',
     email:        currentUser.email || currentUser.username,
-    totalScore:   currentUser.totalScore,
-    totalGames:   currentUser.totalGames,
-    totalHasanat: currentUser.totalHasanat,
-    streak:       currentUser.streak || 0,
-    lastPlay:     currentUser.lastPlay,
-    updatedAt:    currentUser.updatedAt || Date.now(),
+    totalScore:   currentUser.totalScore   || 0,
+    totalGames:   currentUser.totalGames   || 0,
+    totalHasanat: currentUser.totalHasanat || 0,
+    streak:       currentUser.streak       || 0,
+    lastPlay:     currentUser.lastPlay     || null,
+    updatedAt:    currentUser.updatedAt,
     isGuest:      currentUser.isGuest || false,
   };
   saveUsers(users);
@@ -5208,22 +5233,23 @@ function saveCurrentUser() {
   // ★ رفع على Firebase DB — للمستخدمين المسجلين فقط — نرجّع الـ promise عشان doLogout يستناها
   if (!currentUser.isGuest && typeof window.fbSaveFullUserData === 'function') {
     const _p = window.fbSaveFullUserData(currentUser.username, {
-      totalScore:   currentUser.totalScore,
-      totalGames:   currentUser.totalGames,
-      totalHasanat: currentUser.totalHasanat,
-      streak:       currentUser.streak || 0,
-      lastPlay:     currentUser.lastPlay,
+      totalScore:   currentUser.totalScore   || 0,
+      totalGames:   currentUser.totalGames   || 0,
+      totalHasanat: currentUser.totalHasanat || 0,
+      streak:       currentUser.streak       || 0,
+      lastPlay:     currentUser.lastPlay     || null,
+      updatedAt:    currentUser.updatedAt,
     });
     if (_p && typeof _p.then === 'function') _promises.push(_p);
   }
 
-  // رفع على Leaderboard — كل المستخدمين (مسجلين وضيوف) بشرط وجود نقاط
-  if (typeof window.fbSaveUser === 'function' && (currentUser.totalScore || 0) > 0) {
+  // رفع على Leaderboard — كل المستخدمين (مسجلين وضيوف) — بشرط وجود نقاط أو جلسات
+  if (typeof window.fbSaveUser === 'function' && ((currentUser.totalScore || 0) > 0 || (currentUser.totalGames || 0) > 0)) {
     window.fbSaveUser(currentUser.username, {
       name:         currentUser.name || currentUser.username,
-      totalHasanat: currentUser.totalHasanat,
-      totalScore:   currentUser.totalScore,
-      totalGames:   currentUser.totalGames,
+      totalHasanat: currentUser.totalHasanat || 0,
+      totalScore:   currentUser.totalScore   || 0,
+      totalGames:   currentUser.totalGames   || 0,
       isGuest:      currentUser.isGuest || false,
     });
   }
@@ -5722,6 +5748,8 @@ function startFromMemorized() {
   state.qIndex = 0; state.score = 0; state.correct = 0;
   state.sessionHasanat = 0; state.answered = false;
   state.combo = 0;
+  // ★ ID فريد لكل جلسة — يمنع عدّ اللعبة مرتين
+  state._sessionId = Date.now().toString(36) + Math.random().toString(36).slice(2,6);
   // ===== hints حسب المستوى =====
   const lvl0 = LEVEL_DEFS[state.level];
   const hCount = lvl0.hints || 0;
@@ -5754,6 +5782,7 @@ let state = {
   hints: { h1:1, h2:1, h3:1 },
   isReviewMode: false, reviewSurah: null,
   pendingCompletionCheck: null,
+  _sessionId: null,
 };
 
 // ===== COMBO =====
@@ -7322,6 +7351,8 @@ function startGame() {
   state.combo = 0;
   state.hints = { h1:1, h2:1, h3:1 };
   state.isReviewMode = false;
+  // ★ ID فريد لكل جلسة — يمنع عدّ اللعبة مرتين لو حصل reload/bfcache
+  state._sessionId = Date.now().toString(36) + Math.random().toString(36).slice(2,6);
 
   // ===== forcedMode: المستوى بيفرض وضع معين =====
   const lvlForStart = LEVEL_DEFS[state.level];
@@ -7751,17 +7782,23 @@ function handleResult(isRight, e) {
     state.sessionHasanat += hasanat;
 
     // ★★ بنك فوري — النقطة تترفع لحظتها حتى لو خرج قبل النهاية
-    if (!currentUser.isGuest) {
-      currentUser.totalScore   = (currentUser.totalScore   || 0) + pts;
-      currentUser.totalHasanat = (currentUser.totalHasanat || 0) + pts;
-      window.currentUser = currentUser;
-      if (typeof window.fbIncrementScore === 'function') {
-        window.fbIncrementScore(currentUser.username, pts, pts, 0);
-      }
-    } else {
-      currentUser.totalScore   = (currentUser.totalScore   || 0) + pts;
-      currentUser.totalHasanat = (currentUser.totalHasanat || 0) + pts;
-      window.currentUser = currentUser;
+    currentUser.totalScore   = (currentUser.totalScore   || 0) + pts;
+    currentUser.totalHasanat = (currentUser.totalHasanat || 0) + pts;
+    currentUser.updatedAt    = Date.now();
+    window.currentUser = currentUser;
+
+    // ★ حفظ فوري في localStorage بعد كل إجابة صح (ضمان عدم ضياع النقاط)
+    try {
+      const _llu = JSON.parse(localStorage.getItem('nour_users') || '{}');
+      if (!_llu[currentUser.username]) _llu[currentUser.username] = {};
+      _llu[currentUser.username].totalScore   = currentUser.totalScore;
+      _llu[currentUser.username].totalHasanat = currentUser.totalHasanat;
+      _llu[currentUser.username].updatedAt    = currentUser.updatedAt;
+      localStorage.setItem('nour_users', JSON.stringify(_llu));
+    } catch(e) {}
+
+    if (!currentUser.isGuest && typeof window.fbIncrementScore === 'function') {
+      window.fbIncrementScore(currentUser.username, pts, pts, 0);
     }
     document.getElementById('liveScore').textContent = toArabicNum(state.score);
     const comboSuffix = state.combo >= 2 ? ` 🔥×${state.combo}` : '';
@@ -7836,53 +7873,70 @@ function showResults() {
   state.score = 0;
   state.sessionHasanat = 0;
 
-  // عدّ اللعبة والـ streak فقط (النقاط اتضافت فعلاً مع كل إجابة)
-  currentUser.totalGames++;
-  const today = new Date().toDateString();
-  if (currentUser.lastPlay !== today) {
-    const yesterday = new Date(Date.now()-86400000).toDateString();
-    currentUser.streak = (currentUser.lastPlay === yesterday) ? currentUser.streak+1 : 1;
-    currentUser.lastPlay = today;
-  }
-
-  // حفظ محلي
-  const _localUsers = getUsers();
-  _localUsers[currentUser.username] = {
-    ...(_localUsers[currentUser.username] || {}),
-    name:         currentUser.name || '',
-    email:        currentUser.email || currentUser.username,
-    totalScore:   currentUser.totalScore,
-    totalGames:   currentUser.totalGames,
-    totalHasanat: currentUser.totalHasanat,
-    streak:       currentUser.streak || 0,
-    lastPlay:     currentUser.lastPlay,
-    isGuest:      currentUser.isGuest || false,
-  };
-  saveUsers(_localUsers);
-
-  // Firebase — عدّ اللعبة + streak فقط (النقاط اتحفظت لحظيًا فعلاً)
-  if (!currentUser.isGuest && typeof window.fbIncrementScore === 'function') {
-    window.fbIncrementScore(currentUser.username, 0, 0, 1); // 0 نقاط — بس +1 لعبة
-    // حفظ streak وlastPlay منفصلاً
-    if (typeof window.fbSaveFullUserData === 'function') {
-      window.fbSaveFullUserData(currentUser.username, {
-        streak:   currentUser.streak || 0,
-        lastPlay: currentUser.lastPlay,
-      });
-    }
+  // ★ حماية من double-count: لو اللعبة دي اتسجّلت قبل كده (بسبب reload أو bfcache) — نتجاهلها
+  const _sessionId = state._sessionId;
+  if (!_sessionId) { console.warn('showResults: no _sessionId — skipping duplicate guard'); }
+  const _dupKey = 'nour_sess_' + _sessionId;
+  const _alreadyCounted = _sessionId && (() => { try { return localStorage.getItem(_dupKey) === '1'; } catch(e) { return false; } })();
+  if (_alreadyCounted) {
+    // اللعبة اتعدّت قبل — بس نعرض النتايج بدون increment
   } else {
-    saveCurrentUser();
-  }
+    // عدّ اللعبة والـ streak فقط (النقاط اتضافت فعلاً مع كل إجابة)
+    currentUser.totalGames++;
+    const today = new Date().toDateString();
+    if (currentUser.lastPlay !== today) {
+      const yesterday = new Date(Date.now()-86400000).toDateString();
+      currentUser.streak = (currentUser.lastPlay === yesterday) ? currentUser.streak+1 : 1;
+      currentUser.lastPlay = today;
+    }
 
-  // رفع على Leaderboard — أي حد عنده نقاط
-  if (typeof window.fbSaveUser === 'function' && (currentUser.totalScore || 0) > 0) {
-    window.fbSaveUser(currentUser.username, {
-      name:         currentUser.name || currentUser.username,
-      totalHasanat: currentUser.totalHasanat,
+    // حفظ محلي فوري وشامل
+    const _localUsers = getUsers();
+    _localUsers[currentUser.username] = {
+      ...(_localUsers[currentUser.username] || {}),
+      name:         currentUser.name || '',
+      email:        currentUser.email || currentUser.username,
       totalScore:   currentUser.totalScore,
       totalGames:   currentUser.totalGames,
+      totalHasanat: currentUser.totalHasanat,
+      streak:       currentUser.streak || 0,
+      lastPlay:     currentUser.lastPlay,
+      updatedAt:    currentUser.updatedAt || Date.now(),
       isGuest:      currentUser.isGuest || false,
-    });
+    };
+    saveUsers(_localUsers);
+
+    // ★ سجّل إن الجلسة دي اتعدّت (مدة 10 دقائق كافية)
+    if (_sessionId) { try { localStorage.setItem(_dupKey, '1'); setTimeout(() => { try { localStorage.removeItem(_dupKey); } catch(e){} }, 600000); } catch(e) {} }
+
+    // Firebase — عدّ اللعبة + streak فقط (النقاط اتحفظت لحظيًا فعلاً)
+    if (!currentUser.isGuest && typeof window.fbIncrementScore === 'function') {
+      window.fbIncrementScore(currentUser.username, 0, 0, 1); // 0 نقاط — بس +1 لعبة
+      // حفظ streak وlastPlay منفصلاً
+      if (typeof window.fbSaveFullUserData === 'function') {
+        window.fbSaveFullUserData(currentUser.username, {
+          streak:   currentUser.streak || 0,
+          lastPlay: currentUser.lastPlay,
+          totalScore:   currentUser.totalScore,
+          totalGames:   currentUser.totalGames,
+          totalHasanat: currentUser.totalHasanat,
+          updatedAt:    currentUser.updatedAt || Date.now(),
+        });
+      }
+    } else {
+      saveCurrentUser();
+    }
+
+    // رفع على Leaderboard — أي حد عنده نقاط
+    if (typeof window.fbSaveUser === 'function' && (currentUser.totalScore || 0) > 0) {
+      window.fbSaveUser(currentUser.username, {
+        name:         currentUser.name || currentUser.username,
+        totalHasanat: currentUser.totalHasanat,
+        totalScore:   currentUser.totalScore,
+        totalGames:   currentUser.totalGames,
+        isGuest:      currentUser.isGuest || false,
+      });
+    }
   }
   levelUpBox.classList.remove('show');
 
@@ -8823,6 +8877,8 @@ function startSurahReview(surahName) {
   state.combo = 0;
   state.hints = { h1:1, h2:1, h3:1 };
   state.mode = 'mcq';
+  // ★ ID فريد لكل جلسة — يمنع عدّ اللعبة مرتين
+  state._sessionId = Date.now().toString(36) + Math.random().toString(36).slice(2,6);
   stopTimer();
   markSurahReviewStarted(_targetSurah, questions.length);
   if (_resumeIdx > 0 && typeof showToast === 'function') showToast('▶️ كمّلنا من حيث وقفت');
@@ -11058,6 +11114,40 @@ window.addEventListener('pageshow', function(e) {
         }
       }, 500);
     }
+  }
+
+  // ★ bfcache sync: لو المستخدم رجع من تطبيق تاني، وحّد currentUser مع localStorage
+  // (الـ state في الذاكرة صح — بس localStorage ممكن يكون اتحدّث من تاب تاني)
+  if (e.persisted && window.currentUser && window.currentUser.username) {
+    try {
+      const _llu = JSON.parse(localStorage.getItem('nour_users') || '{}');
+      const _ld = _llu[window.currentUser.username];
+      if (_ld) {
+        // خذ الأعلى من الذاكرة والـ localStorage (لحماية من Race condition)
+        const _syncField = (field) => {
+          const memVal  = window.currentUser[field] || 0;
+          const diskVal = _ld[field] || 0;
+          if (diskVal > memVal) {
+            window.currentUser[field] = diskVal;
+            if (typeof currentUser !== 'undefined') currentUser[field] = diskVal;
+          }
+        };
+        _syncField('totalScore');
+        _syncField('totalGames');
+        _syncField('totalHasanat');
+        // اكتب القيم المحدّثة في localStorage
+        _llu[window.currentUser.username] = {
+          ..._ld,
+          totalScore:   window.currentUser.totalScore   || 0,
+          totalGames:   window.currentUser.totalGames   || 0,
+          totalHasanat: window.currentUser.totalHasanat || 0,
+          updatedAt:    Math.max(_ld.updatedAt || 0, window.currentUser.updatedAt || 0),
+        };
+        localStorage.setItem('nour_users', JSON.stringify(_llu));
+        // حدّث الـ UI
+        if (typeof updateHomeStats === 'function') updateHomeStats();
+      }
+    } catch(err) { /* silent — لا نوقف التطبيق */ }
   }
 });
 </script>
