@@ -1742,21 +1742,11 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       if (el && !el.querySelector('input')) {
         el.innerHTML = '👤 ' + fbName + ' <button onclick="event.stopPropagation();editDisplayName()" title="غيّر اسمك للعرض" style="background:none;border:none;font-size:13px;cursor:pointer;color:var(--gold);opacity:.7;padding:2px 4px;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">✏️</button>';
       }
-      // ★ مسح الاسم القديم من لوحة الشرف على هذا الجهاز أيضاً + cleanup شامل
+      // ★ مسح الاسم القديم من لوحة الشرف على هذا الجهاز أيضاً
       if (_prevName && _prevName.trim() && !_prevName.includes('@') &&
-          _prevName.trim().toLowerCase() !== fbName.trim().toLowerCase()) {
-        if (typeof window._fbDeleteOldNameFromLb === 'function') {
-          setTimeout(() => window._fbDeleteOldNameFromLb(username, _prevName.trim(), fbTs, fbName), 500);
-        }
-        // cleanup شامل مرتين للتأكيد
-        setTimeout(() => {
-          if (typeof window._resetLbCleanup === 'function') window._resetLbCleanup();
-          if (typeof window._cleanupMyLbDuplicates === 'function') window._cleanupMyLbDuplicates(username);
-        }, 1200);
-        setTimeout(() => {
-          if (typeof window._resetLbCleanup === 'function') window._resetLbCleanup();
-          if (typeof window._cleanupMyLbDuplicates === 'function') window._cleanupMyLbDuplicates(username);
-        }, 4000);
+          _prevName.trim().toLowerCase() !== fbName.trim().toLowerCase() &&
+          typeof window._fbDeleteOldNameFromLb === 'function') {
+        setTimeout(() => window._fbDeleteOldNameFromLb(username, _prevName.trim(), fbTs, fbName), 800);
       }
     });
   };
@@ -2472,100 +2462,72 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   };
   let _lbCleanupDone = false;
   window._cleanupMyLbDuplicates = function(username) {
-    if (!username) return;
+    if (!username || _lbCleanupDone) return;
     const canonical = dataKey(username);
     const canonNorm = window._normLbKey(canonical);
-    const _email    = String(username).toLowerCase();
-    const _loc      = _email.includes('@') ? _email.split('@')[0] : _email;
-
-    // ★ الاسم الحالي: أولوية localStorage (الأحدث دائماً بعد _saveNameEdit)
-    const _curName = (typeof window._getStoredName === 'function' ? window._getStoredName(username) : null)
-      || (window.currentUser && window.currentUser.username === username && window.currentUser.name && !window.currentUser.name.includes('@') ? window.currentUser.name : null);
-    const _localNameTs = (() => { try { return parseInt(localStorage.getItem('nour_name_ts_' + username) || '0', 10) || 0; } catch(e) { return 0; } })();
-
-    // أسماء قديمة (محلياً + Firebase)
-    const _oldNamesLocal = (() => { try { return (JSON.parse(localStorage.getItem('nour_old_names_' + username) || '[]') || []).map(x => String(x).trim().toLowerCase()); } catch(e) { return []; } })();
-
+    // مفاتيح إضافية بتخصّ نفس اللاعب: جزء الإيميل + مفتاح الاسم الحالي
+    const _email = String(username).toLowerCase();
+    const _loc   = _email.includes('@') ? _email.split('@')[0] : _email;
+    const _curName = (window.currentUser && window.currentUser.name && !window.currentUser.name.includes('@'))
+      ? window.currentUser.name : (() => { try { return localStorage.getItem('nour_name_' + username); } catch(e) { return null; } })();
+    const _nameKey = _curName ? String(_curName).replace(/[\s.#$\/\[\]@]/g,'_').toLowerCase() : null;
+    const _isMineKey = (k) => {
+      if (k === canonical) return false; // ده الصفّ الصح — مش تكرار
+      const kl = String(k).toLowerCase();
+      if (window._normLbKey(k) === canonNorm) return true;       // مفتاح الإيميل بصيغة تانية
+      if (_loc && (kl === _loc || window._normLbKey(k) === _loc)) return true; // مفتاح بجزء الإيميل
+      if (_nameKey && (kl === _nameKey || window._normLbKey(k) === _nameKey)) return true; // مفتاح بالاسم الحالي
+      return false;
+    };
     get(ref(db, LB_PATH)).then(snap => {
       const data = snap.val() || {};
-
-      // ★★ معرفة الحسنات الحالية (أعلى قيمة بين Firebase والذاكرة)
+      // حسنات الصفّ الصح (للمطابقة بالنقاط مع الصفوف القديمة) — ناخد الأعلى بين Firebase والذاكرة
       const _myH = Math.max(
         (data[canonical] && data[canonical].totalHasanat) || 0,
         (window.currentUser && window.currentUser.username === username && window.currentUser.totalHasanat) || 0
       );
-      const _myS = Math.max(
-        (data[canonical] && data[canonical].totalScore) || 0,
-        (window.currentUser && window.currentUser.username === username && window.currentUser.totalScore) || 0
-      );
-      const _myG = Math.max(
-        (data[canonical] && data[canonical].totalGames) || 0,
-        (window.currentUser && window.currentUser.username === username && window.currentUser.totalGames) || 0
-      );
-
-      // ★★ هل المفتاح ده بتاعي؟ — بيشمل: مفتاح الإيميل / جزء الإيميل / الاسم الحالي / الأسماء القديمة / نفس الحسنات
+      // أسماء قديمة اتغيّر منها اللاعب (متسجّلة محليًا) — نمسح صفوفها كمان
+      const _oldNames = (() => { try { return (JSON.parse(localStorage.getItem('nour_old_names_' + username) || '[]') || []).map(x => String(x).trim().toLowerCase()); } catch(e) { return []; } })();
       const _isMineFull = (k) => {
-        if (k === canonical) return false; // الصفّ الكانوني مش تكرار
-        const kl   = String(k).toLowerCase();
-        const kNorm = window._normLbKey(k);
-        const _d   = data[k] || {};
-        // مطابقة بالمفتاح المُطبَّع
-        if (kNorm === canonNorm) return true;
-        if (_loc && (kl === _loc || kNorm === _loc)) return true;
-        // مطابقة بالاسم الحالي
-        if (_curName && _d.name) {
-          const _dNameL = String(_d.name).trim().toLowerCase();
-          const _curNameL = String(_curName).trim().toLowerCase();
-          if (_dNameL === _curNameL) return true;
+        if (_isMineKey(k)) return true;
+        const _kStr = String(k);
+        const _d = data[k] || {};
+        // اسم قديم اتغيّر منه = نسختي القديمة (زي salama)
+        if (_oldNames.length) {
+          if (_d.name && _oldNames.indexOf(String(_d.name).trim().toLowerCase()) !== -1) return true;
+          if (_oldNames.indexOf(window._normLbKey(k)) !== -1) return true;
         }
-        // مطابقة بالأسماء القديمة
-        if (_oldNamesLocal.length && _d.name) {
-          if (_oldNamesLocal.indexOf(String(_d.name).trim().toLowerCase()) !== -1) return true;
-        }
-        if (_oldNamesLocal.indexOf(kNorm) !== -1) return true;
-        // مطابقة بالنقاط (لو مفيش اسم مختلف تماماً — تقليل الـ false positives)
-        const _isLegacyBare = !kl.includes('@') && !kl.includes('_') && !/^u[0-9a-f]{4,}$/i.test(kl);
-        if (_isLegacyBare && _myH > 0 && (_d.totalHasanat || 0) === _myH) return true;
+        // مفتاح قديم بكلمة واحدة (مش مفتاح إيميل) ونفس الحسنات = نسختي القديمة
+        const _isLegacyBare = k !== canonical && !_kStr.includes('_') && !/^u[0-9a-f]{4,}$/i.test(_kStr);
+        if (_isLegacyBare && _myH > 0 && (_d.totalHasanat||0) === _myH) return true;
         return false;
       };
-
       const dupKeys = Object.keys(data).filter(_isMineFull);
       if (dupKeys.length === 0) { _lbCleanupDone = true; return; }
-
-      // ★★ دمج كل الصفوف المكرّرة بأعلى قيمة
-      const all = [[canonical, data[canonical] || {}]].concat(dupKeys.map(k => [k, data[k] || {}]));
+      const all = [[canonical, data[canonical]]].concat(dupKeys.map(k => [k, data[k]]))
+        .filter(([, d]) => d);
       const [, merged] = window._mergeLbEntries(all);
-
-      // ★★ الاسم النهائي = دائماً الاسم الأحدث من localStorage (مش الأقدم من الدمج)
-      const _mergedNameTs = merged.nameUpdatedAt || 0;
-      const _finalNameTs  = Math.max(_mergedNameTs, _localNameTs);
-      const _finalName    = (_localNameTs >= _mergedNameTs && _curName) ? _curName
-                          : (merged.name || _curName || username);
-
-      // أعلى نقاط (بين الدمج والذاكرة)
-      const _finalH = Math.max(merged.totalHasanat || 0, _myH);
-      const _finalS = Math.max(merged.totalScore   || 0, _myS);
-      const _finalG = Math.max(merged.totalGames   || 0, _myG);
-
+      // الاسم النهائي = اسم اللاعب الحالي لو موجود (مش الاسم القديم)
+      const _finalName = _curName || merged.name || username;
+      // طابع زمني للاسم = الأحدث (من الذاكرة المحلية أو المدموج) عشان الاسم الجديد يكسب دايمًا
+      const _localNameTs = (() => { try { return parseInt(localStorage.getItem('nour_name_ts_' + username) || '0', 10) || 0; } catch(e) { return 0; } })();
+      const _finalNameTs = Math.max(merged.nameUpdatedAt || 0, _localNameTs);
       set(ref(db, LB_PATH + canonical), {
-        name:              _finalName,
-        nameUpdatedAt:     _finalNameTs,
-        totalHasanat:      _finalH,
-        totalScore:        _finalS,
-        totalGames:        _finalG,
-        isGuest:           false,
-        updatedAt:         Date.now(),
+        name:             _finalName,
+        nameUpdatedAt:    _finalNameTs,
+        totalHasanat:     merged.totalHasanat || 0,
+        totalScore:       merged.totalScore   || 0,
+        totalGames:       merged.totalGames   || 0,
+        isGuest:          merged.isGuest || false,
+        updatedAt:        Date.now(),
         mistakesClearedAt: merged.mistakesClearedAt || 0,
       }).then(() => {
-        // ★★ مسح كل الصفوف المكرّرة
         dupKeys.forEach(k => remove(ref(db, LB_PATH + k)).catch(() => {}));
-        // ★ اكتب الاسم الجديد على users/ كمان عشان كل الأجهزة تاخده
-        if (_finalName && !String(_finalName).includes('@') && typeof window.fbSaveName === 'function') {
+        // ★ تأكيد: اكتب الاسم الجديد على كل مسارات الداتا بيز كمان
+        if (typeof window.fbSaveName === 'function' && _finalName && !String(_finalName).includes('@')) {
           window.fbSaveName(username, _finalName, _finalNameTs);
         }
-        console.log('✅ cleanup: مسحت ' + dupKeys.length + ' تكرار → الاسم الحالي: "' + _finalName + '"');
       }).catch(() => {});
-
       _lbCleanupDone = true;
     }).catch(() => {});
   };
@@ -4988,15 +4950,19 @@ function _saveNameEdit() {
     window._fbDeleteOldNameFromLb(_email, _oldName, _nameTs, n);
   }
 
-  // ★ ٥. توحيد شامل: امسح كل صفوف اللاعب المكرّرة — شغّله 3 مرات بفارق وقت للضمان على كل الأجهزة
-  const _runCleanup = () => {
-    if (typeof window._resetLbCleanup === 'function') window._resetLbCleanup();
-    if (typeof window._cleanupMyLbDuplicates === 'function') window._cleanupMyLbDuplicates(_email);
-  };
-  _runCleanup();
-  setTimeout(_runCleanup, 1000);
-  setTimeout(_runCleanup, 3000);
-  setTimeout(_runCleanup, 6000);
+  // ★ ٥. توحيد شامل: امسح كل صفوف اللاعب المكرّرة (reset الـ flag عشان يشتغل من جديد)
+  //    بيتنفذ مرتين بفارق وقت للتأكيد بعد اكتمال كتابة Firebase
+  if (typeof window._resetLbCleanup === 'function') window._resetLbCleanup();
+  if (typeof window._cleanupMyLbDuplicates === 'function') {
+    setTimeout(() => {
+      if (typeof window._resetLbCleanup === 'function') window._resetLbCleanup();
+      window._cleanupMyLbDuplicates(_email);
+    }, 1500);
+    setTimeout(() => {
+      if (typeof window._resetLbCleanup === 'function') window._resetLbCleanup();
+      window._cleanupMyLbDuplicates(_email);
+    }, 4000);
+  }
 
   if (typeof renderLeaderboard === 'function') renderLeaderboard();
 }
@@ -5088,13 +5054,9 @@ function _finishLogin(username, isGuest) {
   if (typeof window.fbWatchPassChange === 'function' && !isGuest && username && !username.includes('ضيف')) window.fbWatchPassChange(username);
   if (!isGuest) {
     try { localStorage.setItem('nour_last_user', username); } catch(e) {}
-    // ★★ نظّف صفوف اللاعب المكرّرة من لوحة الشرف — reset الـ flag دايماً عشان الـ cleanup يشتغل
+    // ★★ نظّف صفوف اللاعب المكرّرة من لوحة الشرف (اسم قديم + جديد / جوجل + إيميل) ★★
     if (username && username.includes('@') && typeof window._cleanupMyLbDuplicates === 'function') {
-      if (typeof window._resetLbCleanup === 'function') window._resetLbCleanup();
-      // شغّله 3 مرات بفوارق زمنية عشان نضمن اكتمال كتابة Firebase أولاً
-      setTimeout(() => { if (!window._loggedOut) { if (typeof window._resetLbCleanup === 'function') window._resetLbCleanup(); window._cleanupMyLbDuplicates(username); } }, 1500);
-      setTimeout(() => { if (!window._loggedOut) { if (typeof window._resetLbCleanup === 'function') window._resetLbCleanup(); window._cleanupMyLbDuplicates(username); } }, 4000);
-      setTimeout(() => { if (!window._loggedOut) { if (typeof window._resetLbCleanup === 'function') window._resetLbCleanup(); window._cleanupMyLbDuplicates(username); } }, 8000);
+      setTimeout(() => { if (!window._loggedOut) window._cleanupMyLbDuplicates(username); }, 2500);
     }
   }
   checkStreak();
