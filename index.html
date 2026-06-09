@@ -2472,48 +2472,17 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   };
   window._dedupeLbData = function(data) {
     if (!data || typeof data !== 'object') return data || {};
-
-    // ── مرحلة ١: dedup بالمفتاح المُطبَّع (السلوك الأصلي) ──────────────
     const groups = {};
     for (const k of Object.keys(data)) {
       const n = window._normLbKey(k);
       (groups[n] = groups[n] || []).push([k, data[k]]);
     }
-    const pass1 = {};
+    const out = {};
     for (const n of Object.keys(groups)) {
       const g = groups[n];
-      if (g.length === 1) { pass1[g[0][0]] = g[0][1]; continue; }
+      if (g.length === 1) { out[g[0][0]] = g[0][1]; continue; }
       const [repKey, merged] = window._mergeLbEntries(g);
-      pass1[repKey] = merged;
-    }
-
-    // ── مرحلة ٢: dedup بالاسم المعروض (يمنع تكرار الاسم القديم/الجديد) ─
-    // لو صفّان عندهم نفس d.name (case-insensitive) → خد الأحدث nameUpdatedAt
-    // ولو متساوي → خد الأعلى نقاطاً. الصفّ الخاسر يُحذف من العرض.
-    const nameWinner = {};   // اسم_lowercase → المفتاح الفائز
-    for (const [k, d] of Object.entries(pass1)) {
-      if (!d || !d.name || String(d.name).includes('@')) continue;
-      const nm = String(d.name).trim().toLowerCase();
-      if (!nm) continue;
-      if (!nameWinner[nm]) {
-        nameWinner[nm] = k;
-      } else {
-        const prev = pass1[nameWinner[nm]] || {};
-        const prevTs = prev.nameUpdatedAt || prev.updatedAt || 0;
-        const curTs  = d.nameUpdatedAt   || d.updatedAt   || 0;
-        if (curTs > prevTs || (curTs === prevTs && (d.totalHasanat || 0) > (prev.totalHasanat || 0))) {
-          nameWinner[nm] = k;
-        }
-      }
-    }
-    const nameWinnerKeys = new Set(Object.values(nameWinner));
-
-    // لو صفّ اسمه مش إيميل وليس الفائز → اشيل بياناته (اعتبره مكرّر)
-    // ★ لو صفّ فيه اسمه إيميل (يُكشف بعلامة @) → سيبه زي ما هو
-    const out = {};
-    for (const [k, d] of Object.entries(pass1)) {
-      if (d && d.name && !String(d.name).includes('@') && !nameWinnerKeys.has(k)) continue;
-      out[k] = d;
+      out[repKey] = merged;
     }
     return out;
   };
@@ -3057,7 +3026,10 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     // ★★ توحيد ثانٍ بالاسم المعروض — يمنع ظهور نفس الشخص بالاسم القديم والجديد ★★
     // لو صفّان عندهم نفس d.name بالظبط (case-insensitive) → خد الأحدث nameUpdatedAt
     // ولو نفس nameUpdatedAt → خد الأعلى نقطةً وتجاهل الثاني
+    // هذا يحل مشكلة: اسم قديم "Salama" لم يُمسح بعد من Firebase، والجديد "سلامة" — كلاهما يظهر
+    // ملاحظة: مش بنمسح من Firebase هنا — بنتجاهل التكرار في العرض فقط (المسح بيحصل async)
     const _nameToKey = {};   // اسم_lowercase → مفتاح الفائز (الأحدث nameUpdatedAt، ثم الأعلى نقاطاً)
+    // أولاً: لكل اسم، ابحث عن أفضل مفتاح: الأحدث nameUpdatedAt أولاً، ثم الأعلى حسنات
     for (const [k, d] of Object.entries(data || {})) {
       if (!d || !d.name || d.name.includes('@')) continue;
       const _nm = d.name.trim().toLowerCase();
@@ -3067,33 +3039,14 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         const _prev = data[_nameToKey[_nm]] || {};
         const _prevTs = _prev.nameUpdatedAt || _prev.updatedAt || 0;
         const _curTs  = d.nameUpdatedAt    || d.updatedAt    || 0;
+        // الأحدث nameUpdatedAt يكسب — لو متساوي، الأعلى نقاط يكسب
         if (_curTs > _prevTs || (_curTs === _prevTs && (d.totalHasanat || 0) > (_prev.totalHasanat || 0))) {
           _nameToKey[_nm] = k;
         }
       }
     }
+    // ثانياً: filter يشيل أي صف ليس هو الأفضل لاسمه (يشيل التكرار)
     const _winnerKeys = new Set(Object.values(_nameToKey));
-
-    // ★★ مسح أوتوماتيك من Firebase — لو لاقينا صفوف خاسرة بالاسم نمسحها في الخلفية ★★
-    try {
-      const _cu_r = window.currentUser;
-      const _losers = Object.keys(data || {}).filter(lk => {
-        const d = data[lk];
-        if (!d || !d.name || String(d.name).includes('@')) return false;
-        return !_winnerKeys.has(lk);
-      });
-      if (_losers.length > 0 && typeof remove !== 'undefined' && typeof ref !== 'undefined') {
-        setTimeout(() => {
-          _losers.forEach(lk => {
-            if (_cu_r && window._makeKey) {
-              if (lk === window._makeKey(_cu_r.username, false) ||
-                  lk === window._makeKey(_cu_r.username, true)) return;
-            }
-            try { remove(ref(db, 'leaderboard/' + lk)).catch(() => {}); } catch(e) {}
-          });
-        }, 1500);
-      }
-    } catch(e) {}
 
     // ترتيب تنازلي: الحسنات → الجلسات → النقاط → المفتاح (tiebreakers مستقرة)
     const _showGuests = window.SHOW_GUESTS_IN_RANKING !== false;
