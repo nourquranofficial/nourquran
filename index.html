@@ -4021,7 +4021,9 @@ let currentUser = null;
       if (window.currentUser && window.currentUser._pendingVerify) {
         window.currentUser._pendingVerify = false;
         currentUser = window.currentUser;
-        if (typeof loginSuccess === 'function') loginSuccess(lastUser, data);
+        // ★ FIX: أعد قراءة localStorage عشان تاخد أحدث بيانات (مش النسخة القديمة)
+        const _freshFallbackData = (function(){ try { const _u = JSON.parse(localStorage.getItem('nour_users')||'{}'); return _u[lastUser] || data; } catch(e){ return data; } })();
+        if (typeof loginSuccess === 'function') loginSuccess(lastUser, _freshFallbackData);
       }
     }, 4000);
 
@@ -4228,7 +4230,10 @@ function doLogin() {
         if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
         const _finishFresh = (realName, fbData, fbNameOverride) => {
           if (window._loggedOut) { _restoreBtn(); return; }
-          const lData = users[user] || {};
+          // ★ FIX: أعد قراءة localStorage دايماً هنا (مش نستخدم الـ snapshot القديم)
+          // عشان لو المستخدم عمل save للنقاط قبل ما يسجّل خروج، نلاقيها محدّثة
+          const _freshUsers = (function(){ try { return JSON.parse(localStorage.getItem('nour_users') || '{}'); } catch(e) { return {}; } })();
+          const lData = _freshUsers[user] || users[user] || {};
           const merged = {
             totalScore:   Math.max((fbData && fbData.totalScore)   || 0, lData.totalScore   || 0),
             totalGames:   Math.max((fbData && fbData.totalGames)   || 0, lData.totalGames   || 0),
@@ -4307,7 +4312,9 @@ function doLogin() {
                     || localData.name
                     || (user && user.includes('@') ? user.split('@')[0] : user);
   document.getElementById('loginScreen').classList.add('hide');
-  loginSuccess(user, { ...localData, name: _offlineName, email: user });
+  // ★ FIX: أعد قراءة fresh data من localStorage قبل الدخول
+  const _freshOfflineData = (function(){ try { return JSON.parse(localStorage.getItem("nour_users")||"{}")[user] || localData; } catch(e){ return localData; } })();
+  loginSuccess(user, { ..._freshOfflineData, name: _offlineName, email: user });
 }
 
 function doRegister() {
