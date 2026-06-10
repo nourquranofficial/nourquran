@@ -1168,6 +1168,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   const db   = getDatabase(app);
   const auth = getAuth(app);
   window._firebaseAuth = auth;
+  window._dbUrl = firebaseConfig.databaseURL; // ★ مصدر واحد للحقيقة لعنوان الداتا بيز (يُستخدم في sendBeacon بالـ pagehide)
 
   // ★★ ترميز الاسم لمفتاح ASCII صالح (للإيميل وللـ DB) وثابت لنفس الاسم على كل الأجهزة ★★
   // المشكلة القديمة: الأسماء العربية كانت بتطلّع إيميل غير صالح (سلامة@gmail.com) فالدخول
@@ -2766,6 +2767,79 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     remove(ref(db, LB_PATH + k)).catch(() => {});
   };
 
+  // ═══════════════════════════════════════════════════════════════
+  // ★ أداة تشخيص الدخول — للقراءة فقط، ماتكتبش أو تغيّر أي حاجة ★
+  //   الاستخدام في الكونسول: diagnoseLogin('email@gmail.com','الباسورد')
+  // ═══════════════════════════════════════════════════════════════
+  window.diagnoseLogin = function(email, password) {
+    if (!email || !password) {
+      console.log('%c⚠️ الاستخدام: diagnoseLogin("email@gmail.com","الباسورد")', 'color:orange;font-weight:bold');
+      return;
+    }
+    const _email = String(email).trim().toLowerCase();
+    const _key   = dataKey(_email);
+    const _computedHash = safe_btoa(padPass(password));
+    const _report = {};
+    _report['الإيميل'] = _email;
+    _report['المفتاح (dataKey)'] = _key;
+    _report['الـ hash المحسوب من الباسورد'] = _computedHash;
+
+    console.log('%c🔍 جاري التشخيص...', 'color:#7DFFC9;font-weight:bold;font-size:14px');
+
+    return get(ref(db, 'users/' + _key + '/bypassAuth')).then((snap) => {
+      if (!snap.exists()) {
+        _report['bypassAuth في Firebase'] = '❌ غير موجود';
+        _report['التشخيص'] = 'مفيش bypassAuth → الدخول هيعتمد على Firebase Auth مباشرة';
+      } else {
+        const bpa = snap.val();
+        _report['bypassAuth في Firebase'] = '✅ موجود';
+        _report['الـ hash المخزّن (passHash)'] = bpa.passHash || '(فاضي)';
+        _report['هل passHash يطابق الباسورد؟'] = (bpa.passHash === _computedHash) ? '✅ يطابق' : '❌ لا يطابق';
+        _report['passEnc موجود؟'] = bpa.passEnc ? '✅ نعم' : '❌ لا (مهم للتزامن)';
+        _report['changedAt'] = bpa.changedAt || 0;
+        if (bpa.passEnc) {
+          try {
+            const _dec = safe_atob(bpa.passEnc);
+            _report['الباسورد المفكوك من passEnc'] = _dec;
+            _report['هل passEnc يطابق الباسورد المُدخَل؟'] = (_dec === password) ? '✅ يطابق' : '❌ لا يطابق';
+          } catch(e) { _report['فك passEnc'] = 'فشل'; }
+        }
+      }
+
+      // ── جرّب Firebase Auth (الحَكَم النهائي) ──
+      return signInWithEmailAndPassword(window._firebaseAuth || auth, toFbEmail(_email), padPass(password))
+        .then((cred) => {
+          _report['Firebase Auth'] = '✅ قَبِل الباسورد (الحساب صالح)';
+          _report['نتيجة نهائية'] = '🟢 البيانات صحيحة — المفروض الدخول ينجح';
+          console.table(_report);
+          console.log('%c📋 انسخ الجدول ده وابعتهولي', 'color:#7DFFC9;font-weight:bold');
+          return _report;
+        })
+        .catch((e) => {
+          _report['Firebase Auth'] = '❌ رفض — كود: ' + (e.code || 'غير معروف');
+          if (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential' || e.code === 'auth/invalid-login-credentials') {
+            _report['نتيجة نهائية'] = '🔴 Firebase Auth شايف الباسورد غلط — يبقى الباسورد ده مش اللي اتسجّل بيه في Auth';
+          } else if (e.code === 'auth/network-request-failed') {
+            _report['نتيجة نهائية'] = '🟡 مشكلة شبكة — مش مشكلة باسورد';
+          } else if (e.code === 'auth/user-not-found') {
+            _report['نتيجة نهائية'] = '🔴 الإيميل ده مش متسجّل في Firebase Auth خالص';
+          } else if (e.code === 'auth/too-many-requests') {
+            _report['نتيجة نهائية'] = '🟡 الحساب محجوب مؤقتاً (محاولات كتير) — جرّب بعد شوية';
+          } else {
+            _report['نتيجة نهائية'] = '🔴 رفض لسبب: ' + e.code;
+          }
+          console.table(_report);
+          console.log('%c📋 انسخ الجدول ده وابعتهولي', 'color:#7DFFC9;font-weight:bold');
+          return _report;
+        });
+    }).catch((e) => {
+      _report['خطأ في قراءة Firebase'] = e.message || String(e);
+      _report['نتيجة نهائية'] = '🟡 ماقدرناش نقرا من Firebase — مشكلة اتصال';
+      console.table(_report);
+      return _report;
+    });
+  };
+
   // ─── عرض الحسابات القديمة (مفاتيح بالاسم) عشان تختار اللي تدمجه ───
   window.findMyOldAccounts = function() {
     return get(ref(db, LB_PATH)).then(s => {
@@ -3365,6 +3439,7 @@ function _callWhenReady(fn, args) {
       </div>
 
       <button type="submit" class="login-btn">دخول ✨</button>
+      <button type="button" id="diagBtn" onclick="_runDiagOnScreen()" style="margin-top:8px;width:100%;padding:10px;background:rgba(125,255,201,0.08);border:1.5px solid rgba(125,255,201,0.3);border-radius:12px;font-family:'Cairo',sans-serif;font-size:13px;color:#7DFFC9;cursor:pointer;">🔍 تشخيص مشكلة الدخول</button>
       <div class="login-divider"><span>أو</span></div>
       <div class="login-guest" onclick="guestLogin()">🕊️ الدخول بدون حساب (ضيف)</div>
     </form>
@@ -4256,6 +4331,39 @@ function doFacebookSignIn() {
 }
 window.doFacebookSignIn = doFacebookSignIn;
 
+// ═══════════════════════════════════════════════════════════════
+// ★ تشخيص الدخول على الشاشة — زرار "تشخيص مشكلة الدخول" ★
+// ═══════════════════════════════════════════════════════════════
+function _runDiagOnScreen() {
+  const email = (document.getElementById('loginUser') || {}).value || '';
+  const pass  = (document.getElementById('loginPass') || {}).value || '';
+  if (!email.trim() || !pass) {
+    alert('⚠️ اكتب الإيميل والباسورد الأول وبعدين اضغط تشخيص');
+    return;
+  }
+  const btn = document.getElementById('diagBtn');
+  if (btn) { btn.textContent = '⏳ جاري التشخيص...'; btn.disabled = true; }
+  if (typeof window.diagnoseLogin === 'function') {
+    window.diagnoseLogin(email.trim(), pass).then((r) => {
+      if (btn) { btn.textContent = '🔍 تشخيص مشكلة الدخول'; btn.disabled = false; }
+      if (!r) { alert('❌ ماقدرش يشخّص — اتأكد من الإنترنت'); return; }
+      let msg = '🔍 نتيجة التشخيص\n';
+      msg += '━━━━━━━━━━━━━━━━━━━━━\n';
+      Object.entries(r).forEach(([k, v]) => { msg += k + ': ' + v + '\n'; });
+      msg += '━━━━━━━━━━━━━━━━━━━━━\n';
+      msg += '📋 اعمل screenshot وابعتها للمطوّر';
+      alert(msg);
+    }).catch(() => {
+      if (btn) { btn.textContent = '🔍 تشخيص مشكلة الدخول'; btn.disabled = false; }
+      alert('❌ حصل خطأ — اتأكد من الإنترنت وحاول تاني');
+    });
+  } else {
+    if (btn) { btn.textContent = '🔍 تشخيص مشكلة الدخول'; btn.disabled = false; }
+    alert('⚠️ أداة التشخيص مش محمّلة — حاول تاني بعد ما الصفحة تخلّص تحميل');
+  }
+}
+window._runDiagOnScreen = _runDiagOnScreen;
+
 function doLogin() {
   window._loggedOut = false;
   window._cancelBgAuth = false;
@@ -4809,7 +4917,7 @@ function doConfirmReset() {
         window._loginTime = _rTs + 10000; // الجهاز الحالي ما يتطردش (٩ ثواني grace)
         if (typeof set === 'function' && typeof ref === 'function' && typeof db !== 'undefined') {
           set(ref(db, 'users/' + _rKey + '/bypassAuth'), {
-            email: userEmail, passHash: _rHash, updatedAt: _rTs, changedAt: _rTs,
+            email: userEmail, passHash: _rHash, passEnc: safe_btoa(pass), updatedAt: _rTs, changedAt: _rTs,
           }).catch(() => {});
         }
       } catch(e) {}
@@ -11157,7 +11265,7 @@ window.addEventListener('pagehide', function(e) {
   // ما نمسحش الغرفة عشان باقي اللاعبين يقدروا يكملوا
   if (e.persisted) return;
 
-  const dbUrl = 'https://nour-9bd41-default-rtdb.europe-west1.firebasedatabase.app';
+  const dbUrl = window._dbUrl || 'https://nourquran-9cb63-default-rtdb.europe-west1.firebasedatabase.app';
 
   // مسح اللاعب بس لو مش مضيف وغلق المتصفح فعلاً
   if (!ms.isHost) {
