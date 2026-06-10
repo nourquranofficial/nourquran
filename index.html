@@ -1323,145 +1323,130 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   window.fbSignIn = window.fbLogin = function(email, password, onSuccess, onError) {
     const fbEmail = toFbEmail(email);
     const _key    = dataKey(email);
+    const _passEnc  = safe_btoa(password);
+    const _passHash = safe_btoa(padPass(password));
 
-    // ★ تحقق محلي فوري — لو الباسورد صح في localStorage ادخل على طول
-    try {
-      const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
-      if (_lu[email] && _lu[email].password === safe_btoa(password)) {
-        onSuccess();
-        // تحقق من Firebase في الخلفية بدون ما يوقف الدخول
-        signInWithEmailAndPassword(window._firebaseAuth || auth, fbEmail, padPass(password)).catch(() => {});
-        return;
-      }
-    } catch(e) {}
+    // ── helper: هل الباسورد المحلي يطابق المُدخَل؟ (يقبل safe_btoa الجديدة + btoa القديمة) ──
+    const _localMatch = () => {
+      try {
+        const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
+        const _e = _lu[email];
+        if (!_e || !_e.password) return false;
+        // تطابق مباشر (safe_btoa الحالية)
+        if (_e.password === _passEnc) return true;
+        // تطابق مع فك التخزين (لو متخزّن بـ btoa قديمة بصيغة مختلفة)
+        try { if (safe_atob(_e.password) === password) return true; } catch(ex) {}
+        return false;
+      } catch(e) { return false; }
+    };
 
-    // ★ timeout 5 ثواني — لو Firebase ما ردّش نرجع للـ local fallback
+    // ── helper: احفظ الباسورد محلياً بالصيغة الموحّدة الحالية ──
+    const _saveLocal = () => {
+      try {
+        const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
+        if (!_lu[email]) _lu[email] = {};
+        _lu[email].password = _passEnc;
+        _lu[email].email = email;
+        localStorage.setItem('nour_users', JSON.stringify(_lu));
+      } catch(e) {}
+    };
+
+    // ── helper: اكتب bypassAuth (المصدر الموحّد للباسورد عبر الأجهزة) ──
+    const _writeBypass = (changedAt) => {
+      try {
+        set(ref(db, 'users/' + _key + '/bypassAuth'), {
+          email, passHash: _passHash, passEnc: _passEnc,
+          updatedAt: Date.now(), changedAt: changedAt || 0,
+        }).catch(() => {});
+      } catch(e) {}
+    };
+
+    // ★ timeout 8 ثواني — لو Firebase ما ردّش نرجع للـ local fallback
     let _fbLoginDone = false;
+    const _finish = (fn, arg) => {
+      if (_fbLoginDone) return; _fbLoginDone = true;
+      clearTimeout(_fbLoginTimeout);
+      fn(arg);
+    };
     const _fbLoginTimeout = setTimeout(() => {
       if (_fbLoginDone) return;
-      _fbLoginDone = true;
-      onError('انتهت مهلة الاتصال بالخادم — تأكد من الإنترنت وحاول مرة ثانية');
-    }, 5000);
+      // عند انتهاء المهلة: لو الباسورد صح محلياً → ادخل offline، غير كده بلّغ مشكلة اتصال
+      if (_localMatch()) { _finish(onSuccess); }
+      else { _finish(onError, 'انتهت مهلة الاتصال بالخادم — تأكد من الإنترنت وحاول مرة ثانية'); }
+    }, 8000);
 
-    // ★ المنطق: bypassAuth هي المصدر الحقيقي للباسورد لو موجودة
-    //   لو مش موجودة → Firebase Auth هو المصدر
-    get(ref(db, 'users/' + _key + '/bypassAuth')).then((snap) => {
-      if (_fbLoginDone) return; _fbLoginDone = true; clearTimeout(_fbLoginTimeout);
-      if (snap.exists()) {
-        const bpa = snap.val();
-        if (bpa && bpa.passHash === safe_btoa(padPass(password))) {
-          // ★ الباسورد صح — حدّث localStorage فوراً
-          try {
-            const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
-            if (!_lu[email]) _lu[email] = {};
-            _lu[email].password = safe_btoa(password);
-            _lu[email].email = email;
-            localStorage.setItem('nour_users', JSON.stringify(_lu));
-          } catch(e) {}
-          // حاول تسجيل الدخول بـ Firebase Auth — لو نجح ممتاز، لو لأ ادخّل على كل حال
-          signInWithEmailAndPassword(auth, fbEmail, padPass(password))
-            .then(() => onSuccess())
-            .catch(() => {
-              // Firebase Auth ما اتحدثش — ادخّل بدونه
-              onSuccess();
-            });
-        } else {
-          // ★ الباسورد غلط — حتى لو Firebase Auth يقبله بالقديم → ارفض
-          onError('الإيميل أو كلمة المرور خاطئة');
+    // ════════════════════════════════════════════════════════
+    // المنطق الموحّد: Firebase Auth هو الحَكَم الأوحد للباسورد.
+    //   1) جرّب الدخول بـ Firebase Auth.
+    //      - نجح → الباسورد صح على كل الأجهزة → ادخل + وحّد bypassAuth + local.
+    //      - فشل بـ invalid-credential/user-not-found:
+    //          • الحساب قديم محلي (الباسورد يطابق local) → رقّيه (createUser) + ادخل.
+    //          • غير كده → بص على bypassAuth كملاذ أخير (حسابات اتغير باسوردها بالـ DB بس).
+    //          • لسه فاشل → ارفض.
+    // ════════════════════════════════════════════════════════
+    signInWithEmailAndPassword(auth, fbEmail, padPass(password))
+      .then(() => {
+        // ✅ Firebase Auth قَبِل → الباسورد صح قطعاً
+        _saveLocal();
+        _writeBypass(0);
+        _finish(onSuccess);
+      })
+      .catch((e) => {
+        const _code = e && e.code;
+        if (_code === 'auth/network-request-failed' || _code === 'auth/timeout') {
+          // مشكلة شبكة → fallback محلي
+          if (_localMatch()) { _saveLocal(); _finish(onSuccess); }
+          else { _finish(onError, 'في مشكلة في الإنترنت — اتأكد من اتصالك'); }
+          return;
         }
-      } else {
-        // مفيش bypassAuth → Firebase Auth هو المصدر، وبنكتب bypassAuth للمرات الجاية
-        signInWithEmailAndPassword(auth, fbEmail, padPass(password))
-          .then(() => {
-            // ★ اكتب bypassAuth للمرة الأولى عشان كل الأجهزة تعرف الباسورد الصح
-            set(ref(db, 'users/' + _key + '/bypassAuth'), {
-              email, passHash: safe_btoa(padPass(password)), updatedAt: Date.now(), changedAt: 0,
-            }).catch(() => {});
-            try {
-              const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
-              if (!_lu[email]) _lu[email] = {};
-              _lu[email].password = safe_btoa(password);
-              localStorage.setItem('nour_users', JSON.stringify(_lu));
-            } catch(e) {}
-            onSuccess();
-          })
-          .catch((e) => {
-            if (e.code === 'auth/too-many-requests') {
-              try {
-                const users = JSON.parse(localStorage.getItem('nour_users') || '{}');
-                if (users[email] && users[email].password === safe_btoa(password)) { onSuccess(); return; }
-              } catch(ex) {}
-              onError('الحساب محجوب مؤقتاً من Firebase، حاول بعد قليل');
-            } else if (e.code === 'auth/user-not-found' || e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential' || e.code === 'auth/invalid-login-credentials') {
-              // ★★ ترقية تلقائية صامتة للحسابات القديمة المحلية ★★
-              //   حساب قديم اتسجّل في localStorage بس (مفيش Auth ولا bypassAuth).
-              //   لو الباسورد المحلي يطابق المُدخَل بالظبط → ننشئ حساب Firebase حقيقي
-              //   ونكتب bypassAuth، فيشتغل على كل الأجهزة من بعدها.
-              let _localOk = false;
-              try {
-                const _lu0 = JSON.parse(localStorage.getItem('nour_users') || '{}');
-                _localOk = !!(_lu0[email] && _lu0[email].password === safe_btoa(password));
-              } catch(ex) {}
-              if (_localOk) {
-                createUserWithEmailAndPassword(auth, fbEmail, padPass(password))
-                  .then(() => {
-                    // اكتب bypassAuth + passEnc عشان كل الأجهزة تعرف الباسورد
-                    set(ref(db, 'users/' + _key + '/bypassAuth'), {
-                      email, passHash: safe_btoa(padPass(password)), passEnc: safe_btoa(password), updatedAt: Date.now(), changedAt: 0,
-                    }).catch(() => {});
-                    try {
-                      const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
-                      if (!_lu[email]) _lu[email] = {};
-                      _lu[email].password = safe_btoa(password);
-                      _lu[email].email = email;
-                      localStorage.setItem('nour_users', JSON.stringify(_lu));
-                    } catch(ex) {}
-                    onSuccess();
-                  })
-                  .catch((e2) => {
-                    if (e2.code === 'auth/email-already-in-use' || e2.code === 'auth/email-already-exists') {
-                      // الإيميل موجود في Auth بباسورد مختلف → الباسورد ده فعلاً غلط
-                      onError('الإيميل أو كلمة المرور خاطئة');
-                    } else if (e2.code === 'auth/network-request-failed') {
-                      onError('في مشكلة في الإنترنت — اتأكد من اتصالك');
-                    } else {
-                      onError('الإيميل أو كلمة المرور خاطئة');
-                    }
-                  });
+        if (_code === 'auth/too-many-requests') {
+          if (_localMatch()) { _finish(onSuccess); }
+          else { _finish(onError, 'الحساب محجوب مؤقتاً من Firebase، حاول بعد قليل'); }
+          return;
+        }
+        if (_code === 'auth/operation-not-allowed' || _code === 'auth/configuration-not-found') {
+          _finish(onError, '⛔ خدمة الحسابات مش مفعّلة في Firebase (Authentication ← Email/Password ← Enable).');
+          return;
+        }
+        // باقي الأكواد = الباسورد/الحساب غلط في Auth (invalid-credential / user-not-found / wrong-password)
+        // ── (أ) حساب قديم محلي: الباسورد يطابق local → ترقية تلقائية صامتة ──
+        if (_localMatch()) {
+          createUserWithEmailAndPassword(auth, fbEmail, padPass(password))
+            .then(() => {
+              _saveLocal();
+              _writeBypass(0);
+              _finish(onSuccess);
+            })
+            .catch((e2) => {
+              const _c2 = e2 && e2.code;
+              if (_c2 === 'auth/email-already-in-use' || _c2 === 'auth/email-already-exists') {
+                // الإيميل موجود في Auth بباسورد مختلف → الباسورد ده غلط فعلاً
+                _finish(onError, 'الإيميل أو كلمة المرور خاطئة');
+              } else if (_c2 === 'auth/network-request-failed') {
+                _finish(onError, 'في مشكلة في الإنترنت — اتأكد من اتصالك');
               } else {
-                onError('الإيميل أو كلمة المرور خاطئة');
+                _finish(onError, 'الإيميل أو كلمة المرور خاطئة');
               }
-            } else if (e.code === 'auth/operation-not-allowed' || e.code === 'auth/configuration-not-found') {
-              onError('⛔ خدمة الحسابات مش مفعّلة في Firebase (Authentication ← Email/Password ← Enable).');
-            } else if (e.code === 'auth/network-request-failed') {
-              onError('في مشكلة في الإنترنت — اتأكد من اتصالك');
-            } else {
-              onError('تعذّر الدخول: ' + (e.code || 'خطأ غير معروف'));
-            }
-          });
-      }
-    }).catch(() => {
-      if (_fbLoginDone) return; _fbLoginDone = true; clearTimeout(_fbLoginTimeout);
-      // Firebase مش متاح — جرّب محلياً أولاً ثم Firebase Auth
-      try {
-        const _localUsers = JSON.parse(localStorage.getItem('nour_users') || '{}');
-        const _lu = _localUsers[email];
-        if (_lu && _lu.password === safe_btoa(password)) {
-          onSuccess(); return; // ✅ offline fallback من localStorage
+            });
+          return;
         }
-      } catch(e) {}
-      signInWithEmailAndPassword(auth, fbEmail, padPass(password))
-        .then(() => onSuccess())
-        .catch((e) => {
-          if (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential' || e.code === 'auth/invalid-login-credentials') {
-            onError('الإيميل أو كلمة المرور خاطئة');
-          } else if (e.code === 'auth/network-request-failed') {
-            onError('في مشكلة في الإنترنت — اتأكد من اتصالك');
-          } else {
-            onError('الإيميل أو كلمة المرور خاطئة');
+        // ── (ب) ملاذ أخير: bypassAuth (حساب اتغيّر باسورده بالـ DB من غير Auth) ──
+        get(ref(db, 'users/' + _key + '/bypassAuth')).then((snap) => {
+          if (snap.exists()) {
+            const bpa = snap.val();
+            if (bpa && bpa.passHash === _passHash) {
+              // الباسورد صح حسب bypassAuth → ادخل + وحّد local
+              _saveLocal();
+              _finish(onSuccess);
+              return;
+            }
           }
+          // لا local ولا bypassAuth → الباسورد غلط
+          _finish(onError, 'الإيميل أو كلمة المرور خاطئة');
+        }).catch(() => {
+          _finish(onError, 'الإيميل أو كلمة المرور خاطئة');
         });
-    });
+      });
   };
 
   // ★ تغيير كلمة المرور — يحفظ في Firebase DB ويدخّل فوراً
