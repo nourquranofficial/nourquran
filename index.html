@@ -1154,7 +1154,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   // ═══ نسخة التطبيق — بتتحدّث مع كل تسليم ═══
-  window.NOUR_VERSION = 'v60 — 2026-06-11';
+  window.NOUR_VERSION = 'v61 — 2026-06-11';
   console.log('%c🌙 نور ' + window.NOUR_VERSION, 'color:#F5D98B;font-weight:bold;font-size:14px');
   try {
     const _verEl = document.getElementById('appVerTag');
@@ -1407,14 +1407,52 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     }, 8000);
 
     // ════════════════════════════════════════════════════════
-    // المنطق الموحّد: Firebase Auth هو الحَكَم الأوحد للباسورد.
-    //   1) جرّب الدخول بـ Firebase Auth.
-    //      - نجح → الباسورد صح على كل الأجهزة → ادخل + وحّد bypassAuth + local.
-    //      - فشل بـ invalid-credential/user-not-found:
-    //          • الحساب قديم محلي (الباسورد يطابق local) → رقّيه (createUser) + ادخل.
-    //          • غير كده → بص على bypassAuth كملاذ أخير (حسابات اتغير باسوردها بالـ DB بس).
-    //          • لسه فاشل → ارفض.
+    // ★ v61: ترتيب السلطات المصحّح
+    //   1) اقرأ bypassAuth الأول.
+    //      - الـ hash يطابق المُدخَل → دخول فوري (+ لو في تغيير صريح وجلسة Auth → حدّث Auth نفسه).
+    //      - فيه تغيير صريح (changedAt>0) والمُدخَل مش مطابق → حتى لو Auth يقبله،
+    //        ده الباسورد القديم → ارفض ("اتغيّرت — استخدم الجديدة").
+    //   2) غير كده → Firebase Auth هو الحَكَم (نفس v51): نجاح يدخل،
+    //      فشل → ترقية الحسابات المحلية القديمة، وإلا رفض.
+    //   ده بيمنع: (أ) القديم يدخل بعد التغيير، (ب) دخول القديم يكتب فوق bypassAuth ويلغي التغيير.
     // ════════════════════════════════════════════════════════
+    let _bpa0 = null;
+    try {
+      _bpa0 = await Promise.race([
+        get(ref(db, 'users/' + _key + '/bypassAuth')).then(s => (s.exists() ? s.val() : null)),
+        new Promise(res => setTimeout(() => res(null), 4000)),
+      ]);
+    } catch (e) { _bpa0 = null; }
+    if (_fbLoginDone) return;
+
+    const _bpaChanged = !!(_bpa0 && (_bpa0.changedAt || 0) > 0);
+    const _bpaMatch = !!(_bpa0 && _bpa0.passHash && (_bpa0.passHash === _shaP || _bpa0.passHash === _passHash));
+
+    if (_bpaMatch) {
+      // ✅ bypassAuth يؤكد الباسورد → دخول
+      _saveLocal();
+      // self-heal: حوّل الصيغة القديمة لـ sha مع الحفاظ على changedAt
+      if (!String(_bpa0.passHash).startsWith('sha256:')) {
+        try { set(ref(db, 'users/' + _key + '/bypassAuth'), { email, passHash: _shaP, updatedAt: Date.now(), changedAt: _bpa0.changedAt || 0 }).catch(() => {}); } catch(e) {}
+      }
+      // حاول توحيد Auth: جلسة موجودة → حدّث باسورد Auth للجديد (يقفل الازدواج نهائياً)
+      try {
+        if (_bpaChanged && auth.currentUser && typeof updatePassword === 'function') {
+          updatePassword(auth.currentUser, padPass(password)).catch(() => {});
+        }
+      } catch(e) {}
+      // جلسة Auth best-effort (لو Auth لسه على القديم هيفشل بصمت — مش مشكلة)
+      signInWithEmailAndPassword(auth, fbEmail, padPass(password)).catch(() => {});
+      _finish(onSuccess);
+      return;
+    }
+
+    if (_bpaChanged) {
+      // ⛔ فيه تغيير صريح والمُدخَل مش الجديد → ده الباسورد القديم (حتى لو Auth يقبله)
+      _finish(onError, '🔑 كلمة المرور اتغيّرت من قبل — استخدم الكلمة الجديدة');
+      return;
+    }
+
     signInWithEmailAndPassword(auth, fbEmail, padPass(password))
       .then(() => {
         // ✅ Firebase Auth قَبِل → الباسورد صح قطعاً
@@ -1493,9 +1531,13 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       new Promise((_, rej) => setTimeout(() => rej('timeout'), 6000)),
     ]);
 
-    // ★ خطوة ١: لو في أي session → اكتب bypass مباشرة
-    // (updatePassword يحتاج recent login — مش موثوق هنا، بنعتمد على bypassAuth للتزامن)
+    // ★ خطوة ١: لو في أي session → اكتب bypass + حاول تحدّث Auth نفسه (★ v61: يقفل ازدواج السلطة)
     if (auth.currentUser) {
+      try {
+        if (typeof updatePassword === 'function') {
+          updatePassword(auth.currentUser, padPass(newPass)).catch(() => {}); // best-effort — لو محتاج recent login هيفشل بصمت
+        }
+      } catch(e) {}
       _writeBypass()
         .then(() => onSuccess('bypass'))
         .catch(() => onSuccess('local'));
