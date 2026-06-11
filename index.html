@@ -1154,7 +1154,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   // ═══ نسخة التطبيق — بتتحدّث مع كل تسليم ═══
-  window.NOUR_VERSION = 'v62 — 2026-06-11';
+  window.NOUR_VERSION = 'v63 — 2026-06-11';
   console.log('%c🌙 نور ' + window.NOUR_VERSION, 'color:#F5D98B;font-weight:bold;font-size:14px');
   try {
     const _verEl = document.getElementById('appVerTag');
@@ -1530,32 +1530,55 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     const _key      = dataKey(email);
     const _passHash = await passHashS(newPass); // ★ v58: hash آمن
 
-    const _writeBypass = () => Promise.race([
-      set(ref(db, 'users/' + _key + '/bypassAuth'), {
-        email, passHash: _passHash, updatedAt: Date.now(), changedAt: Date.now(),
-      }),
-      new Promise((_, rej) => setTimeout(() => rej('timeout'), 6000)),
-    ]);
+    // ★ v63: كتابة بـ retry ×3 + قراءة تحقق — مفيش نجاح كاذب
+    const _writeBypassVerified = async () => {
+      for (let _try = 0; _try < 3; _try++) {
+        try {
+          await Promise.race([
+            set(ref(db, 'users/' + _key + '/bypassAuth'), {
+              email, passHash: _passHash, updatedAt: Date.now(), changedAt: Date.now(),
+            }),
+            new Promise((_, rej) => setTimeout(() => rej('timeout'), 6000)),
+          ]);
+          // قراءة تحقق: اتكتب فعلاً؟
+          const _snap = await get(ref(db, 'users/' + _key + '/bypassAuth'));
+          if (_snap.exists() && _snap.val() && _snap.val().passHash === _passHash) return true;
+        } catch (e) {}
+        await new Promise(r => setTimeout(r, 800));
+      }
+      return false;
+    };
+    const _writeBypass = () => _writeBypassVerified().then(ok => { if (!ok) throw 'write-failed'; });
 
-    // ★ خطوة ١: لو في جلسة حقيقية → اكتب bypass + حدّث Auth نفسه (★ v62: مش anonymous)
+    // الباسورد القديم (محفوظ قبل الدوس عليه في _sendForgotEmail)
+    const _prevRaw = (window._nourPrevPassRaw && window._nourPrevPassRaw !== newPass)
+      ? window._nourPrevPassRaw : null;
+
+    // ★ خطوة ١ (v63): جلسة موجودة → re-auth بالقديم (ينعش الجلسة) ثم updatePassword
+    if (auth.currentUser && !auth.currentUser.isAnonymous) {
+      const _reAuth = _prevRaw
+        ? signInWithEmailAndPassword(auth, toFbEmail(email), padPass(_prevRaw)).catch(() => null)
+        : Promise.resolve(null);
+      _reAuth
+        .then(() => (typeof updatePassword === 'function' && auth.currentUser)
+          ? updatePassword(auth.currentUser, padPass(newPass)).catch(() => {})
+          : null)
+        .then(() => _writeBypass())
+        .then(() => { window._nourPrevPassRaw = null; onSuccess('bypass'); })
+        .catch(() => onError('⚠️ التغيير ماتسجّلش على السيرفر — اتأكد من الإنترنت وحاول تاني'));
+      return;
+    }
     if (auth.currentUser) {
-      try {
-        if (!auth.currentUser.isAnonymous && typeof updatePassword === 'function') {
-          updatePassword(auth.currentUser, padPass(newPass)).catch(() => {}); // best-effort
-        }
-      } catch(e) {}
+      // جلسة anonymous (ملتي بلاير) — اكتب bypass بس (محقق)
       _writeBypass()
-        .then(() => onSuccess('bypass'))
-        .catch(() => onSuccess('local'));
+        .then(() => { window._nourPrevPassRaw = null; onSuccess('bypass'); })
+        .catch(() => onError('⚠️ التغيير ماتسجّلش على السيرفر — اتأكد من الإنترنت وحاول تاني'));
       return;
     }
 
     // ★ خطوة ٢ (v62): جرّب الباسورد القديم الأول — ده اللي Auth شايله فعلاً.
     //   نجح → updatePassword للجديد → Auth اتوحّد فوراً، صفر محاولات فاشلة.
-    //   (الترتيب القديم كان بيجرّب الجديد الأول → فشل مضمون بيتراكم لحد الحجب)
-    const _prevRaw = (window._nourPrevPassRaw && window._nourPrevPassRaw !== newPass)
-      ? window._nourPrevPassRaw
-      : (() => {
+    const _prevRaw2 = _prevRaw || (() => {
           try {
             const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
             const _r = _lu[email] && _lu[email].password ? safe_atob(_lu[email].password) : null;
@@ -1564,29 +1587,25 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         })();
     window._nourPrevPassRaw = null; // استُهلك
 
-    const _tryOldFirst = _prevRaw
-      ? signInWithEmailAndPassword(auth, toFbEmail(email), padPass(_prevRaw))
+    const _tryOldFirst = _prevRaw2
+      ? signInWithEmailAndPassword(auth, toFbEmail(email), padPass(_prevRaw2))
           .then(() => updatePassword(auth.currentUser, padPass(newPass)).catch(() => {}))
       : Promise.reject('no-old');
 
     _tryOldFirst
-      .then(() => _writeBypass())
-      .then(() => onSuccess('firebase'))
-      .catch(() => {
+      .then(() => true) // Auth اتوحّد بالقديم→الجديد
+      .catch(() =>
         // القديم مش متاح/فشل → جرّب الجديد (يغطي حالة Auth متوحّد فعلاً)
         signInWithEmailAndPassword(auth, toFbEmail(email), padPass(newPass))
-          .then(() => { _writeBypass().catch(() => {}); onSuccess('firebase'); })
-          .catch(() => {
-            // ★ anonymous fallback (لو مفعّل)
-            if (window._cancelBgAuth) { onSuccess('local'); return; }
-            signInAnonymously(auth)
-              .then(() => _writeBypass())
-              .then(() => onSuccess('bypass'))
-              .catch(() => {
-                // ★ حفظ محلي فقط — بيشتغل على نفس الجهاز
-                onSuccess('local');
-              });
-          });
+          .then(() => true).catch(() => false)
+      )
+      .then((authOk) => {
+        // ★ v63: كل النهايات بتمرّ على الكتابة المحقّقة — مفيش نجاح كاذب
+        const _afterAuth = () => _writeBypass()
+          .then(() => onSuccess(authOk ? 'firebase' : 'bypass'))
+          .catch(() => onError('⚠️ التغيير ماتسجّلش على السيرفر — اتأكد من الإنترنت وحاول تاني'));
+        if (authOk || window._cancelBgAuth) { _afterAuth(); return; }
+        signInAnonymously(auth).catch(() => {}).then(_afterAuth);
       });
   };
 
@@ -4888,12 +4907,10 @@ function _sendForgotEmail() {
     localStorage.setItem('nour_last_user', email);
   } catch(e) {}
 
-  // ★ ٢. اكتب على Firebase عن طريق fbForgotPasswordLogin (جوّا module scope)
+  // ★ ٢ (v63): مفيش نجاح كاذب — الانيميشن بيظهر بس بعد تأكيد السيرفر فعلاً
   const _changedAt = Date.now();
   window._loginTime = _changedAt + 10000;
-  if (typeof window.fbForgotPasswordLogin === 'function') {
-    window.fbForgotPasswordLogin(email, newPass, () => {}, () => {});
-  }
+  const _onChangeOk = () => {
 
   // ★ ٣. أغلق الـ keyboard
   ['forgotEmailInput','forgotNewPass','forgotConfirmPass'].forEach(id => {
@@ -5049,6 +5066,18 @@ function _sendForgotEmail() {
       setTimeout(() => { if (ov.parentNode) ov.parentNode.removeChild(ov); }, 300);
     };
   }, 800);
+  }; // ← نهاية _onChangeOk
+
+  // ★ v63: نفّذ التغيير واستنى تأكيد السيرفر الحقيقي
+  if (typeof window.fbForgotPasswordLogin === 'function') {
+    errEl.textContent = '⏳ جاري الحفظ...'; errEl.style.color = 'rgba(245,217,139,0.7)';
+    window.fbForgotPasswordLogin(email, newPass, _onChangeOk, (msg) => {
+      errEl.textContent = msg || '⚠️ ماقدرناش نسجّل التغيير على السيرفر — حاول تاني';
+      errEl.style.color = '#FF9E9E';
+    });
+  } else {
+    _onChangeOk(); // مفيش Firebase — محلي فقط
+  }
 }
 
 window.doForgotPassword = doForgotPassword;
