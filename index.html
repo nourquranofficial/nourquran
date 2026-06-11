@@ -1154,7 +1154,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   // ═══ نسخة التطبيق — بتتحدّث مع كل تسليم ═══
-  window.NOUR_VERSION = 'v63 — 2026-06-11';
+  window.NOUR_VERSION = 'v64 — 2026-06-11';
   console.log('%c🌙 نور ' + window.NOUR_VERSION, 'color:#F5D98B;font-weight:bold;font-size:14px');
   try {
     const _verEl = document.getElementById('appVerTag');
@@ -3699,7 +3699,7 @@ function _callWhenReady(fn, args) {
       <div class="login-field">
         <label>كلمة المرور</label>
         <div class="pw-wrap">
-          <input type="password" id="loginPass" name="password" autocomplete="current-password" placeholder="••••••••">
+          <input type="text" class="pw-mask" id="loginPass" name="nour-pass" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="••••••••">
           <button type="button" class="pw-eye" onclick="togglePw('loginPass',this)" title="إظهار/إخفاء">👁</button>
         </div>
       </div>
@@ -3737,14 +3737,14 @@ function _callWhenReady(fn, args) {
       <div class="login-field">
         <label>كلمة المرور</label>
         <div class="pw-wrap">
-          <input type="password" id="regPass" name="new-password" autocomplete="new-password" placeholder="٤ أحرف على الأقل">
+          <input type="text" class="pw-mask" id="regPass" name="nour-pass-new" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="٤ أحرف على الأقل">
           <button type="button" class="pw-eye" onclick="togglePw('regPass',this)" title="إظهار/إخفاء">👁</button>
         </div>
       </div>
       <div class="login-field">
         <label>تأكيد كلمة المرور</label>
         <div class="pw-wrap">
-          <input type="password" id="regPass2" name="confirm-password" autocomplete="new-password" placeholder="أعد كتابة كلمة المرور">
+          <input type="text" class="pw-mask" id="regPass2" name="nour-pass-new2" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="أعد كتابة كلمة المرور">
           <button type="button" class="pw-eye" onclick="togglePw('regPass2',this)" title="إظهار/إخفاء">👁</button>
         </div>
       </div>
@@ -4484,11 +4484,36 @@ function switchTab(tab) {
 function togglePw(id, btn) {
   const inp = document.getElementById(id);
   if (!inp) return;
-  const show = inp.type === 'password';
-  inp.type = show ? 'text' : 'password';
-  btn.textContent = show ? '🙈' : '👁';
+  if (inp.classList.contains('pw-mask') || inp.dataset.pwmask) {
+    // ★ v64: خانات القناع (text + CSS) — التبديل بالستايل مش بالـ type
+    const showing = inp.style.webkitTextSecurity === 'none';
+    inp.style.webkitTextSecurity = showing ? 'disc' : 'none';
+    btn.textContent = showing ? '👁' : '🙈';
+  } else {
+    const show = inp.type === 'password';
+    inp.type = show ? 'text' : 'password';
+    btn.textContent = show ? '🙈' : '👁';
+  }
 }
 window.togglePw = togglePw;
+
+// ★ v64: قناع خانات الباسورد بدون type=password —
+//   كروم مايعتبرهاش باسورد → مفيش popup تسريبات ولا "حفظ الباسورد".
+//   متصفح مش بيدعم الخاصية (Firefox) → نرجّعها type=password عادي.
+(function _initPwMask() {
+  try {
+    const _sup = (window.CSS && CSS.supports && (CSS.supports('-webkit-text-security','disc') || CSS.supports('text-security','disc')));
+    document.querySelectorAll('input.pw-mask').forEach(inp => {
+      if (_sup) {
+        inp.style.webkitTextSecurity = 'disc';
+        inp.dataset.pwmask = '1';
+      } else {
+        inp.type = 'password'; // fallback: القناع الأصلي
+        inp.classList.remove('pw-mask');
+      }
+    });
+  } catch(e) {}
+})();
 
 // ★ مسح الحسابات القديمة (بالـ username) وإبقاء الجديدة (بالإيميل) فقط
 (function _cleanOldAccounts() {
@@ -5068,9 +5093,8 @@ function _sendForgotEmail() {
   }, 800);
   }; // ← نهاية _onChangeOk
 
-  // ★ v63: نفّذ التغيير واستنى تأكيد السيرفر الحقيقي
+  // ★ v63: نفّذ التغيير واستنى تأكيد السيرفر الحقيقي (★ v64: بدون مؤشر "جاري الحفظ")
   if (typeof window.fbForgotPasswordLogin === 'function') {
-    errEl.textContent = '⏳ جاري الحفظ...'; errEl.style.color = 'rgba(245,217,139,0.7)';
     window.fbForgotPasswordLogin(email, newPass, _onChangeOk, (msg) => {
       errEl.textContent = msg || '⚠️ ماقدرناش نسجّل التغيير على السيرفر — حاول تاني';
       errEl.style.color = '#FF9E9E';
@@ -5170,9 +5194,6 @@ function doConfirmReset() {
   if (!pass || pass.length < 6) { errEl.textContent = '⚠️ لازم ٤ أحرف على الأقل'; return; }
   if (pass !== pass2) { errEl.textContent = '⚠️ كلمة المرور مش متطابقة'; return; }
   if (!oobCode || !email) { errEl.textContent = '❌ الرابط خاطئ — اطلب رابط جديد'; return; }
-
-  errEl.textContent = '⏳ جاري الحفظ...';
-  errEl.style.color = 'rgba(245,217,139,0.7)';
 
   if (typeof window.fbConfirmReset === 'function') {
     window.fbConfirmReset(oobCode, pass, email, (userEmail) => {
@@ -11354,14 +11375,14 @@ function _stopPolling() {
     <div class="login-field" style="margin-bottom:10px;">
       <label style="font-size:12px;color:rgba(245,217,139,0.6);">كلمة المرور الجديدة</label>
       <div class="pw-wrap">
-        <input type="password" id="forgotNewPass" autocomplete="new-password" placeholder="٤ أحرف على الأقل">
+        <input type="text" class="pw-mask" id="forgotNewPass" name="nour-fp1" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="٤ أحرف على الأقل">
         <button type="button" class="pw-eye" onclick="togglePw('forgotNewPass',this)" title="إظهار/إخفاء">👁</button>
       </div>
     </div>
     <div class="login-field" style="margin-bottom:6px;">
       <label style="font-size:12px;color:rgba(245,217,139,0.6);">تأكيد كلمة المرور</label>
       <div class="pw-wrap">
-        <input type="password" id="forgotConfirmPass" autocomplete="new-password" placeholder="أعد كتابتها">
+        <input type="text" class="pw-mask" id="forgotConfirmPass" name="nour-fp2" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="أعد كتابتها">
         <button type="button" class="pw-eye" onclick="togglePw('forgotConfirmPass',this)" title="إظهار/إخفاء">👁</button>
       </div>
     </div>
