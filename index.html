@@ -1154,7 +1154,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   // ═══ نسخة التطبيق — بتتحدّث مع كل تسليم ═══
-  window.NOUR_VERSION = 'v64 — 2026-06-11';
+  window.NOUR_VERSION = 'v65 — 2026-06-11';
   console.log('%c🌙 نور ' + window.NOUR_VERSION, 'color:#F5D98B;font-weight:bold;font-size:14px');
   try {
     const _verEl = document.getElementById('appVerTag');
@@ -1422,7 +1422,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     try {
       _bpa0 = await Promise.race([
         get(ref(db, 'users/' + _key + '/bypassAuth')).then(s => (s.exists() ? s.val() : null)),
-        new Promise(res => setTimeout(() => res(null), 4000)),
+        new Promise(res => setTimeout(() => res(null), 7000)), // ★ v65: كانت 4s — قليلة على اتصال بارد
       ]);
     } catch (e) { _bpa0 = null; }
     if (_fbLoginDone) return;
@@ -1460,7 +1460,24 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     }
 
     signInWithEmailAndPassword(auth, fbEmail, padPass(password))
-      .then(() => {
+      .then(async () => {
+        // ★ v65: لو قراءة الـ bypass الأولى فشلت/عملت timeout — اتحقق تاني قبل السماح.
+        //   من غير ده: قراءة باردة فاشلة + Auth لسه على القديمة = القديمة تدخل.
+        if (!_bpa0) {
+          let _bpa1 = null;
+          try {
+            _bpa1 = await Promise.race([
+              get(ref(db, 'users/' + _key + '/bypassAuth')).then(s => (s.exists() ? s.val() : null)),
+              new Promise(res => setTimeout(() => res(null), 4000)),
+            ]);
+          } catch (e) { _bpa1 = null; }
+          if (_bpa1 && (_bpa1.changedAt || 0) > 0 && _bpa1.passHash &&
+              _bpa1.passHash !== _shaP && _bpa1.passHash !== _passHash) {
+            try { signOut(auth).catch(() => {}); } catch (e) {}
+            _finish(onError, '🔑 كلمة المرور اتغيّرت من قبل — استخدم الكلمة الجديدة');
+            return;
+          }
+        }
         // ✅ Firebase Auth قَبِل → الباسورد صح قطعاً
         _saveLocal();
         _writeBypass(0);
@@ -1554,27 +1571,10 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     const _prevRaw = (window._nourPrevPassRaw && window._nourPrevPassRaw !== newPass)
       ? window._nourPrevPassRaw : null;
 
-    // ★ خطوة ١ (v63): جلسة موجودة → re-auth بالقديم (ينعش الجلسة) ثم updatePassword
-    if (auth.currentUser && !auth.currentUser.isAnonymous) {
-      const _reAuth = _prevRaw
-        ? signInWithEmailAndPassword(auth, toFbEmail(email), padPass(_prevRaw)).catch(() => null)
-        : Promise.resolve(null);
-      _reAuth
-        .then(() => (typeof updatePassword === 'function' && auth.currentUser)
-          ? updatePassword(auth.currentUser, padPass(newPass)).catch(() => {})
-          : null)
-        .then(() => _writeBypass())
-        .then(() => { window._nourPrevPassRaw = null; onSuccess('bypass'); })
-        .catch(() => onError('⚠️ التغيير ماتسجّلش على السيرفر — اتأكد من الإنترنت وحاول تاني'));
-      return;
-    }
-    if (auth.currentUser) {
-      // جلسة anonymous (ملتي بلاير) — اكتب bypass بس (محقق)
-      _writeBypass()
-        .then(() => { window._nourPrevPassRaw = null; onSuccess('bypass'); })
-        .catch(() => onError('⚠️ التغيير ماتسجّلش على السيرفر — اتأكد من الإنترنت وحاول تاني'));
-      return;
-    }
+    // ★ v65: فلو موحّد لكل الحالات (داخل/anonymous/برة) — الفرع القديم للجلسة
+    //   الـ anonymous كان بيكتب bypass بس من غير ما يوحّد Auth → Auth يفضل
+    //   شايل القديمة والقديمة تلاقي ثغرة تدخل منها. دلوقتي signIn(القديمة)
+    //   بيشتغل في كل الحالات (بيستبدل أي جلسة) → updatePassword → توحيد دايماً.
 
     // ★ خطوة ٢ (v62): جرّب الباسورد القديم الأول — ده اللي Auth شايله فعلاً.
     //   نجح → updatePassword للجديد → Auth اتوحّد فوراً، صفر محاولات فاشلة.
