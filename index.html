@@ -1154,7 +1154,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   // ═══ نسخة التطبيق — بتتحدّث مع كل تسليم ═══
-  window.NOUR_VERSION = 'v54 — 2026-06-11';
+  window.NOUR_VERSION = 'v55 — 2026-06-11';
   console.log('%c🌙 نور ' + window.NOUR_VERSION, 'color:#F5D98B;font-weight:bold;font-size:14px');
   try {
     const _verEl = document.getElementById('appVerTag');
@@ -2172,6 +2172,73 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         console.log('✅ Cloud sync مكتمل لـ ' + username);
       }
     }).catch(e => console.error('fbSyncAllUserData error:', e));
+  };
+
+  // ── ★ v55: مزامنة لحظية للتقدم (revprog / surahprog / memorized) ──
+  //   نفس قواعد الدمج بتاعة fbSyncAllUserData بالظبط — بس لحظية بدل مرة عند الدخول:
+  //   revprog: الأحدث lastPlay يكسب (وإلا الأعلى done) | surahprog: الأعلى رقمياً | memorized: union
+  //   الـ watcher مابيكتبش في Firebase أبداً (يمنع أي loop) — الكتابة من أفعال المستخدم فقط
+  let _progUnsubs = [];
+  window.fbWatchProgress = function(username) {
+    if (!username) return;
+    window.fbUnwatchProgress();
+    const key = dataKey(username);
+
+    // revprog — لكل سورة: الأحدث lastPlay يكسب، وإلا الأعلى done
+    _progUnsubs.push(onValue(ref(db, 'users/' + key + '/revprog'), (snap) => {
+      if (!snap.exists()) return;
+      if (!window.currentUser || window.currentUser.username !== username) return;
+      const fbRev = snap.val() || {};
+      const localKey = 'nour_revprog_' + username;
+      let localRev = {}; try { localRev = JSON.parse(localStorage.getItem(localKey) || '{}'); } catch (e) {}
+      const merged = { ...localRev };
+      Object.keys(fbRev).forEach(s => {
+        const fb = fbRev[s], loc = localRev[s];
+        if (!loc || ((fb && fb.lastPlay) || 0) > ((loc && loc.lastPlay) || 0)) merged[s] = fb;
+        else if (((loc && loc.done) || 0) > ((fb && fb.done) || 0)) merged[s] = loc;
+        else merged[s] = fb;
+      });
+      const mj = JSON.stringify(merged);
+      if (mj === JSON.stringify(localRev)) return; // نفس القيمة — تجاهل (echo guard)
+      try { localStorage.setItem(localKey, mj); } catch (e) {}
+      try { if (typeof renderReviewGrid === 'function') renderReviewGrid(); } catch (e) {}
+      try { if (typeof renderInProgressSurahs === 'function') renderInProgressSurahs(); } catch (e) {}
+    }));
+
+    // surahprog — لكل سورة: الأعلى رقمياً
+    _progUnsubs.push(onValue(ref(db, 'users/' + key + '/surahprog'), (snap) => {
+      if (!snap.exists()) return;
+      if (!window.currentUser || window.currentUser.username !== username) return;
+      const fbS = snap.val() || {};
+      const localKey = 'nour_surahprog_' + username;
+      let loc = {}; try { loc = JSON.parse(localStorage.getItem(localKey) || '{}'); } catch (e) {}
+      const merged = { ...loc };
+      Object.keys(fbS).forEach(s => { merged[s] = Math.max(Number(fbS[s]) || 0, Number(loc[s]) || 0); });
+      const mj = JSON.stringify(merged);
+      if (mj === JSON.stringify(loc)) return;
+      try { localStorage.setItem(localKey, mj); } catch (e) {}
+      try { if (typeof renderInProgressSurahs === 'function') renderInProgressSurahs(); } catch (e) {}
+    }));
+
+    // memorized — union (نفس قاعدة الدخول)
+    _progUnsubs.push(onValue(ref(db, 'users/' + key + '/memorized'), (snap) => {
+      if (!snap.exists()) return;
+      if (!window.currentUser || window.currentUser.username !== username) return;
+      const fbM = snap.val();
+      if (!Array.isArray(fbM)) return;
+      const localKey = 'nour_memorized_' + username;
+      let loc = []; try { loc = JSON.parse(localStorage.getItem(localKey) || '[]'); } catch (e) {}
+      const merged = [...new Set([...loc, ...fbM])];
+      if (JSON.stringify(merged.slice().sort()) === JSON.stringify(loc.slice().sort())) return;
+      try { localStorage.setItem(localKey, JSON.stringify(merged)); } catch (e) {}
+      try { if (typeof window.memorizedSurahs !== 'undefined') window.memorizedSurahs = merged; } catch (e) {}
+      try { if (typeof loadMemorizedSurahs === 'function') loadMemorizedSurahs(); } catch (e) {}
+      try { if (typeof renderReviewGrid === 'function') renderReviewGrid(); } catch (e) {}
+    }));
+  };
+  window.fbUnwatchProgress = function() {
+    _progUnsubs.forEach(u => { try { u(); } catch (e) {} });
+    _progUnsubs = [];
   };
 
   // دالة جديدة لإضافة النقاط بشكل atomic (بدون race condition)
@@ -5435,6 +5502,10 @@ function _finishLogin(username, isGuest) {
     const _doSync = () => {
       if (typeof window.fbSyncAllUserData === 'function') {
         window.fbSyncAllUserData(username);
+        // ★ v55: بعد دمج الدخول، فعّل المزامنة اللحظية للتقدم
+        if (typeof window.fbWatchProgress === 'function') {
+          setTimeout(() => { if (!window._loggedOut) window.fbWatchProgress(username); }, 1500);
+        }
       } else {
         setTimeout(_doSync, 500); // انتظر Firebase يتحمل
       }
@@ -5490,6 +5561,7 @@ function doLogout() {
   if (typeof window.fbUnwatchName === 'function') window.fbUnwatchName();
   if (typeof window.fbUnwatchMistakes === 'function') window.fbUnwatchMistakes();
   if (typeof window.fbUnwatchMistCleared === 'function') window.fbUnwatchMistCleared();
+  if (typeof window.fbUnwatchProgress === 'function') window.fbUnwatchProgress();
   if (typeof window.fbUnwatchUserData  === 'function') window.fbUnwatchUserData();
   if (typeof window.fbUnwatchPassChange === 'function') window.fbUnwatchPassChange();
   if (typeof window._resetLbCleanup === 'function') window._resetLbCleanup();
