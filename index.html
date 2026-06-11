@@ -1154,7 +1154,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   // ═══ نسخة التطبيق — بتتحدّث مع كل تسليم ═══
-  window.NOUR_VERSION = 'v59 — 2026-06-11';
+  window.NOUR_VERSION = 'v60 — 2026-06-11';
   console.log('%c🌙 نور ' + window.NOUR_VERSION, 'color:#F5D98B;font-weight:bold;font-size:14px');
   try {
     const _verEl = document.getElementById('appVerTag');
@@ -11253,6 +11253,37 @@ function _stopPolling() {
     <div style="display:flex;gap:10px;justify-content:center;">
       <button id="confirmNo" onclick="closeConfirm()" style="flex:1;padding:12px;background:rgba(255,254,249,0.05);border:1px solid rgba(201,151,58,0.2);border-radius:12px;color:rgba(245,217,139,0.6);font-family:'Cairo',sans-serif;font-size:15px;font-weight:600;cursor:pointer;">لأ</button>
       <button id="confirmYes" style="flex:1;padding:12px;background:linear-gradient(135deg,#C0392B,#E74C3C);border:none;border-radius:12px;color:white;font-family:'Cairo',sans-serif;font-size:15px;font-weight:700;cursor:pointer;">تصفير</button>
+    </div>
+  </div>
+</div>
+
+<!-- ★ v60: مودال تغيير كلمة المرور (كان ناقص — الدوال كانت موجودة بدون HTML) -->
+<div id="forgotPassModal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.72);align-items:center;justify-content:center;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);">
+  <div style="background:linear-gradient(160deg,#1e1508,#12100a);border:1px solid rgba(201,151,58,0.4);border-radius:20px;padding:26px 22px;max-width:340px;width:90%;box-shadow:0 8px 40px rgba(0,0,0,0.6);font-family:'Cairo',sans-serif;" dir="rtl">
+    <div style="font-size:17px;font-weight:800;color:#F5D98B;text-align:center;margin-bottom:4px;">🔑 تغيير كلمة المرور</div>
+    <div style="font-size:11px;color:rgba(245,217,139,0.45);text-align:center;margin-bottom:16px;">هيتم تحديثها على كل أجهزتك تلقائياً</div>
+    <div class="login-field" style="margin-bottom:10px;">
+      <label style="font-size:12px;color:rgba(245,217,139,0.6);">الإيميل</label>
+      <input type="email" id="forgotEmailInput" autocomplete="email" placeholder="example@gmail.com" style="width:100%;box-sizing:border-box;">
+    </div>
+    <div class="login-field" style="margin-bottom:10px;">
+      <label style="font-size:12px;color:rgba(245,217,139,0.6);">كلمة المرور الجديدة</label>
+      <div class="pw-wrap">
+        <input type="password" id="forgotNewPass" autocomplete="new-password" placeholder="٤ أحرف على الأقل">
+        <button type="button" class="pw-eye" onclick="togglePw('forgotNewPass',this)" title="إظهار/إخفاء">👁</button>
+      </div>
+    </div>
+    <div class="login-field" style="margin-bottom:6px;">
+      <label style="font-size:12px;color:rgba(245,217,139,0.6);">تأكيد كلمة المرور</label>
+      <div class="pw-wrap">
+        <input type="password" id="forgotConfirmPass" autocomplete="new-password" placeholder="أعد كتابتها">
+        <button type="button" class="pw-eye" onclick="togglePw('forgotConfirmPass',this)" title="إظهار/إخفاء">👁</button>
+      </div>
+    </div>
+    <div id="forgotPassErr" style="min-height:18px;font-size:12px;text-align:center;margin-bottom:10px;"></div>
+    <div style="display:flex;gap:10px;">
+      <button type="button" onclick="closeForgotPassModal()" style="flex:1;padding:12px;background:rgba(255,254,249,0.05);border:1px solid rgba(201,151,58,0.2);border-radius:12px;color:rgba(245,217,139,0.6);font-family:'Cairo',sans-serif;font-size:14px;font-weight:600;cursor:pointer;">إلغاء</button>
+      <button type="button" onclick="_sendForgotEmail()" style="flex:1.4;padding:12px;background:linear-gradient(135deg,var(--gold,#C9973A),#E8B84B);border:none;border-radius:12px;color:#1a1208;font-family:'Cairo',sans-serif;font-size:14px;font-weight:800;cursor:pointer;">تأكيد التغيير ✓</button>
     </div>
   </div>
 </div>
