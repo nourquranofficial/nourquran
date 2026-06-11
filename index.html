@@ -1154,7 +1154,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   // ═══ نسخة التطبيق — بتتحدّث مع كل تسليم ═══
-  window.NOUR_VERSION = 'v51 — 2026-06-11';
+  window.NOUR_VERSION = 'v52 — 2026-06-11';
   console.log('%c🌙 نور ' + window.NOUR_VERSION, 'color:#F5D98B;font-weight:bold;font-size:14px');
 
   const firebaseConfig = {
@@ -2550,12 +2550,25 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     const _curName = (window.currentUser && window.currentUser.name && !window.currentUser.name.includes('@'))
       ? window.currentUser.name : (() => { try { return localStorage.getItem('nour_name_' + username); } catch(e) { return null; } })();
     const _nameKey = _curName ? String(_curName).replace(/[\s.#$\/\[\]@]/g,'_').toLowerCase() : null;
+    // ★ مؤكد بتاعي: مفتاح الإيميل بصيغة تانية فقط. المطابقات الضعيفة
+    //   (جزء الإيميل / الاسم الحالي) بقت "مرشّحين" بيتفحصوا ضد users/<key>
+    //   قبل أي حذف — عشان مانمسحش لاعب حقيقي تاني بالصدفة.
     const _isMineKey = (k) => {
       if (k === canonical) return false; // ده الصفّ الصح — مش تكرار
-      const kl = String(k).toLowerCase();
-      if (window._normLbKey(k) === canonNorm) return true;       // مفتاح الإيميل بصيغة تانية
-      if (_loc && (kl === _loc || window._normLbKey(k) === _loc)) return true; // مفتاح بجزء الإيميل
-      if (_nameKey && (kl === _nameKey || window._normLbKey(k) === _nameKey)) return true; // مفتاح بالاسم الحالي
+      if (window._normLbKey(k) === canonNorm) return true; // مفتاح الإيميل بصيغة تانية
+      return false;
+    };
+    // ★ مرشّح محتمل (محتاج تحقق): مفتاح legacy بكلمة واحدة يطابق اسمي الحالي أو جزء إيميلي
+    const _isCandidateKey = (k, rowName) => {
+      if (k === canonical) return false;
+      const _kStr = String(k);
+      const _isLegacyBare = !_kStr.includes('_') && !/^u[0-9a-f]{4,}$/i.test(_kStr) && !_kStr.startsWith('guest__');
+      if (!_isLegacyBare) return false;
+      const kn = window._normLbKey(k);
+      const _rn = rowName ? String(rowName).trim().toLowerCase() : '';
+      const _cn = _curName ? String(_curName).trim().toLowerCase() : '';
+      if (_nameKey && kn === _nameKey) return true;                 // مفتاح باسمي الحالي
+      if (_loc && kn === _loc && _cn && _rn === _cn) return true;   // جزء الإيميل + الاسم يطابق
       return false;
     };
 
@@ -2565,33 +2578,34 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         get(ref(db, LB_PATH)),
       ]).then(([lbSnap]) => {
         const data = lbSnap.val() || {};
-        // حسنات الصفّ الصح
-        const _myH = Math.max(
-          (data[canonical] && data[canonical].totalHasanat) || 0,
-          (window.currentUser && window.currentUser.username === username && window.currentUser.totalHasanat) || 0
-        );
         // أسماء قديمة: من localStorage + من Firebase
         const _localOldNames = (() => { try { return JSON.parse(localStorage.getItem('nour_old_names_' + username) || '[]') || []; } catch(e) { return []; } })();
         const _allOldNames   = [...new Set([..._localOldNames, ...(fbOldNames || [])])].map(x => String(x).trim().toLowerCase()).filter(Boolean);
 
-        const _isMineFull = (k) => {
-          if (_isMineKey(k)) return true;
-          const _kStr = String(k);
+        // ── تصنيف الصفوف: مؤكد بتاعي / مرشّح محتاج تحقق ──
+        const _certain = [], _cands = [];
+        for (const k of Object.keys(data)) {
+          if (k === canonical) continue;
           const _d = data[k] || {};
-          // اسم قديم اتغيّر منه
+          // مؤكد ١: مفتاح إيميلي بصيغة تانية
+          if (_isMineKey(k)) { _certain.push(k); continue; }
+          // مؤكد ٢: اسم/مفتاح مسجّل في أسمائي القديمة (سجّلتها بنفسي عند التغيير)
           if (_allOldNames.length) {
-            if (_d.name && _allOldNames.indexOf(String(_d.name).trim().toLowerCase()) !== -1) return true;
-            if (_allOldNames.indexOf(window._normLbKey(k)) !== -1) return true;
+            if (_d.name && _allOldNames.indexOf(String(_d.name).trim().toLowerCase()) !== -1) { _certain.push(k); continue; }
+            if (_allOldNames.indexOf(window._normLbKey(k)) !== -1) { _certain.push(k); continue; }
           }
-          // مفتاح قديم بكلمة واحدة (مش مفتاح إيميل) ونفس الحسنات
-          const _isLegacyBare = k !== canonical && !_kStr.includes('_') && !/^u[0-9a-f]{4,}$/i.test(_kStr);
-          if (_isLegacyBare && _myH > 0 && (_d.totalHasanat||0) === _myH) return true;
-          // ★ مفتاح بصيغة تطبيع مطابق للكانوني (حروف كبيرة/صغيرة مختلفة) ★
-          if (window._normLbKey(k) === canonNorm && k !== canonical) return true;
-          return false;
-        };
+          // مرشّح: legacy باسمي الحالي / جزء إيميلي — يتفحص قبل الحذف
+          if (_isCandidateKey(k, _d.name)) _cands.push(k);
+          // ★ اتشالت قاعدة "نفس الحسنات بالصدفة" — كانت بتمسح لاعبين حقيقيين
+        }
 
-        const dupKeys = Object.keys(data).filter(_isMineFull);
+        // ── فحص المرشّحين: لو users/<key> لسه موجود = لاعب حقيقي نشط → مانلمسوش ──
+        //    لو مش موجود = اتدمج في حسابي قبل كده (_autoMigrateLegacy) → صفّه اليتيم بتاعي
+        const _candChecks = _cands.map(k =>
+          get(ref(db, 'users/' + k)).then(s => ({ k, exists: s.exists() })).catch(() => ({ k, exists: true }))
+        );
+        Promise.all(_candChecks).then((_candRes) => {
+        const dupKeys = _certain.concat(_candRes.filter(r => !r.exists).map(r => r.k));
         if (dupKeys.length === 0) { _lbCleanupDone = true; return; }
 
         const all = [[canonical, data[canonical]]].concat(dupKeys.map(k => [k, data[k]]))
@@ -2625,6 +2639,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
           }
         }).catch(() => {});
         _lbCleanupDone = true;
+        }).catch(() => { _lbCleanupDone = true; }); // ← إغلاق فحص المرشّحين (Promise.all)
       }).catch(() => {});
     };
 
@@ -3891,7 +3906,7 @@ function _callWhenReady(fn, args) {
           <button id="multiPlayAgainBtn" onclick="multiPlayAgain()" style="padding:14px;background:linear-gradient(135deg,var(--gold),#E8B84B);border:none;border-radius:14px;font-family:'Cairo',sans-serif;font-size:15px;font-weight:700;color:var(--ink);cursor:pointer;">🔄 مرة تانية</button>
           <button onclick="multiLeaveRoom(); goHome();" style="padding:14px;background:rgba(255,254,249,0.05);border:1px solid rgba(201,151,58,0.25);border-radius:14px;font-family:'Cairo',sans-serif;font-size:15px;font-weight:700;color:var(--gold-light);cursor:pointer;">🏠 الرئيسية</button>
         </div>
-        <div style="text-align:center;margin-top:10px;font-size:9px;color:rgba(245,217,139,0.25);">v51 — 2026-06-11</div>
+        <div style="text-align:center;margin-top:10px;font-size:9px;color:rgba(245,217,139,0.25);">v52 — 2026-06-11</div>
       </div>
     </div>
   </div>
