@@ -1154,7 +1154,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   // ═══ نسخة التطبيق — بتتحدّث مع كل تسليم ═══
-  window.NOUR_VERSION = 'v56 — 2026-06-11';
+  window.NOUR_VERSION = 'v57 — 2026-06-11';
   console.log('%c🌙 نور ' + window.NOUR_VERSION, 'color:#F5D98B;font-weight:bold;font-size:14px');
   try {
     const _verEl = document.getElementById('appVerTag');
@@ -2058,6 +2058,31 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       .catch(e => console.error('fbSaveMemorized error:', e));
   };
 
+  // ── ★ v57: خريطة أفعال السور المحفوظة (tombstones) ──
+  //   memact = { سورة: {ts, removed} } — الفعل الأحدث يكسب لكل سورة.
+  //   ده اللي بيخلّي "إلغاء التعليم" يتزامن عبر الأجهزة (الـ union لوحده كان بيرجّعها).
+  window.fbSaveMemAct = function(username, actObj) {
+    if (!username || !actObj) return;
+    const key = dataKey(username);
+    set(ref(db, 'users/' + key + '/memact'), actObj)
+      .catch(e => console.error('fbSaveMemAct error:', e));
+  };
+  // دمج موحّد: union المصفوفتين ثم تطبيق الأفعال (LWW بالطابع الزمني)
+  window._computeMemFinal = function(localArr, fbArr, localAct, fbAct) {
+    const act = { ...(localAct || {}) };
+    Object.keys(fbAct || {}).forEach(s => {
+      const a = fbAct[s], b = act[s];
+      if (a && (!b || (a.ts || 0) > (b.ts || 0))) act[s] = a;
+    });
+    const set0 = new Set([...(localArr || []), ...(fbArr || [])]);
+    Object.keys(act).forEach(s => {
+      const a = act[s] || {};
+      if (a.removed === true) set0.delete(s);
+      else if (a.removed === false) set0.add(s);
+    });
+    return { arr: [...set0], act };
+  };
+
   // ── جلب السور المحفوظة ──
   window.fbLoadMemorized = function(username, callback) {
     if (!username) return;
@@ -2078,7 +2103,8 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       get(ref(db, 'users/' + key + '/revprog')),
       get(ref(db, 'users/' + key + '/surahprog')),
       get(ref(db, 'users/' + key + '/memorized')),
-    ]).then(([mistSnap, revSnap, surahSnap, memSnap]) => {
+      get(ref(db, 'users/' + key + '/memact')),
+    ]).then(([mistSnap, revSnap, surahSnap, memSnap, memActSnap]) => {
 
       // ── الغلطات ──
       if (mistSnap.exists()) {
@@ -2146,23 +2172,24 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         set(ref(db, 'users/' + key + '/surahprog'), merged).catch(() => {});
       }
 
-      // ── السور المحفوظة ──
-      if (memSnap.exists()) {
-        const fbMem = memSnap.val();
-        if (Array.isArray(fbMem)) {
-          const localKey = 'nour_memorized_' + username;
-          let localMem = [];
-          try { localMem = JSON.parse(localStorage.getItem(localKey) || '[]'); } catch {}
-          // دمج: union بين الاتنين
-          const merged = [...new Set([...localMem, ...fbMem])];
-          localStorage.setItem(localKey, JSON.stringify(merged));
-          // أعد تحميل قائمة المحفوظات لو موجودة
-          if (window.currentUser && window.currentUser.username === username) {
-            if (typeof window.memorizedSurahs !== 'undefined') window.memorizedSurahs = merged;
-            if (typeof loadMemorizedSurahs === 'function') loadMemorizedSurahs();
-          }
-          set(ref(db, 'users/' + key + '/memorized'), merged).catch(() => {});
+      // ── السور المحفوظة (v57: مع خريطة الأفعال — الإلغاء بيتزامن) ──
+      {
+        const fbMem = (memSnap.exists() && Array.isArray(memSnap.val())) ? memSnap.val() : [];
+        const fbAct = (memActSnap.exists() && memActSnap.val()) ? memActSnap.val() : {};
+        const localKey = 'nour_memorized_' + username;
+        const actKey   = 'nour_memact_' + username;
+        let localMem = []; try { localMem = JSON.parse(localStorage.getItem(localKey) || '[]'); } catch {}
+        let localAct = {}; try { localAct = JSON.parse(localStorage.getItem(actKey) || '{}'); } catch {}
+        const _r = window._computeMemFinal(localMem, fbMem, localAct, fbAct);
+        localStorage.setItem(localKey, JSON.stringify(_r.arr));
+        localStorage.setItem(actKey, JSON.stringify(_r.act));
+        if (window.currentUser && window.currentUser.username === username) {
+          if (typeof window.memorizedSurahs !== 'undefined') window.memorizedSurahs = _r.arr;
+          if (typeof loadMemorizedSurahs === 'function') loadMemorizedSurahs();
         }
+        // ارفع المدمج (المصفوفة النهائية + الأفعال) — الدخول هو نقطة الدفع المسموحة
+        set(ref(db, 'users/' + key + '/memorized'), _r.arr).catch(() => {});
+        set(ref(db, 'users/' + key + '/memact'), _r.act).catch(() => {});
       }
 
       // ── تحديث الـ UI بعد الـ sync ──
@@ -2220,20 +2247,44 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       try { if (typeof renderInProgressSurahs === 'function') renderInProgressSurahs(); } catch (e) {}
     }));
 
-    // memorized — union (نفس قاعدة الدخول)
+    // memorized — union ثم تطبيق الأفعال (v57: الإلغاء بيتزامن)
     _progUnsubs.push(onValue(ref(db, 'users/' + key + '/memorized'), (snap) => {
       if (!snap.exists()) return;
       if (!window.currentUser || window.currentUser.username !== username) return;
       const fbM = snap.val();
       if (!Array.isArray(fbM)) return;
       const localKey = 'nour_memorized_' + username;
+      const actKey   = 'nour_memact_' + username;
       let loc = []; try { loc = JSON.parse(localStorage.getItem(localKey) || '[]'); } catch (e) {}
-      const merged = [...new Set([...loc, ...fbM])];
-      if (JSON.stringify(merged.slice().sort()) === JSON.stringify(loc.slice().sort())) return;
-      try { localStorage.setItem(localKey, JSON.stringify(merged)); } catch (e) {}
-      try { if (typeof window.memorizedSurahs !== 'undefined') window.memorizedSurahs = merged; } catch (e) {}
+      let act = {}; try { act = JSON.parse(localStorage.getItem(actKey) || '{}'); } catch (e) {}
+      const _r = window._computeMemFinal(loc, fbM, act, {});
+      if (JSON.stringify(_r.arr.slice().sort()) === JSON.stringify(loc.slice().sort())) return;
+      try { localStorage.setItem(localKey, JSON.stringify(_r.arr)); } catch (e) {}
+      try { if (typeof window.memorizedSurahs !== 'undefined') window.memorizedSurahs = _r.arr; } catch (e) {}
       try { if (typeof loadMemorizedSurahs === 'function') loadMemorizedSurahs(); } catch (e) {}
       try { if (typeof renderReviewGrid === 'function') renderReviewGrid(); } catch (e) {}
+    }));
+
+    // memact — أفعال التعليم/الإلغاء (v57): الأحدث يكسب، بيطبّق فوراً على العضوية
+    _progUnsubs.push(onValue(ref(db, 'users/' + key + '/memact'), (snap) => {
+      if (!snap.exists()) return;
+      if (!window.currentUser || window.currentUser.username !== username) return;
+      const fbAct = snap.val() || {};
+      const localKey = 'nour_memorized_' + username;
+      const actKey   = 'nour_memact_' + username;
+      let loc = []; try { loc = JSON.parse(localStorage.getItem(localKey) || '[]'); } catch (e) {}
+      let act = {}; try { act = JSON.parse(localStorage.getItem(actKey) || '{}'); } catch (e) {}
+      const _r = window._computeMemFinal(loc, [], act, fbAct);
+      const _changedArr = JSON.stringify(_r.arr.slice().sort()) !== JSON.stringify(loc.slice().sort());
+      const _changedAct = JSON.stringify(_r.act) !== JSON.stringify(act);
+      if (!_changedArr && !_changedAct) return;
+      try { localStorage.setItem(actKey, JSON.stringify(_r.act)); } catch (e) {}
+      if (_changedArr) {
+        try { localStorage.setItem(localKey, JSON.stringify(_r.arr)); } catch (e) {}
+        try { if (typeof window.memorizedSurahs !== 'undefined') window.memorizedSurahs = _r.arr; } catch (e) {}
+        try { if (typeof loadMemorizedSurahs === 'function') loadMemorizedSurahs(); } catch (e) {}
+        try { if (typeof renderReviewGrid === 'function') renderReviewGrid(); } catch (e) {}
+      }
     }));
   };
   window.fbUnwatchProgress = function() {
@@ -5945,6 +5996,19 @@ function saveMemorizedSurahs() {
   }
 }
 
+// ★ v57: تسجيل فعل تعليم/إلغاء بطابع زمني — ده اللي بيخلّي الإلغاء يتزامن عبر الأجهزة
+function _recordMemAct(surahName, removed) {
+  if (!currentUser || currentUser.isGuest || !surahName) return;
+  const actKey = 'nour_memact_' + currentUser.username;
+  let act = {};
+  try { act = JSON.parse(localStorage.getItem(actKey) || '{}'); } catch (e) {}
+  act[surahName] = { ts: Date.now(), removed: !!removed };
+  try { localStorage.setItem(actKey, JSON.stringify(act)); } catch (e) {}
+  if (typeof window.fbSaveMemAct === 'function') {
+    window.fbSaveMemAct(currentUser.username, act);
+  }
+}
+
 // يتم استدعاؤها لما يخلص كل أسئلة سورة معينة
 function checkSurahCompletion(surahName) {
   if (!surahName || memorizedSurahs.includes(surahName)) return;
@@ -5955,6 +6019,7 @@ function checkSurahCompletion(surahName) {
   if (progress === 0 && surahQs.length > 0) {
     // اتلف يعني خلصهم
     memorizedSurahs.push(surahName);
+    _recordMemAct(surahName, false); // ★ v57: فعل تعليم
     saveMemorizedSurahs();
     renderMemorizedTags();
     setTimeout(() => showToast('🎉 أتقنت سورة ' + surahName + '! تم حفظها في السور المحفوظة ✨', 3500), 500);
@@ -5963,6 +6028,7 @@ function checkSurahCompletion(surahName) {
 
 function removeMemorizedSurah(surahName) {
   memorizedSurahs = memorizedSurahs.filter(s => s !== surahName);
+  _recordMemAct(surahName, true); // ★ v57: فعل إلغاء — هيتزامن على كل الأجهزة
   saveMemorizedSurahs();
   // reset progress too
   saveSurahProgress(surahName, 0);
