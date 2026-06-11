@@ -1154,7 +1154,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   // ═══ نسخة التطبيق — بتتحدّث مع كل تسليم ═══
-  window.NOUR_VERSION = 'v53 — 2026-06-11';
+  window.NOUR_VERSION = 'v54 — 2026-06-11';
   console.log('%c🌙 نور ' + window.NOUR_VERSION, 'color:#F5D98B;font-weight:bold;font-size:14px');
   try {
     const _verEl = document.getElementById('appVerTag');
@@ -2530,10 +2530,11 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   };
   window._mergeLbEntries = function(entries) {
     let best = { totalHasanat: 0, totalScore: 0, totalGames: 0, updatedAt: 0,
-                 nameUpdatedAt: 0, mistakesClearedAt: 0, name: null, isGuest: true };
+                 nameUpdatedAt: 0, mistakesClearedAt: 0, name: null, isGuest: true, tag: null };
     let repKey = null;
     for (const [k, d] of entries) {
       if (!d) continue;
+      if (d.tag && !best.tag) best.tag = d.tag;
       best.totalHasanat = Math.max(best.totalHasanat, d.totalHasanat || 0);
       best.totalScore   = Math.max(best.totalScore,   d.totalScore   || 0);
       best.totalGames   = Math.max(best.totalGames,   d.totalGames   || 0);
@@ -2649,6 +2650,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
 
         set(ref(db, LB_PATH + canonical), {
           name:             _finalName,
+          tag:              (String(username).includes('@') ? String(username).split('@')[0].toLowerCase() : (merged.tag || null)),
           nameUpdatedAt:    _finalNameTs,
           totalHasanat:     merged.totalHasanat || 0,
           totalScore:       merged.totalScore   || 0,
@@ -2736,8 +2738,13 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       const _newNameTs = data.nameUpdatedAt || 0;
       const _newName   = data.name || (cur && cur.name) || username;
       const _safeName  = (_curNameTs > _newNameTs && cur && cur.name && !cur.name.includes('@')) ? cur.name : _newName;
+      // ★ tag = جزء الإيميل قبل @ — لتمييز الأسماء المتكررة في العرض
+      const _tag = (!isGuest && String(username).includes('@'))
+        ? String(username).split('@')[0].toLowerCase()
+        : ((cur && cur.tag) || null);
       return {
         name:             _safeName, // ★ الاسم للعرض وليس الإيميل
+        tag:              _tag,
         // ★★ ناخد الأعلى بين القديم والجديد — مستحيل تنقص النقاط حتى لو حصل overwrite خطأ
         totalHasanat:     Math.max((cur && cur.totalHasanat) || 0, data.totalHasanat || 0),
         totalScore:       Math.max((cur && cur.totalScore)   || 0, data.totalScore   || 0),
@@ -3216,23 +3223,30 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
 
     const toA = n => String(Math.round(n || 0)).replace(/\d/g, d => '٠١٢٣٤٥٦٧٨٩'[d]);
 
+    // ★ صف بمفتاح إيميل (فيه _ ومش guest ومش hex عربي) = شخص مستقل مؤكد
+    const _isEmailRow = (k) => {
+      const s = String(k || '');
+      return s.includes('_') && !s.startsWith('guest__') && !/^u[0-9a-f]{4,}$/i.test(s);
+    };
+
     // ★★ توحيد ثانٍ بالاسم المعروض — يمنع ظهور نفس الشخص بالاسم القديم والجديد ★★
-    // لو صفّان عندهم نفس d.name بالظبط (case-insensitive) → خد الأحدث nameUpdatedAt
-    // ولو نفس nameUpdatedAt → خد الأعلى نقطةً وتجاهل الثاني
-    // هذا يحل مشكلة: اسم قديم "Salama" لم يُمسح بعد من Firebase، والجديد "سلامة" — كلاهما يظهر
-    // ملاحظة: مش بنمسح من Firebase هنا — بنتجاهل التكرار في العرض فقط (المسح بيحصل async)
-    const _nameToKey = {};   // اسم_lowercase → مفتاح الفائز (الأحدث nameUpdatedAt، ثم الأعلى نقاطاً)
-    // أولاً: لكل اسم، ابحث عن أفضل مفتاح: الأحدث nameUpdatedAt أولاً، ثم الأعلى حسنات
+    // ★ v54: صفوف بمفاتيح إيميل مختلفة = أشخاص مختلفون → عمرهم ما يتشالوا هنا.
+    //   التوحيد بالاسم بيشيل بس البقايا القديمة (legacy/guest) لصالح الأحدث/الإيميلي.
+    const _nameToKey = {};   // اسم_lowercase → مفتاح الفائز
     for (const [k, d] of Object.entries(data || {})) {
       if (!d || !d.name || d.name.includes('@')) continue;
       const _nm = d.name.trim().toLowerCase();
       if (!_nameToKey[_nm]) {
         _nameToKey[_nm] = k;
       } else {
-        const _prev = data[_nameToKey[_nm]] || {};
+        const _prevK = _nameToKey[_nm];
+        const _prev = data[_prevK] || {};
+        const _prevEmail = _isEmailRow(_prevK), _curEmail = _isEmailRow(k);
+        // مفتاح إيميلي يكسب على legacy دايماً (الإيميلي هو الحساب الحقيقي)
+        if (_curEmail && !_prevEmail) { _nameToKey[_nm] = k; continue; }
+        if (!_curEmail && _prevEmail) { continue; }
         const _prevTs = _prev.nameUpdatedAt || _prev.updatedAt || 0;
         const _curTs  = d.nameUpdatedAt    || d.updatedAt    || 0;
-        // الأحدث nameUpdatedAt يكسب — لو متساوي، الأعلى نقاط يكسب
         if (_curTs > _prevTs || (_curTs === _prevTs && (d.totalHasanat || 0) > (_prev.totalHasanat || 0))) {
           _nameToKey[_nm] = k;
         }
@@ -3247,8 +3261,8 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       .filter(([k, d]) => {
         if (!d || !d.name || (d.totalHasanat || 0) <= 0) return false;
         if (!_showGuests && (d.isGuest || String(k).startsWith('guest__'))) return false;
-        // لو الاسم مش إيميل: تحقق إنه هو الفائز (مش مكرّر)
-        if (!d.name.includes('@') && !_winnerKeys.has(k)) return false;
+        // لو الاسم مش إيميل: تحقق إنه هو الفائز (مش مكرّر) — صفوف الإيميل محمية دايماً
+        if (!d.name.includes('@') && !_isEmailRow(k) && !_winnerKeys.has(k)) return false;
         return true;
       })
       .sort(([ka, a], [kb, b]) => {
@@ -3278,8 +3292,8 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         const _isMine0 = (k, d) => {
           if (_mk0 && (k === _mk0(_cu0.username, false) || k === _mk0(_cu0.username, true))) return true;
           if (_norm0(k) === _norm0(_canon0)) return true;
-          // مطابقة بالاسم المعروض (يحل مشكلة الاسم القديم/الجديد بمفاتيح مختلفة)
-          if (d && d.name && !d.name.includes('@')) {
+          // مطابقة بالاسم — بس لصفوف legacy/guest. صف بمفتاح إيميل تاني = شخص تاني حقيقي
+          if (!_isEmailRow(k) && d && d.name && !d.name.includes('@')) {
             const _dName = d.name.trim().toLowerCase();
             if (_cuName0 && _dName === _cuName0) return true;
             if (_myOldNames0.length && _myOldNames0.indexOf(_dName) !== -1) return true;
@@ -3326,6 +3340,23 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
             return String(ka).localeCompare(String(kb));
           });
         }
+      }
+    } catch (e) {}
+
+    // ★ v54: علّم الأسماء المتكررة + حضّر الـ tag (جزء الإيميل) للتمييز في العرض
+    try {
+      const _cntNm = {};
+      for (const [, d] of list) {
+        if (d && d.name && !d.name.includes('@')) {
+          const n = d.name.trim().toLowerCase();
+          _cntNm[n] = (_cntNm[n] || 0) + 1;
+        }
+      }
+      for (const [k, d] of list) {
+        if (!d) continue;
+        const n = (d.name || '').trim().toLowerCase();
+        d._dup = !!(n && _cntNm[n] > 1);
+        d._tag = d.tag || (_isEmailRow(k) ? String(k).split('_')[0] : null);
       }
     } catch (e) {}
 
@@ -3396,12 +3427,13 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     const [, d0, emoji0, color0, border0, isMe0] = window._lbTop3Data[0];
     const _rawName0 = (d0 && d0.name) ? d0.name : '';
     const name0 = _rawName0.includes('@') ? (_rawName0.split('@')[0] || 'لاعب') : (_rawName0 || 'لاعب');
+    const tag0 = (d0 && d0._dup && d0._tag) ? '<span style="font-size:11px;opacity:0.55;font-weight:400;"> · ' + d0._tag + '</span>' : '';
 
     podiumWrap.innerHTML = `<div class="lb-podium-slide active" id="lbSlide0"
          style="background:${color0};border-color:${border0};transition:opacity 0.35s ease,transform 0.35s ease;">
       <div class="lb-podium-rank">${emoji0}</div>
       <div class="lb-podium-info">
-        <div class="lb-podium-name${isMe0?' is-me':''}">${name0}${isMe0?' (أنت)':''}</div>
+        <div class="lb-podium-name${isMe0?' is-me':''}">${name0}${tag0}${isMe0?' (أنت)':''}</div>
         <div class="lb-podium-hasanat">${(window.formatBigNum?window.formatBigNum(d0.totalHasanat||0):toA(d0.totalHasanat||0))} ⭐</div>
         <div class="lb-podium-score">${toA(d0.totalGames||0)} جلسة</div>
       </div>
@@ -5806,10 +5838,11 @@ function lbGoTo(idx) {
   setTimeout(() => {
     const [key, d, rankEmoji, rankColor, borderColor, isMe] = window._lbTop3Data[idx];
     const displayName = (d && d.name) ? d.name : 'لاعب';
+    const _slideTag = (d && d._dup && d._tag) ? ' · ' + d._tag : '';
     slide.style.background = rankColor;
     slide.style.borderColor = borderColor;
     slide.querySelector('.lb-podium-rank').textContent = rankEmoji;
-    slide.querySelector('.lb-podium-name').textContent = displayName + (isMe ? ' (أنت)' : '');
+    slide.querySelector('.lb-podium-name').textContent = displayName + _slideTag + (isMe ? ' (أنت)' : '');
     slide.querySelector('.lb-podium-name').className = 'lb-podium-name' + (isMe ? ' is-me' : '');
     const toA = n => String(Math.round(n || 0)).replace(/\d/g, d => '٠١٢٣٤٥٦٧٨٩'[d]);
     slide.querySelector('.lb-podium-hasanat').textContent = toA(d.totalHasanat||0) + ' ⭐';
@@ -9352,10 +9385,12 @@ function openFullRank() {
     const cu = window.currentUser, mk = window._makeKey;
     const cuDisplayName = (cu && cu.name && !cu.name.includes('@')) ? cu.name.trim().toLowerCase() : '';
     const _myOldNmsRank = (() => { try { return (JSON.parse(localStorage.getItem('nour_old_names_' + (cu && cu.username) || '[]') || '[]') || []).map(x => String(x).trim().toLowerCase()); } catch(e) { return []; } })();
+    const _isEmailRowR = (k) => { const s = String(k || ''); return s.includes('_') && !s.startsWith('guest__') && !/^u[0-9a-f]{4,}$/i.test(s); };
     const isMe = (k, d) => {
       if (!cu) return false;
       if (mk && (k === mk(cu.username, false) || k === mk(cu.username, true) || k === mk(cu.username, cu.isGuest || false))) return true;
-      if (d && d.name && !d.name.includes('@')) {
+      // مطابقة بالاسم — بس لصفوف legacy/guest. صف بمفتاح إيميل تاني = شخص تاني
+      if (!_isEmailRowR(k) && d && d.name && !d.name.includes('@')) {
         const _dNm = d.name.trim().toLowerCase();
         if (cuDisplayName && _dNm === cuDisplayName) return true;
         if (_myOldNmsRank.length && _myOldNmsRank.indexOf(_dNm) !== -1) return true;
@@ -9369,9 +9404,11 @@ function openFullRank() {
       const rk = i < 3 ? medals[i] : '#' + toArabicNum(i + 1);
       const rawNm = (d && d.name) ? d.name : '';
       const nm = rawNm.includes('@') ? (rawNm.split('@')[0] || 'لاعب') : (rawNm || 'لاعب');
+      // ★ v54: اسم متكرر → اعرض جزء الإيميل صغير للتمييز
+      const tg = (d && d._dup && d._tag) ? ' <span style="font-size:10px;color:rgba(245,217,139,0.45);font-weight:400;">· ' + d._tag + '</span>' : '';
       const pts = formatBigNum((d && d.totalHasanat) || 0);
       const meTag = me ? ' <span style="color:var(--gold);font-size:11px;font-weight:700;">(أنت)</span>' : '';
-      return `<div class="${cls}"><span class="rk">${rk}</span><span class="nm">${nm}${meTag}</span><span class="pts">${pts} ⭐</span></div>`;
+      return `<div class="${cls}"><span class="rk">${rk}</span><span class="nm">${nm}${tg}${meTag}</span><span class="pts">${pts} ⭐</span></div>`;
     }).join('');
   }
   overlay.classList.add('open');
