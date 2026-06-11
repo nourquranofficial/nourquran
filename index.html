@@ -1154,8 +1154,14 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   // ═══ نسخة التطبيق — بتتحدّث مع كل تسليم ═══
-  window.NOUR_VERSION = 'v52 — 2026-06-11';
+  window.NOUR_VERSION = 'v53 — 2026-06-11';
   console.log('%c🌙 نور ' + window.NOUR_VERSION, 'color:#F5D98B;font-weight:bold;font-size:14px');
+  try {
+    const _verEl = document.getElementById('appVerTag');
+    if (_verEl) _verEl.textContent = '· ' + window.NOUR_VERSION;
+    const _verEl2 = document.getElementById('appVerTagBottom');
+    if (_verEl2) _verEl2.textContent = window.NOUR_VERSION;
+  } catch(e) {}
 
   const firebaseConfig = {
     apiKey: "AIzaSyDmIxeupIlrYv8I3tvz_euIgolr5uUFx2M",
@@ -1985,6 +1991,29 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   };
   window.fbUnwatchMistakes = function() {
     if (_mistUnsub) { try { _mistUnsub(); } catch (e) {} _mistUnsub = null; }
+  };
+
+  // ── ★ tombstone مسح الغلطات: users/<key>/mistClearedAt ──
+  //   المشكلة القديمة: المسح كان بيكتب {} → Firebase بيمسح العقدة → الأجهزة
+  //   التانية بتشوف null وبتتجاهله → الغلطات تفضل عندهم. العلامة القديمة
+  //   كانت بتتكتب في صفّ اللوحة ومحدش بيقراها (tombstone ميّت).
+  //   الجديد: علامة بطابع زمني جنب الغلطات نفسها + watcher بيقراها فعلاً.
+  let _mistClrUnsub = null;
+  window.fbMarkMistClearedNode = function(username) {
+    if (!username) return;
+    const key = dataKey(username);
+    set(ref(db, 'users/' + key + '/mistClearedAt'), Date.now()).catch(() => {});
+  };
+  window.fbWatchMistCleared = function(username, cb) {
+    if (!username) return;
+    if (_mistClrUnsub) { try { _mistClrUnsub(); } catch (e) {} _mistClrUnsub = null; }
+    const key = dataKey(username);
+    _mistClrUnsub = onValue(ref(db, 'users/' + key + '/mistClearedAt'), (snap) => {
+      if (typeof cb === 'function') cb(snap.exists() ? (snap.val() || 0) : 0);
+    });
+  };
+  window.fbUnwatchMistCleared = function() {
+    if (_mistClrUnsub) { try { _mistClrUnsub(); } catch (e) {} _mistClrUnsub = null; }
   };
 
   // ── حفظ تقدم المراجعة (nour_revprog) ──
@@ -3579,7 +3608,7 @@ function _callWhenReady(fn, args) {
       <div class="logo-sub">تحدي حفظ القرآن الكريم</div>
       <div style="display:inline-block;margin-top:6px;padding:3px 12px;background:rgba(201,151,58,0.12);border:1px solid rgba(201,151,58,0.35);border-radius:20px;font-size:10px;color:rgba(245,217,139,0.7);letter-spacing:0.5px;">★ الموقع الرسمي الوحيد ★</div>
       <div style="margin-top:6px;font-size:10px;color:rgba(245,217,139,0.55);">🔊 الصوت: الشيخ مشاري بن راشد العفاسي — مقدَّم من <a href="https://everyayah.com" target="_blank" rel="noopener" style="color:rgba(201,151,58,0.8);text-decoration:underline;">everyayah.com</a></div>
-      <div style="margin-top:4px;font-size:10px;"><a href="privacy-policy.html" target="_blank" style="color:rgba(201,151,58,0.4);text-decoration:none;">سياسة الخصوصية</a> <span style="color:rgba(245,217,139,0.35);">· v49</span></div>
+      <div style="margin-top:4px;font-size:10px;"><a href="privacy-policy.html" target="_blank" style="color:rgba(201,151,58,0.4);text-decoration:none;">سياسة الخصوصية</a> <span id="appVerTag" style="color:rgba(245,217,139,0.35);">·</span></div>
     </div>
 
     <!-- USER BAR -->
@@ -3746,7 +3775,7 @@ function _callWhenReady(fn, args) {
         🔍 ما فيش سور بهذا الفلتر
       </div>
     </div>
-    <div style="text-align:center;padding:8px 0 4px;font-size:9px;color:rgba(245,217,139,0.3);letter-spacing:0.5px;">v52 — 2026-06-11</div>
+    <div id="appVerTagBottom" style="text-align:center;padding:8px 0 4px;font-size:9px;color:rgba(245,217,139,0.3);letter-spacing:0.5px;"></div>
   </div>
 
 
@@ -5401,6 +5430,22 @@ function _finishLogin(username, isGuest) {
         const ms = document.getElementById('mistakesScreen');
         if (ms && ms.classList.contains('active') && typeof showMistakesScreen === 'function') showMistakesScreen();
       });
+      // ★ مراقبة tombstone المسح — لو حد مسح من جهاز تاني، نمسح هنا كمان
+      //   (onValue بيشتغل فوراً بالقيمة الحالية → بيغطي المسح اللي حصل وإحنا offline)
+      if (typeof window.fbWatchMistCleared === 'function') {
+        window.fbWatchMistCleared(username, (clearedTs) => {
+          if (!clearedTs) return;
+          if (!currentUser || currentUser.username !== username) return;
+          const _markKey = 'nour_mist_cleared_' + username;
+          let _localTs = 0;
+          try { _localTs = parseInt(localStorage.getItem(_markKey) || '0', 10) || 0; } catch (e) {}
+          if (clearedTs <= _localTs) return; // مسح قديم اتطبّق قبل كده
+          try { localStorage.removeItem('nour_mistakes_' + username); } catch (e) {}
+          try { localStorage.setItem(_markKey, String(clearedTs)); } catch (e) {}
+          const ms2 = document.getElementById('mistakesScreen');
+          if (ms2 && ms2.classList.contains('active') && typeof showMistakesScreen === 'function') showMistakesScreen();
+        });
+      }
     };
     setTimeout(_watchMist, 900);
   }
@@ -5412,6 +5457,7 @@ function doLogout() {
   window._cancelBgAuth = true;
   if (typeof window.fbUnwatchName === 'function') window.fbUnwatchName();
   if (typeof window.fbUnwatchMistakes === 'function') window.fbUnwatchMistakes();
+  if (typeof window.fbUnwatchMistCleared === 'function') window.fbUnwatchMistCleared();
   if (typeof window.fbUnwatchUserData  === 'function') window.fbUnwatchUserData();
   if (typeof window.fbUnwatchPassChange === 'function') window.fbUnwatchPassChange();
   if (typeof window._resetLbCleanup === 'function') window._resetLbCleanup();
@@ -8460,6 +8506,10 @@ function clearAllMistakes(btn) {
   // امسح من السحابة (للمسجّلين)
   if (!currentUser.isGuest && typeof window.fbSaveMistakes === 'function') {
     window.fbSaveMistakes(currentUser.username, {});
+  }
+  // ★ tombstone حقيقي جنب الغلطات — الأجهزة التانية بتراقبه وبتمسح محلياً
+  if (!currentUser.isGuest && typeof window.fbMarkMistClearedNode === 'function') {
+    window.fbMarkMistClearedNode(currentUser.username);
   }
   // ★ علامة مسح موحّدة على صفّ اللوحة — تتوحّد على كل الأجهزة (حتى غير المسجّلة في Firebase)
   if (typeof window.fbMarkMistakesCleared === 'function') {
