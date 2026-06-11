@@ -1154,7 +1154,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   // ═══ نسخة التطبيق — بتتحدّث مع كل تسليم ═══
-  window.NOUR_VERSION = 'v65 — 2026-06-11';
+  window.NOUR_VERSION = 'v66 — 2026-06-11';
   console.log('%c🌙 نور ' + window.NOUR_VERSION, 'color:#F5D98B;font-weight:bold;font-size:14px');
   try {
     const _verEl = document.getElementById('appVerTag');
@@ -1429,8 +1429,14 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
 
     const _bpaChanged = !!(_bpa0 && (_bpa0.changedAt || 0) > 0);
     const _bpaMatch = !!(_bpa0 && _bpa0.passHash && (_bpa0.passHash === _shaP || _bpa0.passHash === _passHash));
+    // ★ v66: تشخيص مؤقت — بيطبع أسماء الفروع بس (مفيش باسوردات)
+    console.log('[نور-دخول] bpa:', _bpa0 ? 'موجود' : 'فشل القراءة',
+      '| changedAt:', _bpa0 ? (_bpa0.changedAt || 0) : '-',
+      '| تطابق:', _bpaMatch ? 'نعم' : 'لا',
+      '| صيغة:', _bpa0 && _bpa0.passHash ? String(_bpa0.passHash).slice(0, 7) : '-');
 
     if (_bpaMatch) {
+      console.log('[نور-دخول] ✅ فرع: bypass-match');
       // ✅ bypassAuth يؤكد الباسورد → دخول
       _saveLocal();
       // self-heal: حوّل الصيغة القديمة لـ sha مع الحفاظ على changedAt
@@ -1454,6 +1460,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     }
 
     if (_bpaChanged) {
+      console.log('[نور-دخول] ⛔ فرع: رفض القديمة (تغيير صريح)');
       // ⛔ فيه تغيير صريح والمُدخَل مش الجديد → ده الباسورد القديم (حتى لو Auth يقبله)
       _finish(onError, '🔑 كلمة المرور اتغيّرت من قبل — استخدم الكلمة الجديدة');
       return;
@@ -1479,6 +1486,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
           }
         }
         // ✅ Firebase Auth قَبِل → الباسورد صح قطعاً
+        console.log('[نور-دخول] ✅ فرع: Auth-success');
         _saveLocal();
         _writeBypass(0);
         _finish(onSuccess);
@@ -1492,7 +1500,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
           return;
         }
         if (_code === 'auth/too-many-requests') {
-          if (_localMatch()) { _finish(onSuccess); }
+          if (_localMatch()) { console.log('[نور-دخول] ⚠️ فرع: local-fallback (too-many)'); _finish(onSuccess); }
           else { _finish(onError, 'الحساب محجوب مؤقتاً من Firebase، حاول بعد قليل'); }
           return;
         }
@@ -1587,9 +1595,10 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         })();
     window._nourPrevPassRaw = null; // استُهلك
 
+    console.log('[نور-تغيير] الباسورد القديم متاح للتوحيد:', _prevRaw2 ? 'نعم' : 'لا');
     const _tryOldFirst = _prevRaw2
       ? signInWithEmailAndPassword(auth, toFbEmail(email), padPass(_prevRaw2))
-          .then(() => updatePassword(auth.currentUser, padPass(newPass)).catch(() => {}))
+          .then(() => { console.log('[نور-تغيير] ✅ دخل Auth بالقديمة — بيحدّثه للجديدة'); return updatePassword(auth.currentUser, padPass(newPass)).then(() => console.log('[نور-تغيير] ✅ Auth اتوحّد')).catch((e) => console.log('[نور-تغيير] ⚠️ updatePassword فشل:', e && e.code)); })
       : Promise.reject('no-old');
 
     _tryOldFirst
@@ -1597,7 +1606,8 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       .catch(() =>
         // القديم مش متاح/فشل → جرّب الجديد (يغطي حالة Auth متوحّد فعلاً)
         signInWithEmailAndPassword(auth, toFbEmail(email), padPass(newPass))
-          .then(() => true).catch(() => false)
+          .then(() => { console.log('[نور-تغيير] ✅ Auth أصلاً على الجديدة'); return true; })
+          .catch(() => { console.log('[نور-تغيير] ⚠️ Auth ماتوحّدش — bypass بس (القديمة هتتصد من الـ bypass)'); return false; })
       )
       .then((authOk) => {
         // ★ v63: كل النهايات بتمرّ على الكتابة المحقّقة — مفيش نجاح كاذب
@@ -4725,7 +4735,7 @@ function doLogin() {
         const _lsR = document.getElementById('loginScreen'); if(_lsR){_lsR.classList.remove('hide');_lsR.style.display='';_lsR.style.pointerEvents='';}
         // ★ Fallback محلي: بس لو Firebase مش متاح (مش لو رفض الباسورد)
         const _lFresh = getUsers()[user];
-        const _fbReject = errMsg && (errMsg.includes('خاطئة') || errMsg.includes('denied') || errMsg.includes('wrong'));
+        const _fbReject = errMsg && (errMsg.includes('خاطئة') || errMsg.includes('denied') || errMsg.includes('wrong') || errMsg.includes('اتغيّرت') || errMsg.includes('اتغيرت'));
         // ★ Offline fallback: بس لو Firebase مش وصّل خالص (مش لو رفض الباسورد)
         const _doOfflineLogin = () => {
           const _storedName = (typeof window._getStoredName === 'function' ? window._getStoredName(user) : null)
@@ -5062,17 +5072,9 @@ function _sendForgotEmail() {
     }
   };
 
-  // حدّث الـ UI بناءً على نتيجة fbForgotPasswordLogin
-  // fbForgotPasswordLogin بتكتب Firebase من داخل module scope وبتنادي callback
-  const _syncTimeout = setTimeout(() => _updateSyncUI(false), 4000);
-  if (typeof window.fbForgotPasswordLogin === 'function') {
-    window.fbForgotPasswordLogin(email, newPass,
-      () => { clearTimeout(_syncTimeout); _updateSyncUI(true); },
-      () => { clearTimeout(_syncTimeout); _updateSyncUI(false); }
-    );
-  } else {
-    setTimeout(() => _updateSyncUI(false), 500);
-  }
+  // ★ v66: لما _onChangeOk بتتنادى يبقى السيرفر أكّد فعلاً (الكتابة المحقّقة خلصت)
+  //   — النداء التاني المكرر اللي كان هنا اتشال (كان بينفّذ التغيير مرتين)
+  setTimeout(() => _updateSyncUI(true), 600);
 
   // أخفِ الـ overlay بعد 3 ثواني مع fade out
   setTimeout(() => {
