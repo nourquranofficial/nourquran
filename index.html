@@ -1154,7 +1154,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   // ═══ نسخة التطبيق — بتتحدّث مع كل تسليم ═══
-  window.NOUR_VERSION = 'v66 — 2026-06-11';
+  window.NOUR_VERSION = 'v67 — 2026-06-11';
   console.log('%c🌙 نور ' + window.NOUR_VERSION, 'color:#F5D98B;font-weight:bold;font-size:14px');
   try {
     const _verEl = document.getElementById('appVerTag');
@@ -3119,6 +3119,57 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
 
   // ─── دمج حساب قديم في الحساب الحالي (يُشغَّل مرة واحدة من الكونسول) ───
   //     مثال: mergeOldAccount('salama')  — آمن: لازم تحدّد المفتاح بنفسك
+  // ── ★ v67: تشخيص تكرار الأسماء — lbDiag() في الكونسول ──
+  //   بيطبع جدول كامل: المفتاح | الاسم | tag | الحسنات | حساب نشط؟ | التقييم
+  //   وبيقترح أوامر mergeOldAccount الجاهزة للصفوف اللي شكلها بتاعتك.
+  window.lbDiag = function() {
+    return Promise.all([
+      get(ref(db, LB_PATH.replace(/\/$/, ''))).then(s => s.val() || {}).catch(() => ({})),
+      get(ref(db, 'users')).then(s => s.val() || {}).catch(() => ({})),
+    ]).then(([lb, users]) => {
+      const cu = window.currentUser || {};
+      const myKey = cu.username ? dataKey(cu.username) : null;
+      const rows = [];
+      const byName = {};
+      Object.entries(lb).forEach(([k, d]) => {
+        if (!d) return;
+        const nm = (d.name || '').trim();
+        const nmL = nm.toLowerCase();
+        if (nmL) { byName[nmL] = byName[nmL] || []; byName[nmL].push(k); }
+        rows.push({
+          'المفتاح': k,
+          'الاسم': nm || '—',
+          'tag': d.tag || '—',
+          'الحسنات': d.totalHasanat || 0,
+          'جلسات': d.totalGames || 0,
+          'ضيف': d.isGuest ? 'نعم' : 'لا',
+          'حساب نشط (users)': users[k] ? 'نعم' : 'لا ⚠️',
+          'ده أنا': (myKey && k === myKey) ? '⭐ نعم' : '',
+        });
+      });
+      rows.sort((a, b) => (b['الحسنات'] || 0) - (a['الحسنات'] || 0));
+      console.log('═══════ تشخيص لوحة الشرف — ' + rows.length + ' صف ═══════');
+      console.table(rows);
+      // الأسماء المتكررة
+      const dups = Object.entries(byName).filter(([, ks]) => ks.length > 1);
+      if (dups.length === 0) {
+        console.log('✅ مفيش أسماء متكررة في الداتا');
+      } else {
+        console.log('⚠️ أسماء متكررة (' + dups.length + '):');
+        dups.forEach(([nm, ks]) => {
+          console.log('  ▸ "' + nm + '" على المفاتيح: ' + ks.join(' ، '));
+          ks.forEach(k => {
+            if (myKey && k !== myKey && !users[k]) {
+              console.log('    💡 لو ده صفّك القديم: mergeOldAccount(\'' + k + '\')');
+            }
+          });
+        });
+      }
+      console.log('📋 اعمل screenshot للجدول وابعته للمطوّر');
+      return rows.length;
+    });
+  };
+
   window.mergeOldAccount = function(oldKey) {
     const cu = window.currentUser;
     if (!cu || !cu.username) { console.error('❌ سجّل دخول الأول'); return Promise.reject('no user'); }
