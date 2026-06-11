@@ -1617,7 +1617,35 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     if (!username) return;
     const key = dataKey(username);
     const { password, ...cleanData } = data;
-    return update(ref(db, 'users/' + key + '/data'), { ...cleanData, updatedAt: Date.now() }).catch(() => {});
+    // ★★ القاعدة الآمنة الموحّدة (R2) — زي fbWatchUserData و _continueAuthLogin بالظبط:
+    //   التصفير الحقيقي فقط (كل العدّادات صفر + طابع زمني أحدث) ينزّل لصفر.
+    //   غير كده → العدّادات تاخد الأعلى دايمًا (max). streak/lastPlay الأحدث يكسب.
+    //   ده بيمنع أي جهاز بنسخة قديمة إنه يكتب فوق نقاط أعلى عند الخروج.
+    const _inS = cleanData.totalScore, _inG = cleanData.totalGames, _inH = cleanData.totalHasanat;
+    const _hasCounters = (_inS !== undefined || _inG !== undefined || _inH !== undefined);
+    const _inTs = cleanData.updatedAt || Date.now();
+    return runTransaction(ref(db, 'users/' + key + '/data'), (curr) => {
+      if (curr === null) {
+        return { ...cleanData,
+          totalScore: _inS || 0, totalGames: _inG || 0, totalHasanat: _inH || 0,
+          updatedAt: Date.now() };
+      }
+      const merged = { ...curr, ...cleanData };
+      if (_hasCounters) {
+        const _inZero  = !(_inS || 0) && !(_inG || 0) && !(_inH || 0);
+        const _curHas  = (curr.totalScore || 0) > 0 || (curr.totalGames || 0) > 0 || (curr.totalHasanat || 0) > 0;
+        const _genuineReset = _inZero && _curHas && _inTs > (curr.updatedAt || 0);
+        if (_genuineReset) {
+          merged.totalScore = 0; merged.totalGames = 0; merged.totalHasanat = 0;
+        } else {
+          merged.totalScore   = Math.max(curr.totalScore   || 0, _inS || 0);
+          merged.totalGames   = Math.max(curr.totalGames   || 0, _inG || 0);
+          merged.totalHasanat = Math.max(curr.totalHasanat || 0, _inH || 0);
+        }
+      }
+      merged.updatedAt = Date.now();
+      return merged;
+    }).catch(() => {});
   };
 
   // ★ حفظ الاسم في Firebase — مكانين للضمان
@@ -2854,6 +2882,8 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         })
         .catch((e) => {
           _report['Firebase Auth'] = '❌ رفض — كود: ' + (e.code || 'غير معروف');
+          _report['رسالة Firebase الكاملة'] = (e.message || String(e)).slice(0, 200);
+          _report['العنوان الحالي (origin)'] = (location && location.origin) || '(غير معروف)';
           if (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential' || e.code === 'auth/invalid-login-credentials') {
             _report['نتيجة نهائية'] = '🔴 Firebase Auth شايف الباسورد غلط — يبقى الباسورد ده مش اللي اتسجّل بيه في Auth';
           } else if (e.code === 'auth/network-request-failed') {
@@ -2862,6 +2892,10 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
             _report['نتيجة نهائية'] = '🔴 الإيميل ده مش متسجّل في Firebase Auth خالص';
           } else if (e.code === 'auth/too-many-requests') {
             _report['نتيجة نهائية'] = '🟡 الحساب محجوب مؤقتاً (محاولات كتير) — جرّب بعد شوية';
+          } else if (e.code === 'auth/operation-not-allowed' || e.code === 'auth/configuration-not-found') {
+            _report['نتيجة نهائية'] = '🔴 خدمة Email/Password مش مفعّلة في Firebase Console';
+          } else if (e.code === 'auth/unauthorized-domain') {
+            _report['نتيجة نهائية'] = '🔴 الدومين ده مش مضاف في Firebase → Authorized domains';
           } else {
             _report['نتيجة نهائية'] = '🔴 رفض لسبب: ' + e.code;
           }
@@ -8122,15 +8156,12 @@ function showResults() {
     // Firebase — عدّ اللعبة + streak فقط (النقاط اتحفظت لحظيًا فعلاً)
     if (!currentUser.isGuest && typeof window.fbIncrementScore === 'function') {
       window.fbIncrementScore(currentUser.username, 0, 0, 1); // 0 نقاط — بس +1 لعبة
-      // حفظ streak وlastPlay منفصلاً
+      // حفظ streak وlastPlay فقط — العدّادات مسؤولية fbIncrementScore وحده
+      // (كتابة العدّادات هنا كانت بتعمل سباق عدّ مزدوج مع الـ transaction)
       if (typeof window.fbSaveFullUserData === 'function') {
         window.fbSaveFullUserData(currentUser.username, {
           streak:   currentUser.streak || 0,
           lastPlay: currentUser.lastPlay,
-          totalScore:   currentUser.totalScore,
-          totalGames:   currentUser.totalGames,
-          totalHasanat: currentUser.totalHasanat,
-          updatedAt:    currentUser.updatedAt || Date.now(),
         });
       }
     } else {
