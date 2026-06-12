@@ -1154,7 +1154,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   // ═══ نسخة التطبيق — بتتحدّث مع كل تسليم ═══
-  window.NOUR_VERSION = 'v68 — 2026-06-12';
+  window.NOUR_VERSION = 'v69 — 2026-06-13';
   console.log('%c🌙 نور ' + window.NOUR_VERSION, 'color:#F5D98B;font-weight:bold;font-size:14px');
   try {
     const _verEl = document.getElementById('appVerTag');
@@ -3593,10 +3593,10 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       }
     } catch (e) {}
 
-    // ★ v68 (ترقيم المالك): إخفاء أي تكرار لنفس الحساب — الأحدث دايماً هو اللي يظهر
-    //   البصمة: حسنات + نقاط + جلسات متطابقين بالظبط (H>0) = نفس الشخص.
-    //   الاختيار: مفتاح إيميلي يتقدّم على القديم، وبعدها الأحدث (nameUpdatedAt/updatedAt).
-    //   عرض فقط — مفيش مسح من الداتا. صفّي الكانوني محمي دايماً.
+    // ★ v69 (ترقيم المالك): إخفاء بقايا نفس الحساب فقط — التعادل الحقيقي بيظهر بمركز مكرر
+    //   بصمة كاملة متطابقة (حسنات+نقاط+جلسات):
+    //   - فيها مفتاح قديم/guest → ده صف بقايا لنفس الشخص → يتخفى ويفضل الإيميلي/الأحدث.
+    //   - كلهم مفاتيح إيميل حقيقية → لاعبين متعادلين → الاتنين يظهروا (بنفس رقم المركز).
     try {
       const _fpGroups = {};
       for (const [k, d] of list) {
@@ -3608,25 +3608,33 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       const _rowOf = (k) => (list.find(([kk]) => kk === k) || [])[1] || {};
       Object.values(_fpGroups).forEach(ks => {
         if (ks.length < 2) return;
-        let _best = null, _bestEmail = false, _bestTs = -1;
-        ks.forEach(k => {
-          const d = _rowOf(k);
-          const _em = _isEmailRow(k);
-          const ts = Math.max(d.nameUpdatedAt || 0, d.updatedAt || 0);
-          if (_best === null || (_em && !_bestEmail) || (_em === _bestEmail && ts > _bestTs)) {
-            _best = k; _bestEmail = _em; _bestTs = ts;
-          }
-        });
-        ks.forEach(k => { if (k !== _best) _hideKeys.add(k); });
+        const _emails = ks.filter(k => _isEmailRow(k));
+        const _others = ks.filter(k => !_isEmailRow(k));
+        if (_others.length === 0) return; // كلهم حسابات إيميل حقيقية → تعادل → يظهروا كلهم
+        if (_emails.length > 0) {
+          _others.forEach(k => _hideKeys.add(k)); // البقايا القديمة تتخفى، الإيميلي يفضل
+        } else {
+          // كلهم قدام → الأحدث بس
+          let _best = null, _bestTs = -1;
+          ks.forEach(k => {
+            const d = _rowOf(k);
+            const ts = Math.max(d.nameUpdatedAt || 0, d.updatedAt || 0);
+            if (ts > _bestTs) { _bestTs = ts; _best = k; }
+          });
+          ks.forEach(k => { if (k !== _best) _hideKeys.add(k); });
+        }
       });
       if (_hideKeys.size > 0) {
-        // الصف الكانوني بتاعي عمره ما يتخفى
+        // ★ حماية صفّي بالمقارنة المطبّعة (مش النص الحرفي — عشان فروق الحروف الكبيرة)
         try {
           const _cuH = window.currentUser;
-          if (_cuH && _cuH.username) _hideKeys.delete(dataKey(_cuH.username));
+          if (_cuH && _cuH.username) {
+            const _myNorm = window._normLbKey(dataKey(_cuH.username));
+            [..._hideKeys].forEach(k => { if (window._normLbKey(k) === _myNorm) _hideKeys.delete(k); });
+          }
         } catch (e) {}
         list = list.filter(([k]) => !_hideKeys.has(k));
-        console.log('[نور-لوحة] صفوف مكررة متخفية من العرض: ' + [..._hideKeys].join(' ، '));
+        console.log('[نور-لوحة] صفوف بقايا متخفية من العرض: ' + [..._hideKeys].join(' ، '));
       }
     } catch (e) {}
 
@@ -9586,8 +9594,10 @@ function updateGlobalRankChip() {
   );
   let rank, total, myHasanat;
   if (idx >= 0) {
-    rank = idx + 1; total = _listArr.length;
     myHasanat = (_listArr[idx][1] && _listArr[idx][1].totalHasanat) || 0;
+    // ★ v69: ترتيب بمنطق التعادل — نفس رقم المركز للمتعادلين (متوافق مع القايمة)
+    rank = _listArr.filter(([, d]) => ((d && d.totalHasanat) || 0) > myHasanat).length + 1;
+    total = _listArr.length;
   } else {
     // ★ مش لاقي صفّي في اللوحة → احسب ترتيبي من نقاطي مباشرة (الكارت/الميدالية ما يختفوش)
     myHasanat = cu.totalHasanat || 0;
@@ -9681,10 +9691,18 @@ function openFullRank() {
       return false;
     };
     const medals = ['🥇', '🥈', '🥉'];
+    // ★ v69: تعادل النقاط = نفس رقم المركز يتكرر (والميدالية تتكرر لو في التوب 3)
+    const _ranks = [];
+    list.forEach(([, d], i) => {
+      const h = (d && d.totalHasanat) || 0;
+      if (i > 0 && h === (((list[i - 1] || [])[1] || {}).totalHasanat || 0)) _ranks.push(_ranks[i - 1]);
+      else _ranks.push(i + 1);
+    });
     body.innerHTML = list.map(([k, d], i) => {
       const me = isMe(k, d);
-      const cls = 'rank-row' + (i < 3 ? ' top' : '') + (me ? ' me' : '');
-      const rk = i < 3 ? medals[i] : '#' + toArabicNum(i + 1);
+      const _rNum = _ranks[i];
+      const cls = 'rank-row' + (_rNum <= 3 ? ' top' : '') + (me ? ' me' : '');
+      const rk = _rNum <= 3 ? medals[_rNum - 1] : '#' + toArabicNum(_rNum);
       const rawNm = (d && d.name) ? d.name : '';
       const nm = rawNm.includes('@') ? (rawNm.split('@')[0] || 'لاعب') : (rawNm || 'لاعب');
       // ★ v54: اسم متكرر → اعرض جزء الإيميل صغير للتمييز
