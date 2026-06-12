@@ -1154,7 +1154,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   // ═══ نسخة التطبيق — بتتحدّث مع كل تسليم ═══
-  window.NOUR_VERSION = 'v67 — 2026-06-11';
+  window.NOUR_VERSION = 'v68 — 2026-06-12';
   console.log('%c🌙 نور ' + window.NOUR_VERSION, 'color:#F5D98B;font-weight:bold;font-size:14px');
   try {
     const _verEl = document.getElementById('appVerTag');
@@ -3170,6 +3170,69 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     });
   };
 
+  // ── ★ v68: دمج إداري — adminMergeLb('المفتاح_القديم', 'المفتاح_المستهدف') ──
+  //   بيدمج صف قديم في صف مستهدف أياً كان الحساب اللي إنت داخل بيه.
+  //   آمن: max للعدّادات من كل المصادر + تسجيل الاسم القديم في oldNames (مايرجعش تاني)
+  //   + بيرفض دمج حساب مسجّل حقيقي (عنده bypassAuth) إلا بـ force=true.
+  window.adminMergeLb = function(oldKey, targetKey, force) {
+    if (!oldKey || !targetKey) { console.error('❌ الاستخدام: adminMergeLb(\'القديم\',\'المستهدف\')'); return Promise.reject('args'); }
+    if (String(oldKey) === String(targetKey)) { console.error('❌ نفس المفتاح'); return Promise.reject('same'); }
+    return Promise.all([
+      get(ref(db, LB_PATH + oldKey)).then(s => s.val()).catch(() => null),
+      get(ref(db, LB_PATH + targetKey)).then(s => s.val()).catch(() => null),
+      get(ref(db, 'users/' + oldKey)).then(s => s.val()).catch(() => null),
+      get(ref(db, 'users/' + targetKey + '/data')).then(s => s.val()).catch(() => null),
+      get(ref(db, 'users/' + targetKey + '/oldNames')).then(s => s.val()).catch(() => null),
+    ]).then(([oldLb, tgtLb, oldUser, tgtData, tgtOldNames]) => {
+      if (!oldLb && !(oldUser && oldUser.data)) { console.error('❌ الصف القديم "' + oldKey + '" مش موجود'); return Promise.reject('missing'); }
+      if (!tgtLb && !tgtData) { console.error('❌ المستهدف "' + targetKey + '" مش موجود'); return Promise.reject('missing-target'); }
+      if (oldUser && oldUser.bypassAuth && !force) {
+        console.error('⛔ "' + oldKey + '" حساب مسجّل حقيقي (عنده باسورد). لو متأكد إنه ليك: adminMergeLb(\'' + oldKey + '\',\'' + targetKey + '\', true)');
+        return Promise.reject('real-account');
+      }
+      const oldData = (oldUser && oldUser.data) || {};
+      const pick = (...vals) => Math.max(0, ...vals.map(v => Number(v) || 0));
+      const H = pick(oldLb && oldLb.totalHasanat, oldData.totalHasanat, tgtLb && tgtLb.totalHasanat, tgtData && tgtData.totalHasanat);
+      const S = pick(oldLb && oldLb.totalScore,   oldData.totalScore,   tgtLb && tgtLb.totalScore,   tgtData && tgtData.totalScore);
+      const G = pick(oldLb && oldLb.totalGames,   oldData.totalGames,   tgtLb && tgtLb.totalGames,   tgtData && tgtData.totalGames);
+      const now = Date.now();
+      const tgtName = (tgtLb && tgtLb.name) || (tgtData && tgtData.name) || targetKey;
+      // سجّل الاسم القديم + المفتاح القديم في oldNames بتاعة المستهدف — التنظيف هيتعرف عليهم للأبد
+      let names = Array.isArray(tgtOldNames) ? tgtOldNames.slice() : [];
+      [(oldLb && oldLb.name), String(oldKey)].forEach(n => {
+        if (n && !String(n).includes('@') && names.indexOf(n) === -1) names.push(n);
+      });
+      return Promise.all([
+        runTransaction(ref(db, 'users/' + targetKey + '/data'), (curr) => {
+          const c = curr || {};
+          return { ...c,
+            totalHasanat: Math.max(c.totalHasanat || 0, H),
+            totalScore:   Math.max(c.totalScore   || 0, S),
+            totalGames:   Math.max(c.totalGames   || 0, G),
+            updatedAt: now };
+        }),
+        set(ref(db, LB_PATH + targetKey), {
+          ...(tgtLb || {}), name: tgtName,
+          totalHasanat: H, totalScore: S, totalGames: G,
+          isGuest: false, updatedAt: now,
+          nameUpdatedAt: (tgtLb && tgtLb.nameUpdatedAt) || now,
+          tag: (tgtLb && tgtLb.tag) || (String(targetKey).includes('_') ? String(targetKey).split('_')[0] : null),
+        }),
+        set(ref(db, 'users/' + targetKey + '/oldNames'), names),
+      ]).then(() => Promise.all([
+        remove(ref(db, LB_PATH + oldKey)).catch(() => {}),
+        (oldUser && !oldUser.bypassAuth) || force
+          ? remove(ref(db, 'users/' + oldKey)).catch(() => {})
+          : Promise.resolve(),
+      ])).then(() => {
+        console.log('✅ تم الدمج: "' + oldKey + '" → "' + targetKey + '" | حسنات=' + H + ' نقاط=' + S + ' جلسات=' + G);
+        console.log('   الاسم القديم اتسجّل في oldNames — مش هيرجع تاني.');
+        if (typeof renderLeaderboard === 'function') try { renderLeaderboard(); } catch(e) {}
+        return true;
+      });
+    });
+  };
+
   window.mergeOldAccount = function(oldKey) {
     const cu = window.currentUser;
     if (!cu || !cu.username) { console.error('❌ سجّل دخول الأول'); return Promise.reject('no user'); }
@@ -3444,7 +3507,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
 
     // ترتيب تنازلي: الحسنات → الجلسات → النقاط → المفتاح (tiebreakers مستقرة)
     const _showGuests = window.SHOW_GUESTS_IN_RANKING !== false;
-    const list = Object.entries(data || {})
+    let list = Object.entries(data || {})
       .filter(([k, d]) => {
         if (!d || !d.name || (d.totalHasanat || 0) <= 0) return false;
         if (!_showGuests && (d.isGuest || String(k).startsWith('guest__'))) return false;
@@ -3527,6 +3590,43 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
             return String(ka).localeCompare(String(kb));
           });
         }
+      }
+    } catch (e) {}
+
+    // ★ v68 (ترقيم المالك): إخفاء أي تكرار لنفس الحساب — الأحدث دايماً هو اللي يظهر
+    //   البصمة: حسنات + نقاط + جلسات متطابقين بالظبط (H>0) = نفس الشخص.
+    //   الاختيار: مفتاح إيميلي يتقدّم على القديم، وبعدها الأحدث (nameUpdatedAt/updatedAt).
+    //   عرض فقط — مفيش مسح من الداتا. صفّي الكانوني محمي دايماً.
+    try {
+      const _fpGroups = {};
+      for (const [k, d] of list) {
+        if (!d || (d.totalHasanat || 0) <= 0) continue;
+        const _fp = (d.totalHasanat || 0) + '|' + (d.totalScore || 0) + '|' + (d.totalGames || 0);
+        (_fpGroups[_fp] = _fpGroups[_fp] || []).push(k);
+      }
+      const _hideKeys = new Set();
+      const _rowOf = (k) => (list.find(([kk]) => kk === k) || [])[1] || {};
+      Object.values(_fpGroups).forEach(ks => {
+        if (ks.length < 2) return;
+        let _best = null, _bestEmail = false, _bestTs = -1;
+        ks.forEach(k => {
+          const d = _rowOf(k);
+          const _em = _isEmailRow(k);
+          const ts = Math.max(d.nameUpdatedAt || 0, d.updatedAt || 0);
+          if (_best === null || (_em && !_bestEmail) || (_em === _bestEmail && ts > _bestTs)) {
+            _best = k; _bestEmail = _em; _bestTs = ts;
+          }
+        });
+        ks.forEach(k => { if (k !== _best) _hideKeys.add(k); });
+      });
+      if (_hideKeys.size > 0) {
+        // الصف الكانوني بتاعي عمره ما يتخفى
+        try {
+          const _cuH = window.currentUser;
+          if (_cuH && _cuH.username) _hideKeys.delete(dataKey(_cuH.username));
+        } catch (e) {}
+        list = list.filter(([k]) => !_hideKeys.has(k));
+        console.log('[نور-لوحة] صفوف مكررة متخفية من العرض: ' + [..._hideKeys].join(' ، '));
       }
     } catch (e) {}
 
@@ -3840,7 +3940,6 @@ function _callWhenReady(fn, args) {
         <span style="font-size:13px;color:var(--gold);" id="userLevelDisplay">المستوى ١</span>
         <span class="user-logout" onclick="resetScore()" style="color:rgba(255,120,100,0.5);" title="تصفير النقاط">🔄</span>
         <span class="user-logout" onclick="doForgotPassword()" style="color:rgba(245,217,139,0.5);font-size:12px;" title="تغيير كلمة المرور">🔑</span>
-        <span class="user-logout" onclick="doDeleteAccount()" style="color:rgba(255,80,80,0.45);font-size:11px;" title="حذف الحساب نهائياً">🗑️</span>
         <button onclick="doLogout()" ontouchend="event.preventDefault();doLogout();" style="background:none;border:none;font-size:13px;color:rgba(245,217,139,0.55);cursor:pointer;font-family:'Cairo',sans-serif;padding:6px 10px;border-radius:8px;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">خروج ↩</button>
       </div>
     </div>
@@ -5519,49 +5618,6 @@ function _cancelNameEdit() {
 window.editDisplayName = editDisplayName;
 window._saveNameEdit = _saveNameEdit;
 window._cancelNameEdit = _cancelNameEdit;
-// ★ حذف الحساب نهائياً
-async function doDeleteAccount() {
-  if (!currentUser || currentUser.isGuest) return;
-  const name = currentUser.name || currentUser.username || 'حسابك';
-  const c1 = confirm(`⚠️ هتحذف ${name} نهائياً — النقاط والبيانات كلها هتتمسح.\n\nمتأكد؟`);
-  if (!c1) return;
-  const c2 = confirm('❗ مفيش رجوع بعد الحذف — اضغط موافق للتأكيد.');
-  if (!c2) return;
-
-  const username = currentUser.username;
-
-  // ١. مسح كل البيانات من Firebase Database فوراً
-  if (typeof window.fbDeleteAllUserData === 'function') {
-    window.fbDeleteAllUserData(username);
-  }
-
-  // ٢. مسح localStorage
-  try {
-    const users = JSON.parse(localStorage.getItem('nour_users') || '{}');
-    delete users[username];
-    localStorage.setItem('nour_users', JSON.stringify(users));
-    localStorage.removeItem('nour_last_user');
-    localStorage.removeItem('nour_current_user');
-  } catch(e) {}
-
-  // ٣. مسح من Firebase Auth
-  try {
-    const { getAuth, deleteUser } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js');
-    const _auth = getAuth();
-    if (_auth.currentUser) await deleteUser(_auth.currentUser);
-  } catch(e) {
-    if (e.code === 'auth/requires-recent-login') {
-      alert('لأمانك، ادخل تاني وبعدين احذف الحساب.');
-      doLogout();
-      return;
-    }
-  }
-
-  currentUser = null; window.currentUser = null;
-  alert('✅ تم حذف الحساب نهائياً.');
-  location.reload();
-}
-window.doDeleteAccount = doDeleteAccount;
 
 
 function _finishLogin(username, isGuest) {
