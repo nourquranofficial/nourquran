@@ -1127,6 +1127,26 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
 .rank-list::-webkit-scrollbar { width:5px; }
 .rank-list::-webkit-scrollbar-thumb { background:rgba(201,151,58,0.3); border-radius:99px; }
 
+/* ★ v70: إصلاح توقف الترتيب عند المركز السادس على الموبايل
+   السبب: تعارض overflow-y بين .sheet-box و.rank-list (nested scroll conflict على iOS/Android)
+   الحل: نخلّي #fullRankOverlay .sheet-box يشتغل بـ flex ومايـ scrollش هو،
+         و#fullRankList هو الـ container الوحيد اللي بيـ scroll — بيضمن عرض كل المراكز */
+#fullRankOverlay .sheet-box {
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+  max-height:92vh;
+}
+#fullRankList {
+  flex:1;
+  min-height:0;
+  max-height:none;
+  overflow-y:auto;
+  -webkit-overflow-scrolling:touch;
+  padding:2px;
+  margin:0 -2px;
+}
+
 /* surah/juz select inside sheet */
 .sheet-tabs { display:grid; grid-template-columns:1fr 1fr; gap:4px; margin-bottom:10px; background:rgba(255,255,255,0.04); border-radius:12px; padding:4px; }
 .sheet-start { width:100%; padding:15px; margin-top:18px; background:linear-gradient(135deg,#C9973A,#E8B84B); border:none; border-radius:16px; font-family:"Cairo",sans-serif; font-size:17px; font-weight:800; color:#12100a; cursor:pointer; transition:all .2s; }
@@ -1154,7 +1174,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   // ═══ نسخة التطبيق — بتتحدّث مع كل تسليم ═══
-  window.NOUR_VERSION = 'v69 — 2026-06-13';
+  window.NOUR_VERSION = 'v70 — 2026-06-13';
   console.log('%c🌙 نور ' + window.NOUR_VERSION, 'color:#F5D98B;font-weight:bold;font-size:14px');
   try {
     const _verEl = document.getElementById('appVerTag');
@@ -3593,10 +3613,11 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       }
     } catch (e) {}
 
-    // ★ v69 (ترقيم المالك): إخفاء بقايا نفس الحساب فقط — التعادل الحقيقي بيظهر بمركز مكرر
+    // ★ v70 (ترقيم المالك): إخفاء بقايا نفس الحساب فقط — التعادل الحقيقي بيظهر بمركز مكرر
     //   بصمة كاملة متطابقة (حسنات+نقاط+جلسات):
     //   - فيها مفتاح قديم/guest → ده صف بقايا لنفس الشخص → يتخفى ويفضل الإيميلي/الأحدث.
     //   - كلهم مفاتيح إيميل حقيقية → لاعبين متعادلين → الاتنين يظهروا (بنفس رقم المركز).
+    //   ★ v70 fix: إصلاح توقف الترتيب عند المركز ٦ على الموبايل (nested scroll conflict).
     try {
       const _fpGroups = {};
       for (const [k, d] of list) {
@@ -3937,7 +3958,7 @@ function _callWhenReady(fn, args) {
       <div class="logo-sub">تحدي حفظ القرآن الكريم</div>
       <div style="display:inline-block;margin-top:6px;padding:3px 12px;background:rgba(201,151,58,0.12);border:1px solid rgba(201,151,58,0.35);border-radius:20px;font-size:10px;color:rgba(245,217,139,0.7);letter-spacing:0.5px;">★ الموقع الرسمي الوحيد ★</div>
       <div style="margin-top:6px;font-size:10px;color:rgba(245,217,139,0.55);">🔊 الصوت: الشيخ مشاري بن راشد العفاسي — مقدَّم من <a href="https://everyayah.com" target="_blank" rel="noopener" style="color:rgba(201,151,58,0.8);text-decoration:underline;">everyayah.com</a></div>
-      <div style="margin-top:4px;font-size:10px;"><a href="privacy-policy.html" target="_blank" style="color:rgba(201,151,58,0.4);text-decoration:none;">سياسة الخصوصية</a> <span id="appVerTag" style="color:rgba(245,217,139,0.35);">·</span></div>
+      <div style="margin-top:4px;font-size:10px;"><a href="privacy-policy.html" target="_blank" style="color:rgba(201,151,58,0.4);text-decoration:none;">سياسة الخصوصية</a> <span id="appVerTag" style="color:rgba(245,217,139,0.35);">· v70 — 2026-06-13</span></div>
     </div>
 
     <!-- USER BAR -->
@@ -9595,7 +9616,7 @@ function updateGlobalRankChip() {
   let rank, total, myHasanat;
   if (idx >= 0) {
     myHasanat = (_listArr[idx][1] && _listArr[idx][1].totalHasanat) || 0;
-    // ★ v69: ترتيب بمنطق التعادل — نفس رقم المركز للمتعادلين (متوافق مع القايمة)
+    // ★ v70: ترتيب بمنطق التعادل — نفس رقم المركز للمتعادلين (متوافق مع القايمة)
     rank = _listArr.filter(([, d]) => ((d && d.totalHasanat) || 0) > myHasanat).length + 1;
     total = _listArr.length;
   } else {
@@ -9691,7 +9712,7 @@ function openFullRank() {
       return false;
     };
     const medals = ['🥇', '🥈', '🥉'];
-    // ★ v69: تعادل النقاط = نفس رقم المركز يتكرر (والميدالية تتكرر لو في التوب 3)
+    // ★ v70: تعادل النقاط = نفس رقم المركز يتكرر (والميدالية تتكرر لو في التوب 3)
     const _ranks = [];
     list.forEach(([, d], i) => {
       const h = (d && d.totalHasanat) || 0;
