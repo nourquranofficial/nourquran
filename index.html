@@ -1154,7 +1154,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   // ═══ نسخة التطبيق — بتتحدّث مع كل تسليم ═══
-  window.NOUR_VERSION = 'v78 — 2026-06-13';
+  window.NOUR_VERSION = 'v79 — 2026-06-13';
   console.log('%c🌙 نور ' + window.NOUR_VERSION, 'color:#F5D98B;font-weight:bold;font-size:14px');
   try {
     const _verEl = document.getElementById('appVerTag');
@@ -9759,10 +9759,37 @@ window.addEventListener('focus', () => _resyncScoreFromCloud());
 
 // جدول الترتيب العام الكامل — كل اللاعبين، نفس ترتيب لوحة الشرف، منسّق وأنيق
 function openFullRank() {
-  const list = window._lbAllList;
+  let list = window._lbAllList;
   const body = document.getElementById('fullRankList');
   const overlay = document.getElementById('fullRankOverlay');
   if (!body || !overlay) return;
+  // ★ v79: طبقة حماية أخيرة على مستوى العرض — ادمج أي صفوف بنفس المفتاح المطبّع
+  //   (لو فلت صفّ مكرر من التوحيد لأي سبب). بياخد أعلى نقاط، مايلمسش الداتا.
+  if (Array.isArray(list) && list.length > 1 && typeof window._normLbKey === 'function') {
+    try {
+      const _seen = {};
+      const _merged = [];
+      for (const [k, d] of list) {
+        const nk = window._normLbKey(k);
+        if (_seen[nk] != null) {
+          const ex = _merged[_seen[nk]][1];
+          ex.totalHasanat = Math.max(ex.totalHasanat || 0, (d && d.totalHasanat) || 0);
+          ex.totalScore   = Math.max(ex.totalScore   || 0, (d && d.totalScore)   || 0);
+          ex.totalGames   = Math.max(ex.totalGames   || 0, (d && d.totalGames)   || 0);
+          if (d && d._dup) ex._dup = true;
+          if (d && d._tag && !ex._tag) ex._tag = d._tag;
+        } else {
+          _seen[nk] = _merged.length;
+          _merged.push([k, Object.assign({}, d)]);
+        }
+      }
+      _merged.sort(([, a], [, b]) =>
+        ((b.totalHasanat || 0) - (a.totalHasanat || 0)) ||
+        ((b.totalGames || 0) - (a.totalGames || 0)) ||
+        ((b.totalScore || 0) - (a.totalScore || 0)));
+      list = _merged;
+    } catch (e) {}
+  }
   if (!Array.isArray(list) || list.length === 0) {
     body.innerHTML = '<div style="text-align:center;color:rgba(245,217,139,0.4);padding:34px 16px;font-size:13px;">لسه مفيش لاعبين سجّلوا نقاط 🌱</div>';
   } else {
