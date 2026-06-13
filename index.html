@@ -1154,7 +1154,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   // ═══ نسخة التطبيق — بتتحدّث مع كل تسليم ═══
-  window.NOUR_VERSION = 'v86 — 2026-06-13';
+  window.NOUR_VERSION = 'v79 — 2026-06-13';
   console.log('%c🌙 نور ' + window.NOUR_VERSION, 'color:#F5D98B;font-weight:bold;font-size:14px');
   try {
     const _verEl = document.getElementById('appVerTag');
@@ -3340,95 +3340,6 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   // ─── حذف كل الحسابات القديمة بدون إيميل (مفاتيح بالاسم — legacy) ───
   //     مفتاح الإيميل دايمًا فيه "_" (من @ و .). المفتاح بدون "_" = حساب قديم بالاسم.
   //     افتراضيًا = معاينة فقط (مايمسحش). للمسح الفعلي: purgeLegacyAccounts(true)
-  // ════════════════════════════════════════════════════════════════════
-  // ★ أداة مؤقتة (تتشال بعد التجارب): تفريغ الداتابيز بالكامل ما عدا
-  //   credential الدخول (email+password) للحساب الأساسي.
-  //   الاستخدام من الكونسول: wipeKeepMe()
-  // ════════════════════════════════════════════════════════════════════
-  window.wipeKeepMe = function() {
-    const KEEP_EMAIL = 'salamaamirsalama03@gmail.com';
-    const keepKey = (window._dataKey ? window._dataKey(KEEP_EMAIL) : KEEP_EMAIL.replace(/[.#$/\[\]@]/g, '_').toLowerCase());
-    if (!window.confirm('⚠️ هيتمسح كل الداتا (كل الحسابات + اللوحة + الغرف) ما عدا باسورد الدخول بتاعك (' + KEEP_EMAIL + ').\n\nمتأكد؟')) {
-      console.log('[نور] أُلغيت العملية.');
-      return Promise.resolve(false);
-    }
-
-    // مسح فرع كامل (لو القواعد بتسمح بالكتابة على الفرع نفسه)
-    const _wipeBranch = (path) => set(ref(db, path), null)
-      .then(() => console.log('  ✓ ' + path + ' اتمسح'))
-      .catch((e) => console.warn('  ✗ ' + path + ':', e && e.message));
-
-    // مسح فرع فيه مستخدمين: نقرأ المفاتيح ونمسح كل واحد لوحده (القواعد بتسمح بـ /$user بس)
-    //   مع تخطّي مفتاحي (عشان أحافظ على باسورد الدخول).
-    const _wipeUsersBranch = (path) =>
-      get(ref(db, path)).then(s => s.val() || {}).catch(() => ({})).then((obj) => {
-        const keys = Object.keys(obj).filter(k => k !== keepKey);
-        console.log('  ' + path + ': ' + keys.length + ' مستخدم هيتمسح (متخطّي ' + keepKey + ')');
-        return Promise.all(keys.map(k =>
-          set(ref(db, path + '/' + k), null).catch((e) => console.warn('    ✗ ' + path + '/' + k + ':', e && e.message))
-        ));
-      });
-
-    console.log('[نور] بدء التفريغ…');
-    return Promise.all([
-      _wipeBranch('leaderboard'),
-      _wipeBranch('nour_lb'),
-      _wipeBranch('nour_rooms'),
-      _wipeUsersBranch('users'),
-      _wipeUsersBranch('nour_users'),
-    ])
-      .then(() => {
-        // داخل حسابي: امسح بياناتي بس وسيب bypassAuth (باسورد الدخول)
-        return Promise.all([
-          set(ref(db, 'users/' + keepKey + '/data'), null).catch(() => {}),
-          set(ref(db, 'nour_users/' + keepKey + '/data'), null).catch(() => {}),
-        ]);
-      })
-      .then(() => {
-        // ★★ مهم: امسح البيانات المحلية (localStorage) كمان — وإلا بترجع تتزرع
-        //   في Firebase لما تسجّل دخول تاني (دي كانت سبب "النقاط بترجع").
-        //   نحافظ على بيانات دخولي بس (الباسورد المحلي للإيميل بتاعي).
-        try {
-          // احفظ صفّي من nour_users (فيه الباسورد) قبل المسح
-          let _myLocalAuth = null;
-          try {
-            const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
-            if (_lu && _lu[KEEP_EMAIL]) _myLocalAuth = { password: _lu[KEEP_EMAIL].password };
-          } catch (e) {}
-
-          // امسح كل مفاتيح نور المحلية
-          const _toRemove = [];
-          for (let i = 0; i < localStorage.length; i++) {
-            const k = localStorage.key(i);
-            if (k && (k === 'nour_users' || k === 'nour_current_user' || k === 'nour_last_user' ||
-                      k === 'nour_pending_reset' ||
-                      k.startsWith('nour_memorized_') || k.startsWith('nour_mist_cleared_') ||
-                      k.startsWith('nour_mistakes_') || k.startsWith('nour_name_') ||
-                      k.startsWith('nour_name_ts_') || k.startsWith('nour_old_names_') ||
-                      k.startsWith('nour_revprog_') || k.startsWith('nour_surahprog_'))) {
-              _toRemove.push(k);
-            }
-          }
-          _toRemove.forEach(k => localStorage.removeItem(k));
-          console.log('  ✓ localStorage: ' + _toRemove.length + ' مفتاح محلي اتمسح');
-
-          // رجّع بيانات دخولي بس (الباسورد) عشان أقدر أسجّل دخول
-          if (_myLocalAuth) {
-            const _fresh = {}; _fresh[KEEP_EMAIL] = _myLocalAuth;
-            localStorage.setItem('nour_users', JSON.stringify(_fresh));
-            console.log('  ✓ باسورد دخولي المحلي اتحفظ');
-          }
-        } catch (e) { console.warn('localStorage:', e && e.message); }
-        return true;
-      })
-      .then(() => {
-        console.log('%c✅ تم التفريغ بالكامل (Firebase + المحلي) — باسورد دخولك محفوظ. اعمل Refresh.', 'color:#4ade80;font-weight:bold;font-size:14px;');
-        try { if (typeof renderLeaderboard === 'function') renderLeaderboard(); } catch (e) {}
-        return true;
-      })
-      .catch((e) => { console.error('❌ فشل التفريغ:', e); return Promise.reject(e); });
-  };
-
   window.purgeLegacyAccounts = function(confirm) {
     const _isLegacy = (k) => {
       const s = String(k || '');
@@ -3775,35 +3686,16 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     //   ⛔ صفّان بمفتاحين إيميل مختلفين = شخصان مستقلان → عمرهم ما يتخفوا حتى لو
     //      نفس النقاط (القاعدة القديمة كانت بتوحّدهم غلط وتلخبط اللوحة).
     //   كل حساب إيميلي يظهر بنقاطه الحقيقية. التمييز بجزء الإيميل (· tag).
-    //   ★ v80: نخفي البقايا القديمة (مفتاح بالاسم بس، مش إيميل) لو:
-    //     (أ) بصمة النقاط تطابق صف إيميلي، أو
-    //     (ب) مفتاحها/اسمها يطابق الجزء المحلي أو اسم صف إيميلي (نفس الشخص، مفتاح قديم).
-    //   ده بيمنع رجوع الصف القديم اليتيم زي 'mariam' (4763) جنب 'mariam20032008'.
     try {
       const _emailKeys = list.filter(([k]) => _isEmailRow(k));
       const _hideKeys = new Set();
-      const _localOf = (k) => {
-        const s = String(k || '').toLowerCase();
-        if (s.includes('@')) return s.split('@')[0];
-        const m = s.match(/^(.+?)_(gmail|yahoo|hotmail|outlook|icloud|live|msn)(_com)?$/);
-        return m ? m[1] : s;
-      };
       list.forEach(([k, d]) => {
         if (_isEmailRow(k)) return;                  // صف إيميلي = شخص مستقل، ماينخفيش
         if (!d || (d.totalHasanat || 0) <= 0) return;
         const _fp = (d.totalHasanat || 0) + '|' + (d.totalScore || 0) + '|' + (d.totalGames || 0);
-        const _legacyName = (d.name || '').trim().toLowerCase();
-        const _legacyKey = String(k).toLowerCase();
-        const _match = _emailKeys.find(([ek, ed]) => {
-          // (أ) نفس بصمة النقاط بالظبط
-          if (((ed.totalHasanat || 0) + '|' + (ed.totalScore || 0) + '|' + (ed.totalGames || 0)) === _fp) return true;
-          // (ب) مفتاح البقايا أو اسمها = الجزء المحلي للإيميل أو اسم صفّه
-          const _eLoc = _localOf(ek);
-          const _eName = (ed.name || '').trim().toLowerCase();
-          if (_legacyKey && _legacyKey === _eLoc) return true;
-          if (_legacyName && (_legacyName === _eLoc || _legacyName === _eName)) return true;
-          return false;
-        });
+        // لو فيه صف إيميلي بنفس البصمة بالظبط → ده بقايا قديمة لنفس الشخص → اخفيها
+        const _match = _emailKeys.find(([, ed]) =>
+          ((ed.totalHasanat || 0) + '|' + (ed.totalScore || 0) + '|' + (ed.totalGames || 0)) === _fp);
         if (_match) _hideKeys.add(k);
       });
       if (_hideKeys.size > 0) {
@@ -4184,11 +4076,6 @@ function _callWhenReady(fn, args) {
         <button class="mistakes-nav-btn" style="margin-bottom:0;" onclick="showMistakesScreen()">❌ الغلطات</button>
       </div>
 
-    </div>
-
-    <!-- ★ زر تفريغ مؤقت (للتجارب فقط — يتشال قبل الإطلاق) -->
-    <div style="margin:8px 0 16px;">
-      <button onclick="wipeKeepMe()" style="width:100%;padding:11px;border:1px solid rgba(220,60,60,0.5);background:rgba(220,60,60,0.12);color:#ff8a8a;border-radius:12px;font-family:'Cairo',sans-serif;font-size:12px;font-weight:700;cursor:pointer;">🗑️ تفريغ قاعدة البيانات (تجريبي — يتشال قبل الإطلاق)</button>
     </div>
 
     <!-- IN-PROGRESS SURAHS (مخفي من الصفحة الرئيسية) -->
