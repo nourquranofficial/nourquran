@@ -9791,8 +9791,15 @@ function openFullRank() {
       const rk = _rNum <= 3 ? medals[_rNum - 1] : '#' + toArabicNum(_rNum);
       const rawNm = (d && d.name) ? d.name : '';
       const nm = rawNm.includes('@') ? (rawNm.split('@')[0] || 'لاعب') : (rawNm || 'لاعب');
-      // ★ v54: اسم متكرر → اعرض جزء الإيميل صغير للتمييز
-      const tg = (d && d._dup && d._tag) ? ' <span style="font-size:10px;color:rgba(245,217,139,0.45);font-weight:400;">· ' + d._tag + '</span>' : '';
+      // ★ v78: اسم متكرر → اعرض جزء الإيميل للتمييز. احسب الـ tag من المفتاح مباشرة
+      //   (أنضف من الاعتماد على d._tag اللي ممكن يتلغبط بعد توحيد الصفوف)، ونظّف النطاق.
+      let _tagTxt = (d && d._tag) || '';
+      if (!_tagTxt && _isEmailRowR(k)) {
+        _tagTxt = String(k).split('_')[0].split('@')[0];
+      } else if (_tagTxt) {
+        _tagTxt = String(_tagTxt).split('_')[0].split('@')[0];
+      }
+      const tg = (d && d._dup && _tagTxt) ? ' <span style="font-size:10px;color:rgba(245,217,139,0.45);font-weight:400;">· ' + _tagTxt + '</span>' : '';
       const pts = formatBigNum((d && d.totalHasanat) || 0);
       const meTag = me ? ' <span style="color:var(--gold);font-size:11px;font-weight:700;">(أنت)</span>' : '';
       return `<div class="${cls}"><span class="rk">${rk}</span><span class="nm">${nm}${tg}${meTag}</span><span class="pts">${pts} ⭐</span></div>`;
