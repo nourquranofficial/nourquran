@@ -1154,7 +1154,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   // ═══ نسخة التطبيق — بتتحدّث مع كل تسليم ═══
-  window.NOUR_VERSION = 'v83 — 2026-06-14';
+  window.NOUR_VERSION = 'v86 — 2026-06-14';
   console.log('%c🌙 نور ' + window.NOUR_VERSION, 'color:#F5D98B;font-weight:bold;font-size:14px');
   try {
     const _verEl = document.getElementById('appVerTag');
@@ -3101,9 +3101,66 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   window.fbResetUserData = function(username) {
     if (!username) return;
     const key = dataKey(username);
+    const _now = Date.now();
     set(ref(db, 'users/' + key + '/data'), {
-      totalScore: 0, totalGames: 0, totalHasanat: 0, streak: 0, lastPlay: null, updatedAt: Date.now()
+      totalScore: 0, totalGames: 0, totalHasanat: 0, streak: 0, lastPlay: null, updatedAt: _now
     }).catch(() => {});
+    // ★ v84: علامة تصفير دائمة — الدمج التلقائي بيرفض يرجّع أي نقاط أقدم منها
+    set(ref(db, 'users/' + key + '/resetAt'), _now).catch(() => {});
+  };
+
+  // 🔎 v85: تشخيص نقاط — للقراءة فقط (مايكتبش/مايمسحش أي حاجة). شغّله: pointsDebug()
+  //   بيطبع منين كل قيمة نقاط بتيجي عشان نعرف مصدر أي بقايا بالظبط.
+  window.pointsDebug = async function() {
+    const cu = window.currentUser;
+    if (!cu || !cu.username) { console.log('سجّل دخول الأول'); return 'سجّل دخول الأول'; }
+    const out = [];
+    const P = s => out.push(s);
+    const uname = cu.username, canon = dataKey(uname);
+    P('🔎 تشخيص نقاط — ' + uname);
+    P('المفتاح الكانوني: ' + canon);
+    P('1) currentUser: hasanat=' + (cu.totalHasanat || 0) + '  updatedAt=' + (cu.updatedAt || 0));
+    try {
+      const lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
+      P('2) localStorage nour_users:');
+      Object.keys(lu).forEach(k => { const d = lu[k] || {}; P('   • ' + k + ' → hasanat=' + (d.totalHasanat || 0) + ' updatedAt=' + (d.updatedAt || 0)); });
+    } catch (e) { P('2) localStorage: خطأ'); }
+    const [cdata, clb, creset] = await Promise.all([
+      get(ref(db, 'users/' + canon + '/data')).then(s => s.val()).catch(() => null),
+      get(ref(db, LB_PATH + canon)).then(s => s.val()).catch(() => null),
+      get(ref(db, 'users/' + canon + '/resetAt')).then(s => s.val()).catch(() => null),
+    ]);
+    P('3) Firebase users/' + canon + '/data: ' + (cdata ? ('hasanat=' + (cdata.totalHasanat || 0) + ' updatedAt=' + (cdata.updatedAt || 0)) : '∅'));
+    P('4) Firebase leaderboard/' + canon + ': ' + (clb ? ('hasanat=' + (clb.totalHasanat || 0) + ' updatedAt=' + (clb.updatedAt || 0)) : '∅'));
+    P('5) resetAt: ' + (creset || '∅ (لسه ما اتعملش تصفير بـ v84+)'));
+    const enc = window._encodeKey || (s => String(s || '').toLowerCase());
+    let names = [];
+    if (cu.name && !String(cu.name).includes('@')) names.push(cu.name);
+    try { const a = JSON.parse(localStorage.getItem('nour_old_names_' + uname) || '[]'); if (Array.isArray(a)) names = names.concat(a); } catch (e) {}
+    try { const fo = await get(ref(db, 'users/' + canon + '/oldNames')).then(s => s.val()).catch(() => null); if (Array.isArray(fo)) names = names.concat(fo); } catch (e) {}
+    const cands = Array.from(new Set(names.map(n => enc(String(n).trim())).filter(k => k && k !== canon && !/^guest__/.test(k))));
+    P('6) مفاتيح يتيمة محتملة: ' + (cands.length ? cands.join(', ') : 'مفيش'));
+    for (const k of cands) {
+      const [kd, klb, kbpa] = await Promise.all([
+        get(ref(db, 'users/' + k + '/data')).then(s => s.val()).catch(() => null),
+        get(ref(db, LB_PATH + k)).then(s => s.val()).catch(() => null),
+        get(ref(db, 'users/' + k + '/bypassAuth')).then(s => s.exists()).catch(() => false),
+      ]);
+      P('   ▸ ' + k + ': data=' + (kd ? ((kd.totalHasanat || 0) + '@' + (kd.updatedAt || 0)) : '∅')
+        + '  lb=' + (klb ? ((klb.totalHasanat || 0) + '@' + (klb.updatedAt || 0)) : '∅')
+        + '  باسورد=' + (kbpa ? 'نعم(محمي)' : 'لأ(يتيم)'));
+    }
+    try {
+      const all = await get(ref(db, LB_PATH)).then(s => s.val() || {}).catch(() => ({}));
+      const myNm = (cu.name || '').trim().toLowerCase();
+      const m = Object.keys(all).filter(k => { const d = all[k] || {}; return d.name && String(d.name).trim().toLowerCase() === myNm; });
+      P('7) صفوف leaderboard باسمك (' + (cu.name || '') + '): ' + (m.length ? '' : 'مفيش'));
+      m.forEach(k => { const d = all[k] || {}; P('   • ' + k + ' → ' + (d.totalHasanat || 0) + '@' + (d.updatedAt || 0)); });
+    } catch (e) {}
+    const txt = out.join('\n');
+    console.log('%c' + txt, 'font-family:monospace;font-size:12px');
+    try { alert(txt); } catch (e) {}
+    return txt;
   };
 
   // ★ تصفير لوحة الشرف بـ set() مباشرة (يتجاوز الـMAX)
@@ -3502,23 +3559,47 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
           // ★ v71: اقرا bypassAuth بتاع المرشّح — لو عنده باسورد مستقل = حساب حقيقي منفصل
           reads.push(get(ref(db, 'users/' + k + '/bypassAuth')).then(s => ['bpa', k, s.val()]).catch(() => ['bpa', k, null]));
         });
-        reads.push(get(ref(db, LB_PATH + canon)).then(s => ['c', canon, s.val()]).catch(() => ['c', canon, null]));
-        reads.push(get(ref(db, 'users/' + canon + '/data')).then(s => ['c', canon, s.val()]).catch(() => ['c', canon, null]));
+        reads.push(get(ref(db, LB_PATH + canon)).then(s => ['clb', canon, s.val()]).catch(() => ['clb', canon, null]));
+        reads.push(get(ref(db, 'users/' + canon + '/data')).then(s => ['cdata', canon, s.val()]).catch(() => ['cdata', canon, null]));
+        reads.push(get(ref(db, 'users/' + canon + '/resetAt')).then(s => ['reset', canon, s.val()]).catch(() => ['reset', canon, null]));   // ★ v84: علامة تصفير دائمة
         return Promise.all(reads).then(rows => {
-          let H = cu.totalHasanat || 0, S = cu.totalScore || 0, G = cu.totalGames || 0;
-          let found = false;
-          // ★ v71: المرشّحون اللي عندهم bypassAuth مستقل = حسابات حقيقية منفصلة
-          //   (نفس الاسم بس إيميل تاني وباسورد خاص) → ممنوع دمجها أو مسحها نهائياً.
+          // ★ v85: الحقيقة الحالية = حسابي. اليتيم القديم ما يطغاش — لا بعد تصفير ولا
+          //   حتى من غير تصفير لو عندي نقاط بالفعل. القاعدة:
+          //   • لو اليتيم أقدم من آخر تصفير → بقايا، ارفض.
+          //   • لو حسابي عنده نقاط بالفعل واليتيم مش أحدث من نشاطي → بقايا، ارفض (LWW).
+          //   • غير كده (حسابي فاضي = استرجاع شرعي، أو اليتيم نشاطه أحدث) → ادمج.
+          //   في كل الأحوال اليتيم يتشال (مصدر البقايا يختفي نهائياً).
           const _protectedKeys = new Set();
+          let _resetAt = 0;
           rows.forEach(([t, k, v]) => {
             if (t === 'bpa' && v && v.passHash) _protectedKeys.add(k);
+            if (t === 'reset' && typeof v === 'number') _resetAt = Math.max(_resetAt, v);
           });
           const _safeCand = cand.filter(k => !_protectedKeys.has(k));
+          // ١) الحقيقة الحالية = cu + بيانات الحساب الكانوني (مش leaderboard — ده إسقاط)
+          //    مع طابع زمني لنشاطي (cTs) وهل عندي نقاط أصلاً (_canonHasPts)
+          let H = cu.totalHasanat || 0, S = cu.totalScore || 0, G = cu.totalGames || 0;
+          let cTs = cu.updatedAt || 0;
+          let _canonHasPts = (H > 0 || S > 0 || G > 0);
+          rows.forEach(([t, k, v]) => {
+            if (!v || t !== 'cdata') return;
+            H = Math.max(H, v.totalHasanat || 0);
+            S = Math.max(S, v.totalScore || 0);
+            G = Math.max(G, v.totalGames || 0);
+            if ((v.updatedAt || 0) > cTs) cTs = v.updatedAt || 0;
+            if ((v.totalHasanat || 0) > 0 || (v.totalScore || 0) > 0 || (v.totalGames || 0) > 0) _canonHasPts = true;
+          });
+          // ٢) المفاتيح اليتيمة: تُدمج بشروط (تحترم التصفير + LWW لو عندي نقاط)
+          let found = false;
           rows.forEach(([t, k, v]) => {
             if (!v) return;
-            if (t === 'bpa') return; // مش بيانات نقاط
-            if (_protectedKeys.has(k)) return; // حساب محمي — ماياخدش منه نقاط ولا يتمسح
-            if (t === 'x') found = true; // فيه حساب قديم بنفس أسمائي (ومالوش باسورد مستقل)
+            if (t !== 'x') return; // بس المفاتيح اليتيمة (مش bpa/reset/clb/cdata)
+            if (_protectedKeys.has(k)) return; // حساب محمي مستقل — ماياخدش منه ولا يتمسح
+            found = true; // فيه يتيم → هيتشال حتى لو ما اندمجش
+            const _oTs = v.updatedAt || 0;
+            if (_oTs <= _resetAt) return;                 // بقايا قبل/عند آخر تصفير → ارفض
+            if (_canonHasPts && _oTs <= cTs) return;       // ★ عندي نقاط واليتيم مش أحدث → بقايا، ارفض
+            // غير كده: حسابي فاضي (استرجاع) أو اليتيم نشاطه أحدث → ادمج (max)
             H = Math.max(H, v.totalHasanat || 0);
             S = Math.max(S, v.totalScore || 0);
             G = Math.max(G, v.totalGames || 0);
@@ -4121,7 +4202,7 @@ function _callWhenReady(fn, args) {
     <div class="stats-row">
       <div class="stat-card" style="cursor:default;display:flex;align-items:center;justify-content:center;"><div id="totalScore" style="font-size:12px;font-weight:700;line-height:1.6;text-align:center;color:var(--gold-light);font-family:'Cairo',sans-serif;"></div></div>
       <div class="stat-card"><div class="stat-val" id="totalGames">٠</div><div class="stat-lbl">جلسة مكتملة</div></div>
-      <div class="stat-card"><div class="stat-val" id="totalHasanat">٠</div><div class="stat-lbl">نقاط ⭐</div></div>
+      <div class="stat-card" onclick="window._pdTap=(window._pdTap||0)+1; if(window._pdTap>=5){window._pdTap=0; if(typeof pointsDebug==='function')pointsDebug();} setTimeout(()=>{window._pdTap=0;},2500);"><div class="stat-val" id="totalHasanat">٠</div><div class="stat-lbl">نقاط ⭐</div></div>
     </div>
 
     <!-- LEVELS -->
