@@ -1154,7 +1154,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   // ═══ نسخة التطبيق — بتتحدّث مع كل تسليم ═══
-  window.NOUR_VERSION = 'v72 — 2026-06-13';
+  window.NOUR_VERSION = 'v71 — 2026-06-13';
   console.log('%c🌙 نور ' + window.NOUR_VERSION, 'color:#F5D98B;font-weight:bold;font-size:14px');
   try {
     const _verEl = document.getElementById('appVerTag');
@@ -1520,15 +1520,8 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
             .catch((e2) => {
               const _c2 = e2 && e2.code;
               if (_c2 === 'auth/email-already-in-use' || _c2 === 'auth/email-already-exists') {
-                // ★ v72: الإيميل موجود في Auth بباسورد تاني، لكن الباسورد ده يطابق
-                //   المحفوظ محلياً على الجهاز → ده دليل إن bypassAuth/Auth اتلخبطوا
-                //   من دمج قديم. نصلّح bypassAuth تلقائياً للباسورد ده ونسمح بالدخول.
-                //   (إصلاح ذاتي — مايلمسش أي حساب تاني، بيكتب مفتاح الإيميل ده بس)
-                console.log('[نور-دخول] 🔧 إصلاح ذاتي: bypassAuth كان متلخبط — بيتصلّح للباسورد المحلي');
-                set(ref(db, 'users/' + _key + '/bypassAuth'), {
-                  email: fbEmail, passHash: _shaP, updatedAt: Date.now(), changedAt: 0,
-                }).then(() => { _saveLocal(); _finish(onSuccess); })
-                  .catch(() => { _saveLocal(); _finish(onSuccess); });
+                // الإيميل موجود في Auth بباسورد مختلف → الباسورد ده غلط فعلاً
+                _finish(onError, 'الإيميل أو كلمة المرور خاطئة');
               } else if (_c2 === 'auth/network-request-failed') {
                 _finish(onError, 'في مشكلة في الإنترنت — اتأكد من اتصالك');
               } else {
