@@ -1154,7 +1154,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   // ═══ نسخة التطبيق — بتتحدّث مع كل تسليم ═══
-  window.NOUR_VERSION = 'v73 — 2026-06-13';
+  window.NOUR_VERSION = 'v74 — 2026-06-13';
   console.log('%c🌙 نور ' + window.NOUR_VERSION, 'color:#F5D98B;font-weight:bold;font-size:14px');
   try {
     const _verEl = document.getElementById('appVerTag');
@@ -2758,6 +2758,11 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     return String(k || '')
       .replace(/^guest__/, '')
       .replace(/[@.#$\/\[\]]/g, '_')
+      .replace(/_+/g, '_')
+      // ★ v74: شيل لاحقة نطاق الإيميل عشان المفتاح القديم (الجزء المحلي بس)
+      //   والمفتاح الكانوني (بالنطاق) يتوحّدوا في صف واحد — يمنع تكرار نفس الحساب.
+      .replace(/_(gmail|yahoo|hotmail|outlook|icloud|live|msn)(_com)?$/i, '')
+      .replace(/_com$/i, '')
       .toLowerCase();
   };
   window._mergeLbEntries = function(entries) {
@@ -3608,23 +3613,10 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
           try { return (JSON.parse(localStorage.getItem('nour_old_names_' + _cu0.username) || '[]') || []).map(x => String(x).trim().toLowerCase()); }
           catch(e) { return []; }
         })();
-        const _emailLoc0 = String(_cu0.username || '').toLowerCase().includes('@')
-          ? String(_cu0.username).toLowerCase().split('@')[0] : '';
         // صفّي = أي صف مفتاحه يطابق مفتاحي، أو اسمه يطابق اسمي الحالي، أو اسمه من أسمائي القديمة
         const _isMine0 = (k, d) => {
           if (_mk0 && (k === _mk0(_cu0.username, false) || k === _mk0(_cu0.username, true))) return true;
           if (_norm0(k) === _norm0(_canon0)) return true;
-          // ★ v73: مطابقة جزء الإيميل — صفّي القديم بنفس الجزء المحلي من إيميلي
-          //   (بيمنع ظهوري مرتين: "أنت" + صف بالـ tag بنفس النقاط). بنقارن الجزء
-          //   المحلي لمفتاح الصف (قبل @ أو _gmail) بالجزء المحلي لإيميلي — لازم يتطابقوا
-          //   بالكامل، فحساب تاني بإيميل مختلف (حتى لو بادئته متشابهة) مايتأثرش.
-          if (_emailLoc0) {
-            const _kL = String(k).toLowerCase();
-            const _kLoc = _kL.includes('@') ? _kL.split('@')[0]
-                        : (_kL.includes('_gmail') || _kL.includes('_yahoo') || _kL.includes('_hotmail') || _kL.includes('_outlook'))
-                          ? _kL.split('_')[0] : _kL;
-            if (_kLoc === _emailLoc0) return true;
-          }
           // مطابقة بالاسم — بس لصفوف legacy/guest. صف بمفتاح إيميل تاني = شخص تاني حقيقي
           if (!_isEmailRow(k) && d && d.name && !d.name.includes('@')) {
             const _dName = d.name.trim().toLowerCase();
