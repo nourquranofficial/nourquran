@@ -1112,7 +1112,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
 .sheet-section { font-size:12px; color:rgba(245,217,139,0.5); margin-bottom:8px; margin-top:14px; }
 
 /* ===== جدول الترتيب العام ===== */
-.rank-list { max-height:62vh; overflow-y:auto; padding:2px; margin:0 -2px; }
+.rank-list { max-height:min(62vh,520px); overflow-y:auto; padding:2px; margin:0 -2px; -webkit-overflow-scrolling:touch; }
 .rank-row {
   display:flex; align-items:center; gap:12px;
   padding:11px 14px; margin-bottom:7px; border-radius:14px;
@@ -1154,7 +1154,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   // ═══ نسخة التطبيق — بتتحدّث مع كل تسليم ═══
-  window.NOUR_VERSION = 'v69 — 2026-06-13';
+  window.NOUR_VERSION = 'v70 — 2026-06-13';
   console.log('%c🌙 نور ' + window.NOUR_VERSION, 'color:#F5D98B;font-weight:bold;font-size:14px');
   try {
     const _verEl = document.getElementById('appVerTag');
@@ -3591,6 +3591,13 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
           });
         }
       }
+    } catch (e) {}
+
+    // ★ تشخيص مؤقت — عدد الصفوف الخام من Firebase مقابل المعروض
+    try {
+      const _raw = Object.entries(data || {}).filter(([k, d]) => d && d.name && (d.totalHasanat || 0) > 0);
+      console.log('[نور-لوحة] صفوف Firebase الخام (>0 نقطة): ' + _raw.length +
+        ' | الأسماء: ' + _raw.map(([k, d]) => d.name + '(' + (d.totalHasanat||0) + ')').join(' ، '));
     } catch (e) {}
 
     // ★ v69 (ترقيم المالك): إخفاء بقايا نفس الحساب فقط — التعادل الحقيقي بيظهر بمركز مكرر
@@ -9713,6 +9720,11 @@ function openFullRank() {
     }).join('');
   }
   overlay.classList.add('open');
+  // ★ عدّاد اللاعبين في العنوان + تلميح التمرير
+  try {
+    const _t = overlay.querySelector('.sheet-title');
+    if (_t && Array.isArray(list)) _t.textContent = '🏆 الترتيب العام (' + toArabicNum(list.length) + ' لاعب)';
+  } catch (e) {}
   // مرّر لصفّك تلقائياً لو موجود
   setTimeout(() => { const m = body.querySelector('.rank-row.me'); if (m) m.scrollIntoView({ block: 'center' }); }, 250);
 }
