@@ -1154,7 +1154,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   // ═══ نسخة التطبيق — بتتحدّث مع كل تسليم ═══
-  window.NOUR_VERSION = 'v79 — 2026-06-13';
+  window.NOUR_VERSION = 'v80 — 2026-06-14';
   console.log('%c🌙 نور ' + window.NOUR_VERSION, 'color:#F5D98B;font-weight:bold;font-size:14px');
   try {
     const _verEl = document.getElementById('appVerTag');
@@ -2993,6 +2993,99 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       };
     }).catch(e => console.error('fbSaveUser error:', e));
   };
+
+  // ★★ v80: فحص تكرار اسم العرض عالمياً (للحسابات الإيميلية فقط — الضيوف خارج الموضوع) ★★
+  //   بيقرا أسماء كل الحسابات من لوحة الشرف (مصدر خفيف وكامل: كل حساب اتسجّل له صفّ).
+  //   بيطبّع الاسم (trim + مسافات مفردة + حروف صغيرة) ويستثني حساب المستخدم نفسه.
+  //   بيرجّع Promise<boolean>. لو القراءة فشلت بيرمي خطأ → اللي بينده بيتعامل معاه (يمنع وقتها).
+  const _normName = (n) => String(n || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  window._isNameTaken = async function(name, myEmail) {
+    const target = _normName(name);
+    if (!target) return false;
+    let myKey = null, myNorm = null;
+    try { myKey = myEmail ? dataKey(myEmail) : null; } catch (e) {}
+    try { myNorm = (myKey && window._normLbKey) ? window._normLbKey(myKey) : myKey; } catch (e) {}
+    const snap = await get(ref(db, LB_PATH));
+    const data = snap.val() || {};
+    for (const k in data) {
+      if (!Object.prototype.hasOwnProperty.call(data, k)) continue;
+      if (String(k).startsWith('guest__')) continue;          // الضيوف برّه
+      const d = data[k] || {};
+      if (d.isGuest) continue;
+      // استثنِ حسابي أنا (بالمفتاح المباشر أو المطبّع)
+      if (myKey && k === myKey) continue;
+      if (myNorm && window._normLbKey && window._normLbKey(k) === myNorm) continue;
+      const nm = d.name;
+      if (!nm || String(nm).includes('@')) continue;
+      if (_normName(nm) === target) return true;
+    }
+    return false;
+  };
+
+  // ★★ v80: أداة أدمن لمرة واحدة — ترقّم الأسماء المتكررة الموجودة حالياً (بدون حذف أي حاجة) ★★
+  //   fixDuplicateNames()      → عرض بس (dry-run): مين هيتغيّر اسمه لإيه.
+  //   fixDuplicateNames(true)  → تطبيق فعلي.
+  //   القاعدة: الأعلى نقاطاً يحتفظ بالاسم الأصلي، والباقي ياخدوا " 2"، " 3"...
+  //            عند تساوي النقاط الأقدم (updatedAt أصغر) يحتفظ بالاسم.
+  //   بتكتب حقل الاسم فقط في leaderboard/<key> و users/<key> و users/<key>/data — النقاط ما تتلمسش.
+  window.fixDuplicateNames = async function(apply) {
+    const snap = await get(ref(db, LB_PATH));
+    const data = snap.val() || {};
+    const rows = [];
+    const allNames = new Set();                  // كل الأسماء المطبّعة الموجودة (لتفادي تصادم الرقم الجديد)
+    for (const k in data) {
+      if (!Object.prototype.hasOwnProperty.call(data, k)) continue;
+      if (String(k).startsWith('guest__')) continue;
+      const d = data[k] || {};
+      if (d.isGuest) continue;
+      const nm = d.name;
+      if (!nm || String(nm).includes('@')) continue;
+      const norm = _normName(nm);
+      if (!norm) continue;
+      allNames.add(norm);
+      rows.push({ key: k, name: String(nm).trim(), norm, h: d.totalHasanat || 0, ts: d.updatedAt || 0 });
+    }
+    const groups = {};
+    rows.forEach(r => { (groups[r.norm] = groups[r.norm] || []).push(r); });
+    const plan = [];
+    Object.keys(groups).forEach(norm => {
+      const g = groups[norm];
+      if (g.length < 2) return;                  // مش متكرر
+      g.sort((a, b) => (b.h - a.h) || (a.ts - b.ts));   // الأعلى نقاطاً أولاً؛ ثم الأقدم
+      const base = g[0].name;                    // الاسم الأصلي يحتفظ به صاحب أعلى نقاط
+      let counter = 2;
+      for (let i = 1; i < g.length; i++) {
+        let candidate, candNorm;
+        do {
+          candidate = base + ' ' + counter;
+          candNorm  = _normName(candidate);
+          counter++;
+        } while (allNames.has(candNorm));        // تجنّب التصادم مع اسم موجود فعلاً
+        allNames.add(candNorm);
+        plan.push({ key: g[i].key, from: g[i].name, to: candidate });
+      }
+    });
+    if (!plan.length) { console.log('%c✅ مفيش أسماء متكررة — مفيش حاجة تتغيّر.', 'color:#7ED957;font-weight:bold;'); return plan; }
+    console.log('%c🔧 خطة ترقيم التكرارات (' + plan.length + ' حساب):', 'color:#F5D98B;font-weight:bold;font-size:13px;');
+    plan.forEach(p => console.log('  • "' + p.from + '"  →  "' + p.to + '"     [' + p.key + ']'));
+    if (!apply) {
+      console.log('%cℹ️ ده عرض بس (dry-run). لو الخطة تمام شغّل:  fixDuplicateNames(true)', 'color:#9ad;font-weight:bold;');
+      return plan;
+    }
+    const now = Date.now();
+    let done = 0;
+    for (const p of plan) {
+      try {
+        await update(ref(db, LB_PATH + p.key),          { name: p.to, nameUpdatedAt: now });
+        await update(ref(db, 'users/' + p.key),         { name: p.to, nameUpdatedAt: now });
+        await update(ref(db, 'users/' + p.key + '/data'), { name: p.to, nameUpdatedAt: now });
+        done++;
+      } catch (e) { console.error('فشل تحديث ' + p.key, e); }
+    }
+    console.log('%c✅ تم ترقيم ' + done + '/' + plan.length + ' حساب. النقاط والبيانات ما اتلمستش.', 'color:#7ED957;font-weight:bold;font-size:13px;');
+    return plan;
+  };
+
   // رفع علامة مسح الغلطات فقط (من غير ما نلمس النقط) — تتوحّد عبر الأجهزة
   window.fbMarkMistakesCleared = function(username, isGuest) {
     if (!username) return;
@@ -3710,40 +3803,10 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       }
     } catch (e) {}
 
-    // ★ v54: علّم الأسماء المتكررة + حضّر الـ tag (جزء الإيميل) للتمييز في العرض
-    //   ★ v77: شيل الأرقام القديمة (Mariam ٢) فقط لو الاسم الأساسي متكرر فعلاً —
-    //   التمييز الصح بيبقى بجزء الإيميل مش برقم. أسماء فيها أرقام مقصودة ومش
-    //   متكررة ما تتلمسش.
-    try {
-      // احسب الاسم الأساسي (بدون رقم لاحق) لكل صف
-      const _baseOf = (nm) => String(nm || '').replace(/\s*[١٢٣٤٥٦٧٨٩٠\d]+\s*$/, '').trim();
-      const _baseCnt = {};
-      for (const [, d] of list) {
-        if (d && d.name && !d.name.includes('@')) {
-          const b = _baseOf(d.name).toLowerCase();
-          if (b) _baseCnt[b] = (_baseCnt[b] || 0) + 1;
-        }
-      }
-      for (const [, d] of list) {
-        if (d && d.name && !d.name.includes('@')) {
-          const b = _baseOf(d.name);
-          if (b && _baseCnt[b.toLowerCase()] > 1) d.name = b; // متكرر → شيل الرقم
-        }
-      }
-      const _cntNm = {};
-      for (const [, d] of list) {
-        if (d && d.name && !d.name.includes('@')) {
-          const n = d.name.trim().toLowerCase();
-          _cntNm[n] = (_cntNm[n] || 0) + 1;
-        }
-      }
-      for (const [k, d] of list) {
-        if (!d) continue;
-        const n = (d.name || '').trim().toLowerCase();
-        d._dup = !!(n && _cntNm[n] > 1);
-        d._tag = d.tag || (_isEmailRow(k) ? String(k).split('_')[0] : null);
-      }
-    } catch (e) {}
+    // ★ v80: اتشال منطق التمييز بالأسماء المتكررة (شيل الرقم + tag جزء الإيميل · ).
+    //   الأسماء بقت فريدة بالمنع عند الإنشاء/التعديل، فالأسماء بتتعرض زي ما هي
+    //   متخزّنة بالظبط من غير أي رقم أو لاحقة إيميل. (الحقول _dup/_tag كانت عرض بس
+    //   ومش بتأثر في الترتيب — فلما ما تتحسبش بتفضل undefined والـ tag ما بيظهرش.)
 
     window._lbAllList = list;
 
@@ -5031,7 +5094,7 @@ function doLogin() {
   loginSuccess(user, { ..._freshOfflineData, name: _offlineName, email: user });
 }
 
-function doRegister() {
+function doRegister(_nameChecked) {
   const name  = document.getElementById('regName').value.trim();
   const email = document.getElementById('regEmail').value.trim().toLowerCase();
   const pass  = document.getElementById('regPass').value;
@@ -5042,6 +5105,25 @@ function doRegister() {
   if (!email.includes('@') || !email.includes('.')) { showLoginErr('الإيميل غير صحيح — تأكد من كتابته صح'); return; }
   if (pass.length < 4) { showLoginErr('كلمة المرور يجب أن تكون ٤ أحرف على الأقل'); return; }
   if (pass !== pass2) { showLoginErr('كلمتا المرور غير متطابقتين'); return; }
+
+  // ★ v80: امنع الاسم المحجوز قبل إنشاء حساب Auth (عشان ما نعملش حساب يتيم لو الاسم متكرر)
+  if (!_nameChecked) {
+    const _rb0 = document.querySelector('#registerForm .login-btn');
+    if (_rb0) { _rb0.disabled = true; }
+    showLoginErr('🔍 بنتأكد إن الاسم متاح...');
+    Promise.resolve((typeof window._isNameTaken === 'function') ? window._isNameTaken(name, email) : false)
+      .then((taken) => {
+        if (_rb0) { _rb0.disabled = false; }
+        if (taken) { showLoginErr('الاسم ده محجوز اختار اسم تاني'); return; }
+        showLoginErr('');
+        doRegister(true);   // الاسم متاح — أكمل التسجيل
+      })
+      .catch(() => {
+        if (_rb0) { _rb0.disabled = false; }
+        showLoginErr('⚠️ مش قادرين نتأكد إن الاسم متاح — اتأكد من النت وحاول تاني');
+      });
+    return;
+  }
 
   showLoginErr('');
   const _regBtn = document.querySelector('#registerForm .login-btn');
@@ -5628,7 +5710,7 @@ function editDisplayName() {
   // إغلاق بالضغط على الخلفية
   overlay.onclick = (e) => { if (e.target === overlay) _cancelNameEdit(); };
 }
-function _saveNameEdit() {
+function _saveNameEdit(_nameChecked) {
   const inp = document.getElementById('_nameEditInput');
   if (!inp) return;
   const n = inp.value.trim();
@@ -5636,6 +5718,17 @@ function _saveNameEdit() {
   if (!currentUser || !currentUser.username) return;
 
   const _email = currentUser.username;
+
+  // ★ v80: امنع الاسم المحجوز لحساب تاني قبل الحفظ (حسابي أنا مستثنى داخل _isNameTaken)
+  if (!_nameChecked) {
+    Promise.resolve((typeof window._isNameTaken === 'function') ? window._isNameTaken(n, _email) : false)
+      .then((taken) => {
+        if (taken) { showToast('الاسم ده محجوز اختار اسم تاني'); return; }
+        _saveNameEdit(true);   // الاسم متاح — أكمل الحفظ
+      })
+      .catch(() => { showToast('\u26a0\ufe0f مش قادرين نتأكد إن الاسم متاح — اتأكد من النت وحاول تاني'); });
+    return;
+  }
 
   // ─── حفظ الاسم القديم قبل أي تغيير ───
   const _oldName = (currentUser.name || '').trim();
