@@ -1154,7 +1154,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   // ═══ نسخة التطبيق — بتتحدّث مع كل تسليم ═══
-  window.NOUR_VERSION = 'v83 — 2026-06-13';
+  window.NOUR_VERSION = 'v84 — 2026-06-13';
   console.log('%c🌙 نور ' + window.NOUR_VERSION, 'color:#F5D98B;font-weight:bold;font-size:14px');
   try {
     const _verEl = document.getElementById('appVerTag');
@@ -3356,8 +3356,12 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     return get(ref(db, 'users/' + keepKey + '/bypassAuth')).then(s => (s.exists() ? s.val() : null)).catch(() => null)
       .then((myBypass) => {
         console.log('[نور] الـ bypassAuth المحفوظ:', myBypass ? 'موجود ✓' : 'مش موجود ✗');
-        // ٢) امسح كل الجذر
-        return set(ref(db, '/'), null).then(() => myBypass);
+        // ٢) امسح كل فرع لوحده (مش من الجذر — Firebase بيرفض set('/', null))
+        return Promise.all([
+          set(ref(db, 'leaderboard'), null).catch((e) => console.warn('leaderboard:', e && e.message)),
+          set(ref(db, 'users'), null).catch((e) => console.warn('users:', e && e.message)),
+          set(ref(db, 'nour_rooms'), null).catch((e) => console.warn('nour_rooms:', e && e.message)),
+        ]).then(() => myBypass);
       })
       .then((myBypass) => {
         // ٣) رجّع bypassAuth بتاعي بس (عشان أقدر أدخل تاني)
