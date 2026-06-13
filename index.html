@@ -1154,7 +1154,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   // ═══ نسخة التطبيق — بتتحدّث مع كل تسليم ═══
-  window.NOUR_VERSION = 'v81 — 2026-06-13';
+  window.NOUR_VERSION = 'v83 — 2026-06-13';
   console.log('%c🌙 نور ' + window.NOUR_VERSION, 'color:#F5D98B;font-weight:bold;font-size:14px');
   try {
     const _verEl = document.getElementById('appVerTag');
@@ -3340,6 +3340,40 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   // ─── حذف كل الحسابات القديمة بدون إيميل (مفاتيح بالاسم — legacy) ───
   //     مفتاح الإيميل دايمًا فيه "_" (من @ و .). المفتاح بدون "_" = حساب قديم بالاسم.
   //     افتراضيًا = معاينة فقط (مايمسحش). للمسح الفعلي: purgeLegacyAccounts(true)
+  // ════════════════════════════════════════════════════════════════════
+  // ★ أداة مؤقتة (تتشال بعد التجارب): تفريغ الداتابيز بالكامل ما عدا
+  //   credential الدخول (email+password) للحساب الأساسي.
+  //   الاستخدام من الكونسول: wipeKeepMe()
+  // ════════════════════════════════════════════════════════════════════
+  window.wipeKeepMe = function() {
+    const KEEP_EMAIL = 'salamaamirsalama03@gmail.com';
+    const keepKey = (window._dataKey ? window._dataKey(KEEP_EMAIL) : KEEP_EMAIL.replace(/[.#$/\[\]@]/g, '_').toLowerCase());
+    if (!window.confirm('⚠️ هيتمسح كل الداتا (كل الحسابات + اللوحة + الغرف) ما عدا باسورد الدخول بتاعك (' + KEEP_EMAIL + ').\n\nمتأكد؟')) {
+      console.log('[نور] أُلغيت العملية.');
+      return Promise.resolve(false);
+    }
+    // ١) اقرأ bypassAuth بتاعي عشان أحافظ عليه
+    return get(ref(db, 'users/' + keepKey + '/bypassAuth')).then(s => (s.exists() ? s.val() : null)).catch(() => null)
+      .then((myBypass) => {
+        console.log('[نور] الـ bypassAuth المحفوظ:', myBypass ? 'موجود ✓' : 'مش موجود ✗');
+        // ٢) امسح كل الجذر
+        return set(ref(db, '/'), null).then(() => myBypass);
+      })
+      .then((myBypass) => {
+        // ٣) رجّع bypassAuth بتاعي بس (عشان أقدر أدخل تاني)
+        if (myBypass) {
+          return set(ref(db, 'users/' + keepKey + '/bypassAuth'), myBypass).then(() => true);
+        }
+        return true;
+      })
+      .then(() => {
+        console.log('%c✅ تم تفريغ الداتابيز بالكامل — باسورد دخولك محفوظ. اعمل Refresh.', 'color:#4ade80;font-weight:bold;');
+        try { if (typeof renderLeaderboard === 'function') renderLeaderboard(); } catch (e) {}
+        return true;
+      })
+      .catch((e) => { console.error('❌ فشل التفريغ:', e); return Promise.reject(e); });
+  };
+
   window.purgeLegacyAccounts = function(confirm) {
     const _isLegacy = (k) => {
       const s = String(k || '');
@@ -3765,15 +3799,6 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     } catch (e) {}
 
     window._lbAllList = list;
-    // ★★ تشخيص مؤقت v81 — اطبع المفاتيح النهائية لكشف سبب التكرار ★★
-    try {
-      console.log('[نور-تشخيص] المفاتيح النهائية في اللوحة (' + list.length + ' صف):');
-      list.forEach(([k, d], i) => {
-        console.log('  ' + (i+1) + ') مفتاح:[' + k + '] | norm:[' + (window._normLbKey ? window._normLbKey(k) : '?') + '] | اسم:' + ((d&&d.name)||'') + ' | نقاط:' + ((d&&d.totalHasanat)||0));
-      });
-      const _cuDbg = window.currentUser;
-      if (_cuDbg) console.log('[نور-تشخيص] أنا: username=' + _cuDbg.username + ' | name=' + _cuDbg.name + ' | canon=' + (window._dataKey ? window._dataKey(_cuDbg.username) : '?'));
-    } catch (e) {}
 
     // ★★ مزامنة مسح الغلطات فقط — النقاط بقت تتزامن عبر users/data (مصدر الحقيقة) مش من اللوحة ★★
     try {
@@ -4104,6 +4129,11 @@ function _callWhenReady(fn, args) {
         <button class="mistakes-nav-btn" style="margin-bottom:0;" onclick="showMistakesScreen()">❌ الغلطات</button>
       </div>
 
+    </div>
+
+    <!-- ★ زر تفريغ مؤقت (للتجارب فقط — يتشال قبل الإطلاق) -->
+    <div style="margin:8px 0 16px;">
+      <button onclick="wipeKeepMe()" style="width:100%;padding:11px;border:1px solid rgba(220,60,60,0.5);background:rgba(220,60,60,0.12);color:#ff8a8a;border-radius:12px;font-family:'Cairo',sans-serif;font-size:12px;font-weight:700;cursor:pointer;">🗑️ تفريغ قاعدة البيانات (تجريبي — يتشال قبل الإطلاق)</button>
     </div>
 
     <!-- IN-PROGRESS SURAHS (مخفي من الصفحة الرئيسية) -->
