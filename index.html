@@ -1154,7 +1154,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   // ═══ نسخة التطبيق — بتتحدّث مع كل تسليم ═══
-  window.NOUR_VERSION = 'v77 — 2026-06-13';
+  window.NOUR_VERSION = 'v78 — 2026-06-13';
   console.log('%c🌙 نور ' + window.NOUR_VERSION, 'color:#F5D98B;font-weight:bold;font-size:14px');
   try {
     const _verEl = document.getElementById('appVerTag');
@@ -3793,6 +3793,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
 
     // تحديد اللاعب الحالي (key مباشر أو اسم)
     const cu = window.currentUser;
+    const _isEmailRowP = (k) => { const s = String(k || ''); return s.includes('_') && !s.startsWith('guest__') && !/^u[0-9a-f]{4,}$/i.test(s); };
     const isMyEntry = (key, d) => {
       if (!cu) return false;
       if (window._makeKey) {
@@ -3800,7 +3801,14 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         if (key === window._makeKey(cu.username, false)) return true;
         if (key === window._makeKey(cu.username, true)) return true;
       }
-      // مقارنة اسم العرض (d.name) مع اسم العرض للمستخدم الحالي (cu.name) — وليس الإيميل
+      // ★ v78: مفتاح كانوني/مطبّع يطابقني؟
+      try {
+        const _nk = window._normLbKey, _ck = window._dataKey ? window._dataKey(cu.username) : cu.username;
+        if (_nk && _nk(key) === _nk(_ck)) return true;
+      } catch (e) {}
+      // ★ v78: مقارنة الاسم بس لصفوف legacy/guest — صف بمفتاح إيميل تاني = شخص تاني
+      //   (كان بيلاقي حساب تاني بنفس الاسم ويحطّ عليه "أنت")
+      if (_isEmailRowP(key)) return false;
       const cuDisplayName = cu.name || '';
       return !!(d && d.name && cuDisplayName && d.name.trim().toLowerCase() === cuDisplayName.trim().toLowerCase());
     };
@@ -9664,11 +9672,14 @@ function updateGlobalRankChip() {
   const _normK = window._normLbKey || (x => String(x||'').toLowerCase());
   const _canonK = window._dataKey ? window._dataKey(cu.username) : cu.username;
   const _emailLoc = String(cu.username||'').toLowerCase().includes('@') ? String(cu.username).toLowerCase().split('@')[0] : '';
+  const _isEmailRowW = (k) => { const s = String(k || ''); return s.includes('_') && !s.startsWith('guest__') && !/^u[0-9a-f]{4,}$/i.test(s); };
   const idx = _listArr.findIndex(([k, d]) =>
     (mk && (k === mk(cu.username, false) || k === mk(cu.username, true) || k === mk(cu.username, cu.isGuest || false))) ||
     (_normK(k) === _normK(_canonK)) ||
     (_emailLoc && (String(k).toLowerCase() === _emailLoc || _normK(k) === _emailLoc)) ||
-    (d && d.name && cuDisplayName && d.name.trim().toLowerCase() === cuDisplayName.trim().toLowerCase())
+    // ★ v78: مطابقة الاسم بس لصفوف legacy/guest — صف بمفتاح إيميل تاني = شخص تاني
+    //   (كان بيلاقي حساب تاني بنفس الاسم "Mariam" ويعرض نقاطه في الودجت)
+    (!_isEmailRowW(k) && d && d.name && cuDisplayName && d.name.trim().toLowerCase() === cuDisplayName.trim().toLowerCase())
   );
   let rank, total, myHasanat;
   // ★ v76: نقاطي 0 → اخفي الودجت كله (مش في الترتيب)
