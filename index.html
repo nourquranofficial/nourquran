@@ -1154,7 +1154,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   // ═══ نسخة التطبيق — بتتحدّث مع كل تسليم ═══
-  window.NOUR_VERSION = 'v75 — 2026-06-13';
+  window.NOUR_VERSION = 'v76 — 2026-06-13';
   console.log('%c🌙 نور ' + window.NOUR_VERSION, 'color:#F5D98B;font-weight:bold;font-size:14px');
   try {
     const _verEl = document.getElementById('appVerTag');
@@ -3655,6 +3655,11 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
           if (_mineIdx.length > 1) {
             const _rm = new Set(_mineIdx.slice(1));
             for (let i = list.length - 1; i >= 0; i--) if (_rm.has(i)) list.splice(i, 1);
+          }
+          // ★ v76: لو نقاطي 0 (بعد تصفير) → اشيل صفّي خالص من اللوحة (ماظهرش بـ 0)
+          if ((keep.totalHasanat || 0) <= 0) {
+            const _ki = list.findIndex(([kk]) => kk === _canon0);
+            if (_ki >= 0) list.splice(_ki, 1);
           }
         } else if ((_cu0.totalHasanat || 0) > 0 && _cu0.name && !_cu0.name.includes('@')) {
           // مالقيتش صفّي في اللوحة → أضيف صفّي من بياناتي (بيضمن ظهوري + شغل الكارت/الميدالية)
@@ -9660,6 +9665,8 @@ function updateGlobalRankChip() {
     (d && d.name && cuDisplayName && d.name.trim().toLowerCase() === cuDisplayName.trim().toLowerCase())
   );
   let rank, total, myHasanat;
+  // ★ v76: نقاطي 0 → اخفي الودجت كله (مش في الترتيب)
+  if ((cu.totalHasanat || 0) <= 0) { hide(); return; }
   if (idx >= 0) {
     myHasanat = (_listArr[idx][1] && _listArr[idx][1].totalHasanat) || 0;
     // ★ v73: المركز = الموضع الفعلي في القايمة (متسق مع الترتيب المتسلسل)
