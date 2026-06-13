@@ -1154,7 +1154,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   // ═══ نسخة التطبيق — بتتحدّث مع كل تسليم ═══
-  window.NOUR_VERSION = 'v82 — 2026-06-14';
+  window.NOUR_VERSION = 'v83 — 2026-06-14';
   console.log('%c🌙 نور ' + window.NOUR_VERSION, 'color:#F5D98B;font-weight:bold;font-size:14px');
   try {
     const _verEl = document.getElementById('appVerTag');
@@ -9775,17 +9775,22 @@ function updateGlobalRankChip() {
   let rank, total, myHasanat;
   // ★ v76: نقاطي 0 → اخفي الودجت كله (مش في الترتيب)
   if ((cu.totalHasanat || 0) <= 0) { hide(); return; }
+  // ★ v83: مركز كثيف — عدد قيم النقاط المختلفة الأعلى مني + 1 (متسق مع قائمة الترتيب العام)
+  const _denseRankByPts = (h) => {
+    const _ab = new Set();
+    for (const [, _d] of _listArr) { const _hh = (_d && _d.totalHasanat) || 0; if (_hh > h) _ab.add(_hh); }
+    return _ab.size + 1;
+  };
   if (idx >= 0) {
     myHasanat = (_listArr[idx][1] && _listArr[idx][1].totalHasanat) || 0;
-    // ★ v73: المركز = الموضع الفعلي في القايمة (متسق مع الترتيب المتسلسل)
-    rank = idx + 1;
+    rank = _denseRankByPts(myHasanat);
     total = _listArr.length;
   } else {
     // ★ مش لاقي صفّي في اللوحة → احسب ترتيبي من نقاطي مباشرة (الكارت/الميدالية ما يختفوش)
     myHasanat = cu.totalHasanat || 0;
     if (myHasanat <= 0) { hide(); return; }
-    rank = _listArr.filter(([,d]) => ((d && d.totalHasanat) || 0) > myHasanat).length + 1;
-    total = _listArr.length + (idx >= 0 ? 0 : 1);
+    rank = _denseRankByPts(myHasanat);
+    total = _listArr.length + 1;
   }
 
 
@@ -9921,11 +9926,15 @@ function openFullRank() {
       return false;
     };
     const medals = ['🥇', '🥈', '🥉'];
-    // ★ v73: مركز متسلسل بالترتيب — كل صف رقمه حسب موضعه (مفيش تساوي مراكز)
-    //   الأول 🥇، التاني 🥈، التالت 🥉، والباقي #٤ #٥... حتى لو النقاط متساوية.
+    // ★ v83: ترتيب كثيف بالنقاط — المتساوون في النقاط ياخدوا نفس المركز،
+    //   واللي بعدهم ياخد المركز اللي يليه مباشرة (٤، ٤، ٥). الأول 🥇 التاني 🥈 التالت 🥉.
+    let _prevPtsR = null, _denseRk = 0;
     body.innerHTML = list.map(([k, d], i) => {
       const me = isMe(k, d);
-      const _rNum = i + 1;
+      const _ptsR = (d && d.totalHasanat) || 0;
+      if (i === 0 || _ptsR !== _prevPtsR) _denseRk++;   // زيد المركز بس لما النقاط تتغيّر
+      _prevPtsR = _ptsR;
+      const _rNum = _denseRk;
       const cls = 'rank-row' + (_rNum <= 3 ? ' top' : '') + (me ? ' me' : '');
       const rk = _rNum <= 3 ? medals[_rNum - 1] : '#' + toArabicNum(_rNum);
       const rawNm = (d && d.name) ? d.name : '';
