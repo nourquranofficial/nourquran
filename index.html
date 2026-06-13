@@ -1154,7 +1154,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   // ═══ نسخة التطبيق — بتتحدّث مع كل تسليم ═══
-  window.NOUR_VERSION = 'v86 — 2026-06-14';
+  window.NOUR_VERSION = 'v87 — 2026-06-14';
   console.log('%c🌙 نور ' + window.NOUR_VERSION, 'color:#F5D98B;font-weight:bold;font-size:14px');
   try {
     const _verEl = document.getElementById('appVerTag');
@@ -1941,13 +1941,14 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
 
   // ★ listener لتحديث نقاط المستخدم لحظياً على كل الأجهزة
   let _dataUnsub = null;
+  let _resetUnsub = null;   // ★ v87: مراقبة علامة التصفير resetAt
   window.fbWatchUserData = function(username) {
     if (_dataUnsub) { _dataUnsub(); _dataUnsub = null; }
+    if (_resetUnsub) { _resetUnsub(); _resetUnsub = null; }
     if (!username) return;
     const key = dataKey(username);
-    _dataUnsub = onValue(ref(db, 'users/' + key + '/data'), (snap) => {
-      if (!snap.exists()) return;
-      const fbData = snap.val();
+    let _watchResetAt = 0;   // ★ v87: آخر تصفير لهذا الحساب (محدّث لحظياً)
+    const _reconcile = (fbData) => {
       if (!fbData) return;
       const cu = window.currentUser;
       if (!cu || cu.username !== username) return;
@@ -1958,10 +1959,15 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       const fTs = fbData.updatedAt || 0, cTs = cu.updatedAt || 0;
       const _fbZero = fH === 0 && fS === 0 && fG === 0;
       let changed = false;
-      if (_fbZero && fTs > cTs && (cH > 0 || cS > 0 || cG > 0)) {
+      // ★ v87: أرضية التصفير — لو القيم الحالية بقايا قبل التصفير (طابعها أقدم من آخر
+      //   تصفير) وFirebase بعد التصفير → خذ Firebase مباشرة (مايغلبش الأعلى القديم).
+      if (_watchResetAt && cTs < _watchResetAt && fTs >= _watchResetAt) {
+        cu.totalHasanat = fH; cu.totalScore = fS; cu.totalGames = fG;
+        cu.streak = fbData.streak || 0; cu.updatedAt = fTs; changed = true;
+      } else if (_fbZero && fTs > cTs && (cH > 0 || cS > 0 || cG > 0)) {
         // تصفير حقيقي من جهاز تاني
         cu.totalHasanat = 0; cu.totalScore = 0; cu.totalGames = 0; cu.updatedAt = fTs; changed = true;
-      } else if (fH > cH || fS > cS || fG > cG) {
+      } else if ((fH > cH || fS > cS || fG > cG) && (!_watchResetAt || fTs >= _watchResetAt)) {
         cu.totalHasanat = Math.max(cH, fH);
         cu.totalScore   = Math.max(cS, fS);
         cu.totalGames   = Math.max(cG, fG);
@@ -1970,23 +1976,44 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       }
       if (!changed) return;
       window.currentUser = cu;
-      // حفظ في localStorage
+      // حفظ في localStorage — للمفتاحين (الاسم + الإيميل) عشان البقايا القديمة تتنضّف
       try {
         const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
-        if (_lu[username]) {
-          _lu[username].totalHasanat = cu.totalHasanat;
-          _lu[username].totalScore   = cu.totalScore;
-          _lu[username].totalGames   = cu.totalGames;
-          _lu[username].updatedAt    = cu.updatedAt || Date.now();
-          localStorage.setItem('nour_users', JSON.stringify(_lu));
-        }
+        const _ks = [username]; if (cu.email && cu.email !== username) _ks.push(cu.email);
+        _ks.forEach(_k => {
+          if (_lu[_k]) {
+            _lu[_k].totalHasanat = cu.totalHasanat;
+            _lu[_k].totalScore   = cu.totalScore;
+            _lu[_k].totalGames   = cu.totalGames;
+            _lu[_k].updatedAt    = cu.updatedAt || Date.now();
+          }
+        });
+        localStorage.setItem('nour_users', JSON.stringify(_lu));
       } catch(e) {}
-      // تحديث الـ UI فوراً
       if (typeof updateHomeStats === 'function') updateHomeStats();
+    };
+    let _lastFb = null;
+    // ★ v87: اقرا resetAt الأول (يمنع سباق: تكون جاهزة وقت أول مصالحة)، بعدين راقب
+    get(ref(db, 'users/' + key + '/resetAt')).then(rs => {
+      const v = rs.val(); _watchResetAt = (typeof v === 'number') ? v : 0;
+      try { window._curResetAt = _watchResetAt; } catch (e) {}
+    }).catch(() => {}).finally(() => {
+      // مراقبة حيّة لـ resetAt — لو اتصفّر أثناء الجلسة، أعِد المصالحة بآخر بيانات
+      _resetUnsub = onValue(ref(db, 'users/' + key + '/resetAt'), (rs) => {
+        const v = rs.val(); _watchResetAt = (typeof v === 'number') ? v : 0;
+        try { window._curResetAt = _watchResetAt; } catch (e) {}
+        if (_lastFb) _reconcile(_lastFb);
+      });
+      _dataUnsub = onValue(ref(db, 'users/' + key + '/data'), (snap) => {
+        if (!snap.exists()) return;
+        _lastFb = snap.val();
+        _reconcile(_lastFb);
+      });
     });
   };
   window.fbUnwatchUserData = function() {
     if (_dataUnsub) { _dataUnsub(); _dataUnsub = null; }
+    if (_resetUnsub) { _resetUnsub(); _resetUnsub = null; }
   };
 
   // ★ مراقبة تغيير الباسورد — يفرض logout على كل الأجهزة
@@ -2524,13 +2551,23 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       tryGet('users/' + _dbKey + '/data'),
       tryGet('users/' + _dbKey + '/name'),
       tryGet('leaderboard/' + _dbKey),
-    ]).then(([fbData_, fbName, lbData]) => {
+      tryGet('users/' + _dbKey + '/resetAt'),
+    ]).then(([fbData_, fbName, lbData, _resetAtRaw]) => {
       const fbData = fbData_ || {};
+      const _resetAt0 = (typeof _resetAtRaw === 'number') ? _resetAtRaw : 0;   // ★ v87 (جزء أ)
       const _localUsers = (() => { try { return JSON.parse(localStorage.getItem('nour_users') || '{}'); } catch(e) { return {}; } })();
       const _localData  = _localUsers[realUsername] || {};
-      const fbScore   = fbData.totalScore   || 0;
-      const fbHasanat = fbData.totalHasanat || 0;
-      const fbGames   = fbData.totalGames   || 0;
+      // ★ v87 (جزء أ): أي مصدر طابعه الزمني أقدم من آخر تصفير = بقايا → نتجاهله (صفر)
+      const _localStale = _resetAt0 > 0 && (_localData.updatedAt || 0) < _resetAt0;
+      const _fbStale    = _resetAt0 > 0 && (fbData.updatedAt    || 0) < _resetAt0;
+      const _lH = _localStale ? 0 : (_localData.totalHasanat || 0);
+      const _lS = _localStale ? 0 : (_localData.totalScore   || 0);
+      const _lG = _localStale ? 0 : (_localData.totalGames   || 0);
+      const _lStreak = _localStale ? 0 : (_localData.streak || 0);
+      const fbScore   = _fbStale ? 0 : (fbData.totalScore   || 0);
+      const fbHasanat = _fbStale ? 0 : (fbData.totalHasanat || 0);
+      const fbGames   = _fbStale ? 0 : (fbData.totalGames   || 0);
+      const _fbStreak = _fbStale ? 0 : (fbData.streak || 0);
       // ★★ آمن: لو Firebase تصفير حقيقي (الكل صفر) وأحدث من المحلي → خذ صفر (يحترم التصفير).
       //    غير كده → الأعلى (مايضيّعش تقدّم محلي/offline ولا ينزّل من كتابة ناقصة).
       const _fbTs0    = fbData.updatedAt || 0;
@@ -2538,10 +2575,10 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       const _fbZero0  = fbScore === 0 && fbHasanat === 0 && fbGames === 0;
       const _resetWins = _fbZero0 && _fbTs0 > _localTs0;
       const merged = {
-        totalScore:   _resetWins ? 0 : Math.max(fbScore,   _localData.totalScore   || 0),
-        totalGames:   _resetWins ? 0 : Math.max(fbGames,   _localData.totalGames   || 0),
-        totalHasanat: _resetWins ? 0 : Math.max(fbHasanat, _localData.totalHasanat || 0),
-        streak:       _resetWins ? 0 : Math.max(fbData.streak || 0, _localData.streak || 0),
+        totalScore:   _resetWins ? 0 : Math.max(fbScore,   _lS),
+        totalGames:   _resetWins ? 0 : Math.max(fbGames,   _lG),
+        totalHasanat: _resetWins ? 0 : Math.max(fbHasanat, _lH),
+        streak:       _resetWins ? 0 : Math.max(_fbStreak, _lStreak),
         lastPlay:     fbData.lastPlay || _localData.lastPlay || null,
         // ★ توحيد الاسم: ناخد الأحدث بين Firebase والمحلي (زي النقاط بالظبط)
         name: (() => {
