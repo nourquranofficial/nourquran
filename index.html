@@ -1154,7 +1154,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   // ═══ نسخة التطبيق — بتتحدّث مع كل تسليم ═══
-  window.NOUR_VERSION = 'v76 — 2026-06-13';
+  window.NOUR_VERSION = 'v77 — 2026-06-13';
   console.log('%c🌙 نور ' + window.NOUR_VERSION, 'color:#F5D98B;font-weight:bold;font-size:14px');
   try {
     const _verEl = document.getElementById('appVerTag');
@@ -3711,7 +3711,25 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     } catch (e) {}
 
     // ★ v54: علّم الأسماء المتكررة + حضّر الـ tag (جزء الإيميل) للتمييز في العرض
+    //   ★ v77: شيل الأرقام القديمة (Mariam ٢) فقط لو الاسم الأساسي متكرر فعلاً —
+    //   التمييز الصح بيبقى بجزء الإيميل مش برقم. أسماء فيها أرقام مقصودة ومش
+    //   متكررة ما تتلمسش.
     try {
+      // احسب الاسم الأساسي (بدون رقم لاحق) لكل صف
+      const _baseOf = (nm) => String(nm || '').replace(/\s*[١٢٣٤٥٦٧٨٩٠\d]+\s*$/, '').trim();
+      const _baseCnt = {};
+      for (const [, d] of list) {
+        if (d && d.name && !d.name.includes('@')) {
+          const b = _baseOf(d.name).toLowerCase();
+          if (b) _baseCnt[b] = (_baseCnt[b] || 0) + 1;
+        }
+      }
+      for (const [, d] of list) {
+        if (d && d.name && !d.name.includes('@')) {
+          const b = _baseOf(d.name);
+          if (b && _baseCnt[b.toLowerCase()] > 1) d.name = b; // متكرر → شيل الرقم
+        }
+      }
       const _cntNm = {};
       for (const [, d] of list) {
         if (d && d.name && !d.name.includes('@')) {
@@ -5062,21 +5080,9 @@ function doRegister() {
       if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
       loginSuccess(email, defaultData);
     };
-    // نجيب قائمة الأسماء الموجودة ونشوف لو في تكرار
-    try {
-      const _lbData = (window._lbAllList || []).map(([,d]) => d && d.name ? d.name.trim() : '');
-      const _sameName = _lbData.filter(n => n && (n === name || n.replace(/\s*[١٢٣٤٥٦٧٨٩٠\d]+$/, '').trim() === name));
-      if (_sameName.length === 0) {
-        _doFinishReg(name);
-      } else {
-        // اعطيه الرقم التالي
-        let _num = 2;
-        while (_sameName.includes(name + ' ' + _toAr(_num))) _num++;
-        _doFinishReg(name + ' ' + _toAr(_num));
-      }
-    } catch(e) {
-      _doFinishReg(name);
-    }
+    // ★ v77: مابنعدّلش الاسم لو متكرر — نسيبه زي ما المستخدم كتبه.
+    //   التمييز بين أصحاب نفس الاسم بيحصل في العرض عبر جزء الإيميل (· tag).
+    _doFinishReg(name);
   };
   const _onErr = (errMsg) => {
     window._registering = false;
