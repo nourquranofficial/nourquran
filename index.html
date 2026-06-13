@@ -1154,7 +1154,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   // ═══ نسخة التطبيق — بتتحدّث مع كل تسليم ═══
-  window.NOUR_VERSION = 'v85 — 2026-06-13';
+  window.NOUR_VERSION = 'v86 — 2026-06-13';
   console.log('%c🌙 نور ' + window.NOUR_VERSION, 'color:#F5D98B;font-weight:bold;font-size:14px');
   try {
     const _verEl = document.getElementById('appVerTag');
@@ -3385,7 +3385,44 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         ]);
       })
       .then(() => {
-        console.log('%c✅ تم التفريغ بالكامل — باسورد دخولك محفوظ. اعمل Refresh.', 'color:#4ade80;font-weight:bold;font-size:14px;');
+        // ★★ مهم: امسح البيانات المحلية (localStorage) كمان — وإلا بترجع تتزرع
+        //   في Firebase لما تسجّل دخول تاني (دي كانت سبب "النقاط بترجع").
+        //   نحافظ على بيانات دخولي بس (الباسورد المحلي للإيميل بتاعي).
+        try {
+          // احفظ صفّي من nour_users (فيه الباسورد) قبل المسح
+          let _myLocalAuth = null;
+          try {
+            const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
+            if (_lu && _lu[KEEP_EMAIL]) _myLocalAuth = { password: _lu[KEEP_EMAIL].password };
+          } catch (e) {}
+
+          // امسح كل مفاتيح نور المحلية
+          const _toRemove = [];
+          for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k && (k === 'nour_users' || k === 'nour_current_user' || k === 'nour_last_user' ||
+                      k === 'nour_pending_reset' ||
+                      k.startsWith('nour_memorized_') || k.startsWith('nour_mist_cleared_') ||
+                      k.startsWith('nour_mistakes_') || k.startsWith('nour_name_') ||
+                      k.startsWith('nour_name_ts_') || k.startsWith('nour_old_names_') ||
+                      k.startsWith('nour_revprog_') || k.startsWith('nour_surahprog_'))) {
+              _toRemove.push(k);
+            }
+          }
+          _toRemove.forEach(k => localStorage.removeItem(k));
+          console.log('  ✓ localStorage: ' + _toRemove.length + ' مفتاح محلي اتمسح');
+
+          // رجّع بيانات دخولي بس (الباسورد) عشان أقدر أسجّل دخول
+          if (_myLocalAuth) {
+            const _fresh = {}; _fresh[KEEP_EMAIL] = _myLocalAuth;
+            localStorage.setItem('nour_users', JSON.stringify(_fresh));
+            console.log('  ✓ باسورد دخولي المحلي اتحفظ');
+          }
+        } catch (e) { console.warn('localStorage:', e && e.message); }
+        return true;
+      })
+      .then(() => {
+        console.log('%c✅ تم التفريغ بالكامل (Firebase + المحلي) — باسورد دخولك محفوظ. اعمل Refresh.', 'color:#4ade80;font-weight:bold;font-size:14px;');
         try { if (typeof renderLeaderboard === 'function') renderLeaderboard(); } catch (e) {}
         return true;
       })
