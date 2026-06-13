@@ -1154,7 +1154,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   // ═══ نسخة التطبيق — بتتحدّث مع كل تسليم ═══
-  window.NOUR_VERSION = 'v81 — 2026-06-14';
+  window.NOUR_VERSION = 'v82 — 2026-06-14';
   console.log('%c🌙 نور ' + window.NOUR_VERSION, 'color:#F5D98B;font-weight:bold;font-size:14px');
   try {
     const _verEl = document.getElementById('appVerTag');
@@ -3734,18 +3734,14 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
           }
           // الاسم المعروض = اسمي الحالي دائماً
           if (_cuName0) keep.name = _cu0.name;
-          // ★ v75: احترام التصفير الحديث — بعد التصفير مباشرةً (آخر 12 ثانية)
-          //   ماناخدش max مع قيم قديمة (اللوحة/صفوف مكررة)، نعرض المصفّر فعلاً.
-          const _recentReset = (window._recentReset && (Date.now() - window._recentReset) < 12000);
-          if (_recentReset) {
-            keep.totalHasanat = _cu0.totalHasanat || 0;
-            keep.totalScore   = _cu0.totalScore   || 0;
-            keep.totalGames   = _cu0.totalGames   || 0;
-          } else {
-            keep.totalHasanat = Math.max(keep.totalHasanat || 0, _cu0.totalHasanat || 0);
-            keep.totalScore   = Math.max(keep.totalScore   || 0, _cu0.totalScore   || 0);
-            keep.totalGames   = Math.max(keep.totalGames   || 0, _cu0.totalGames   || 0);
-          }
+          // ★ v82: صفّي في الليدربورد = حسابي بالظبط (مصدر الحقيقة الواحد = users/data
+          //   المنعكس في currentUser). مابناخدش max مع صفوف/بقايا قديمة عشان ما نطلّعش
+          //   قيمة شاذة أعلى من الحساب — ده بيخلّي الليدربورد يطابق الهوم ويثبت مع
+          //   الخروج/الدخول. (عرض فقط — مايكتبش/مايمسحش حاجة. حماية فقد النقاط بتتم
+          //   أصلاً في مصالحة users/data، مش هنا.)
+          keep.totalHasanat = _cu0.totalHasanat || 0;
+          keep.totalScore   = _cu0.totalScore   || 0;
+          keep.totalGames   = _cu0.totalGames   || 0;
           list[keepI][0] = _canon0;
           if (_mineIdx.length > 1) {
             const _rm = new Set(_mineIdx.slice(1));
@@ -9888,6 +9884,21 @@ function openFullRank() {
         ((b.totalHasanat || 0) - (a.totalHasanat || 0)) ||
         ((b.totalGames || 0) - (a.totalGames || 0)) ||
         ((b.totalScore || 0) - (a.totalScore || 0)));
+      // ★ v82: صفّي = حسابي بالظبط (مش max مع بقايا) — يطابق الهوم
+      if (_cuNmR && _cuR) {
+        for (const row of _merged) {
+          const d = row[1];
+          if (d && d.name && !String(d.name).includes('@') && String(d.name).trim().toLowerCase() === _cuNmR) {
+            d.totalHasanat = _cuR.totalHasanat || 0;
+            d.totalScore   = _cuR.totalScore   || 0;
+            d.totalGames   = _cuR.totalGames   || 0;
+          }
+        }
+        _merged.sort(([, a], [, b]) =>
+          ((b.totalHasanat || 0) - (a.totalHasanat || 0)) ||
+          ((b.totalGames || 0) - (a.totalGames || 0)) ||
+          ((b.totalScore || 0) - (a.totalScore || 0)));
+      }
       list = _merged;
     } catch (e) {}
   }
