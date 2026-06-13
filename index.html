@@ -1154,7 +1154,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   // ═══ نسخة التطبيق — بتتحدّث مع كل تسليم ═══
-  window.NOUR_VERSION = 'v80 — 2026-06-13';
+  window.NOUR_VERSION = 'v81 — 2026-06-13';
   console.log('%c🌙 نور ' + window.NOUR_VERSION, 'color:#F5D98B;font-weight:bold;font-size:14px');
   try {
     const _verEl = document.getElementById('appVerTag');
@@ -3765,6 +3765,15 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     } catch (e) {}
 
     window._lbAllList = list;
+    // ★★ تشخيص مؤقت v81 — اطبع المفاتيح النهائية لكشف سبب التكرار ★★
+    try {
+      console.log('[نور-تشخيص] المفاتيح النهائية في اللوحة (' + list.length + ' صف):');
+      list.forEach(([k, d], i) => {
+        console.log('  ' + (i+1) + ') مفتاح:[' + k + '] | norm:[' + (window._normLbKey ? window._normLbKey(k) : '?') + '] | اسم:' + ((d&&d.name)||'') + ' | نقاط:' + ((d&&d.totalHasanat)||0));
+      });
+      const _cuDbg = window.currentUser;
+      if (_cuDbg) console.log('[نور-تشخيص] أنا: username=' + _cuDbg.username + ' | name=' + _cuDbg.name + ' | canon=' + (window._dataKey ? window._dataKey(_cuDbg.username) : '?'));
+    } catch (e) {}
 
     // ★★ مزامنة مسح الغلطات فقط — النقاط بقت تتزامن عبر users/data (مصدر الحقيقة) مش من اللوحة ★★
     try {
