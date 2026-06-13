@@ -1154,7 +1154,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   // ═══ نسخة التطبيق — بتتحدّث مع كل تسليم ═══
-  window.NOUR_VERSION = 'v70 — 2026-06-13';
+  window.NOUR_VERSION = 'v73 — 2026-06-13';
   console.log('%c🌙 نور ' + window.NOUR_VERSION, 'color:#F5D98B;font-weight:bold;font-size:14px');
   try {
     const _verEl = document.getElementById('appVerTag');
@@ -3233,6 +3233,62 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     });
   };
 
+  // ── ★ v71: إصلاح طوارئ لباسورد حساب — fixAccountPassword('email','الباسورد') ──
+  //   بيصلّح bypassAuth التالف (من تجارب سابقة): يكتب الـ hash الصح + changedAt:0
+  //   ويحدّث Auth لو فيه جلسة. بيلمس الحساب المحدد بس — صفر تأثير على غيره.
+  // ── ★ v73: تصحيح نقاط حساب يدويًا — fixPoints('email', حسنات, نقاط, جلسات) ──
+  //   للاستخدام لو نقاط اتكتبت فوق بعضها بالغلط. بيلمس الحساب المحدد بس.
+  window.fixPoints = function(email, hasanat, score, games) {
+    if (!email) { console.error('❌ الاستخدام: fixPoints(\'email\', حسنات, نقاط, جلسات)'); return Promise.reject('args'); }
+    const _key = dataKey(email);
+    const H = Number(hasanat) || 0, S = Number(score) || 0, G = Number(games) || 0;
+    const now = Date.now();
+    return Promise.all([
+      set(ref(db, 'users/' + _key + '/data'), { totalHasanat: H, totalScore: S, totalGames: G, updatedAt: now }),
+      get(ref(db, LB_PATH + _key)).then(s => s.val()).catch(() => null).then(lb =>
+        set(ref(db, LB_PATH + _key), { ...(lb || {}),
+          name: (lb && lb.name) || email.split('@')[0],
+          totalHasanat: H, totalScore: S, totalGames: G, isGuest: false, updatedAt: now,
+          nameUpdatedAt: (lb && lb.nameUpdatedAt) || now,
+        })),
+    ]).then(() => {
+      console.log('✅ تم تصحيح نقاط "' + email + '" → حسنات=' + H + ' نقاط=' + S + ' جلسات=' + G);
+      if (typeof renderLeaderboard === 'function') try { renderLeaderboard(); } catch (e) {}
+      return true;
+    }).catch(e => { console.error('❌ فشل:', e); return Promise.reject(e); });
+  };
+
+  window.fixAccountPassword = function(email, password) {
+    if (!email || !password) { console.error('❌ الاستخدام: fixAccountPassword(\'email@gmail.com\',\'الباسورد\')'); return Promise.reject('args'); }
+    const _key = dataKey(email);
+    return passHashS(password).then((sha) => {
+      return set(ref(db, 'users/' + _key + '/bypassAuth'), {
+        email: toFbEmail(email), passHash: sha, updatedAt: Date.now(), changedAt: 0,
+      }).then(() => {
+        // وحّد التخزين المحلي لو ده الإيميل المفتوح
+        try {
+          const _lu = JSON.parse(localStorage.getItem('nour_users') || '{}');
+          if (!_lu[email]) _lu[email] = {};
+          _lu[email].pwS = sha;
+          _lu[email].password = safe_btoa(password);
+          _lu[email].email = email;
+          localStorage.setItem('nour_users', JSON.stringify(_lu));
+        } catch (e) {}
+        // حدّث Auth لو فيه جلسة لنفس الإيميل
+        try {
+          if (auth.currentUser && !auth.currentUser.isAnonymous &&
+              String(auth.currentUser.email || '').toLowerCase() === toFbEmail(email) &&
+              typeof updatePassword === 'function') {
+            updatePassword(auth.currentUser, padPass(password)).catch(() => {});
+          }
+        } catch (e) {}
+        console.log('✅ تم إصلاح باسورد "' + email + '" — جرّب تدخل بيه دلوقتي.');
+        console.log('   (لو فيه جلسة قديمة على Auth، يفضّل تعمل خروج ودخول)');
+        return true;
+      });
+    }).catch((e) => { console.error('❌ فشل الإصلاح:', e); return Promise.reject(e); });
+  };
+
   window.mergeOldAccount = function(oldKey) {
     const cu = window.currentUser;
     if (!cu || !cu.username) { console.error('❌ سجّل دخول الأول'); return Promise.reject('no user'); }
@@ -3345,20 +3401,34 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         cand.forEach(k => {
           reads.push(get(ref(db, LB_PATH + k)).then(s => ['x', k, s.val()]).catch(() => ['x', k, null]));
           reads.push(get(ref(db, 'users/' + k + '/data')).then(s => ['x', k, s.val()]).catch(() => ['x', k, null]));
+          // ★ v71: اقرا bypassAuth بتاع المرشّح — لو عنده باسورد مستقل = حساب حقيقي منفصل
+          reads.push(get(ref(db, 'users/' + k + '/bypassAuth')).then(s => ['bpa', k, s.val()]).catch(() => ['bpa', k, null]));
         });
         reads.push(get(ref(db, LB_PATH + canon)).then(s => ['c', canon, s.val()]).catch(() => ['c', canon, null]));
         reads.push(get(ref(db, 'users/' + canon + '/data')).then(s => ['c', canon, s.val()]).catch(() => ['c', canon, null]));
         return Promise.all(reads).then(rows => {
           let H = cu.totalHasanat || 0, S = cu.totalScore || 0, G = cu.totalGames || 0;
           let found = false;
+          // ★ v71: المرشّحون اللي عندهم bypassAuth مستقل = حسابات حقيقية منفصلة
+          //   (نفس الاسم بس إيميل تاني وباسورد خاص) → ممنوع دمجها أو مسحها نهائياً.
+          const _protectedKeys = new Set();
+          rows.forEach(([t, k, v]) => {
+            if (t === 'bpa' && v && v.passHash) _protectedKeys.add(k);
+          });
+          const _safeCand = cand.filter(k => !_protectedKeys.has(k));
           rows.forEach(([t, k, v]) => {
             if (!v) return;
-            if (t === 'x') found = true; // فيه حساب قديم بنفس أسمائي
+            if (t === 'bpa') return; // مش بيانات نقاط
+            if (_protectedKeys.has(k)) return; // حساب محمي — ماياخدش منه نقاط ولا يتمسح
+            if (t === 'x') found = true; // فيه حساب قديم بنفس أسمائي (ومالوش باسورد مستقل)
             H = Math.max(H, v.totalHasanat || 0);
             S = Math.max(S, v.totalScore || 0);
             G = Math.max(G, v.totalGames || 0);
           });
-          if (!found) return; // مفيش أورفان → خلاص
+          if (_protectedKeys.size > 0) {
+            console.log('[نور-ترحيل] حسابات محمية (ليها باسورد مستقل) مش هتتدمج: ' + [..._protectedKeys].join(' ، '));
+          }
+          if (!found) return; // مفيش أورفان قابل للدمج → خلاص
           const name = (cu.name && !String(cu.name).includes('@')) ? cu.name : cu.username;
           const now = Date.now();
           return Promise.all([
@@ -3366,7 +3436,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
             set(ref(db, LB_PATH + canon), { name: name, nameUpdatedAt: now, totalHasanat: H, totalScore: S, totalGames: G, isGuest: false, updatedAt: now }),
           ]).then(() => {
             const dels = [];
-            cand.forEach(k => { dels.push(remove(ref(db, LB_PATH + k)).catch(() => {})); dels.push(remove(ref(db, 'users/' + k)).catch(() => {})); });
+            _safeCand.forEach(k => { dels.push(remove(ref(db, LB_PATH + k)).catch(() => {})); dels.push(remove(ref(db, 'users/' + k)).catch(() => {})); });
             return Promise.all(dels);
           }).then(() => {
             cu.totalHasanat = H; cu.totalScore = S; cu.totalGames = G; cu.updatedAt = now;
@@ -3593,46 +3663,23 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       }
     } catch (e) {}
 
-    // ★ تشخيص مؤقت — عدد الصفوف الخام من Firebase مقابل المعروض
+    // ★ v73: إخفاء بقايا قديمة فقط (legacy/guest) لو بصمتها تطابق صف إيميلي حقيقي.
+    //   ⛔ صفّان بمفتاحين إيميل مختلفين = شخصان مستقلان → عمرهم ما يتخفوا حتى لو
+    //      نفس النقاط (القاعدة القديمة كانت بتوحّدهم غلط وتلخبط اللوحة).
+    //   كل حساب إيميلي يظهر بنقاطه الحقيقية. التمييز بجزء الإيميل (· tag).
     try {
-      const _raw = Object.entries(data || {}).filter(([k, d]) => d && d.name && (d.totalHasanat || 0) > 0);
-      console.log('[نور-لوحة] صفوف Firebase الخام (>0 نقطة): ' + _raw.length +
-        ' | الأسماء: ' + _raw.map(([k, d]) => d.name + '(' + (d.totalHasanat||0) + ')').join(' ، '));
-    } catch (e) {}
-
-    // ★ v69 (ترقيم المالك): إخفاء بقايا نفس الحساب فقط — التعادل الحقيقي بيظهر بمركز مكرر
-    //   بصمة كاملة متطابقة (حسنات+نقاط+جلسات):
-    //   - فيها مفتاح قديم/guest → ده صف بقايا لنفس الشخص → يتخفى ويفضل الإيميلي/الأحدث.
-    //   - كلهم مفاتيح إيميل حقيقية → لاعبين متعادلين → الاتنين يظهروا (بنفس رقم المركز).
-    try {
-      const _fpGroups = {};
-      for (const [k, d] of list) {
-        if (!d || (d.totalHasanat || 0) <= 0) continue;
-        const _fp = (d.totalHasanat || 0) + '|' + (d.totalScore || 0) + '|' + (d.totalGames || 0);
-        (_fpGroups[_fp] = _fpGroups[_fp] || []).push(k);
-      }
+      const _emailKeys = list.filter(([k]) => _isEmailRow(k));
       const _hideKeys = new Set();
-      const _rowOf = (k) => (list.find(([kk]) => kk === k) || [])[1] || {};
-      Object.values(_fpGroups).forEach(ks => {
-        if (ks.length < 2) return;
-        const _emails = ks.filter(k => _isEmailRow(k));
-        const _others = ks.filter(k => !_isEmailRow(k));
-        if (_others.length === 0) return; // كلهم حسابات إيميل حقيقية → تعادل → يظهروا كلهم
-        if (_emails.length > 0) {
-          _others.forEach(k => _hideKeys.add(k)); // البقايا القديمة تتخفى، الإيميلي يفضل
-        } else {
-          // كلهم قدام → الأحدث بس
-          let _best = null, _bestTs = -1;
-          ks.forEach(k => {
-            const d = _rowOf(k);
-            const ts = Math.max(d.nameUpdatedAt || 0, d.updatedAt || 0);
-            if (ts > _bestTs) { _bestTs = ts; _best = k; }
-          });
-          ks.forEach(k => { if (k !== _best) _hideKeys.add(k); });
-        }
+      list.forEach(([k, d]) => {
+        if (_isEmailRow(k)) return;                  // صف إيميلي = شخص مستقل، ماينخفيش
+        if (!d || (d.totalHasanat || 0) <= 0) return;
+        const _fp = (d.totalHasanat || 0) + '|' + (d.totalScore || 0) + '|' + (d.totalGames || 0);
+        // لو فيه صف إيميلي بنفس البصمة بالظبط → ده بقايا قديمة لنفس الشخص → اخفيها
+        const _match = _emailKeys.find(([, ed]) =>
+          ((ed.totalHasanat || 0) + '|' + (ed.totalScore || 0) + '|' + (ed.totalGames || 0)) === _fp);
+        if (_match) _hideKeys.add(k);
       });
       if (_hideKeys.size > 0) {
-        // ★ حماية صفّي بالمقارنة المطبّعة (مش النص الحرفي — عشان فروق الحروف الكبيرة)
         try {
           const _cuH = window.currentUser;
           if (_cuH && _cuH.username) {
@@ -3641,7 +3688,6 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
           }
         } catch (e) {}
         list = list.filter(([k]) => !_hideKeys.has(k));
-        console.log('[نور-لوحة] صفوف بقايا متخفية من العرض: ' + [..._hideKeys].join(' ، '));
       }
     } catch (e) {}
 
@@ -9602,8 +9648,8 @@ function updateGlobalRankChip() {
   let rank, total, myHasanat;
   if (idx >= 0) {
     myHasanat = (_listArr[idx][1] && _listArr[idx][1].totalHasanat) || 0;
-    // ★ v69: ترتيب بمنطق التعادل — نفس رقم المركز للمتعادلين (متوافق مع القايمة)
-    rank = _listArr.filter(([, d]) => ((d && d.totalHasanat) || 0) > myHasanat).length + 1;
+    // ★ v73: المركز = الموضع الفعلي في القايمة (متسق مع الترتيب المتسلسل)
+    rank = idx + 1;
     total = _listArr.length;
   } else {
     // ★ مش لاقي صفّي في اللوحة → احسب ترتيبي من نقاطي مباشرة (الكارت/الميدالية ما يختفوش)
@@ -9698,16 +9744,11 @@ function openFullRank() {
       return false;
     };
     const medals = ['🥇', '🥈', '🥉'];
-    // ★ v69: تعادل النقاط = نفس رقم المركز يتكرر (والميدالية تتكرر لو في التوب 3)
-    const _ranks = [];
-    list.forEach(([, d], i) => {
-      const h = (d && d.totalHasanat) || 0;
-      if (i > 0 && h === (((list[i - 1] || [])[1] || {}).totalHasanat || 0)) _ranks.push(_ranks[i - 1]);
-      else _ranks.push(i + 1);
-    });
+    // ★ v73: مركز متسلسل بالترتيب — كل صف رقمه حسب موضعه (مفيش تساوي مراكز)
+    //   الأول 🥇، التاني 🥈، التالت 🥉، والباقي #٤ #٥... حتى لو النقاط متساوية.
     body.innerHTML = list.map(([k, d], i) => {
       const me = isMe(k, d);
-      const _rNum = _ranks[i];
+      const _rNum = i + 1;
       const cls = 'rank-row' + (_rNum <= 3 ? ' top' : '') + (me ? ' me' : '');
       const rk = _rNum <= 3 ? medals[_rNum - 1] : '#' + toArabicNum(_rNum);
       const rawNm = (d && d.name) ? d.name : '';
