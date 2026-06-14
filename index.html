@@ -1154,7 +1154,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   // ═══ نسخة التطبيق — بتتحدّث مع كل تسليم ═══
-  window.NOUR_VERSION = 'v87 — 2026-06-14';
+  window.NOUR_VERSION = 'v88 — 2026-06-14';
   console.log('%c🌙 نور ' + window.NOUR_VERSION, 'color:#F5D98B;font-weight:bold;font-size:14px');
   try {
     const _verEl = document.getElementById('appVerTag');
@@ -1460,9 +1460,18 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     }
 
     if (_bpaChanged) {
-      console.log('[نور-دخول] ⛔ فرع: رفض القديمة (تغيير صريح)');
-      // ⛔ فيه تغيير صريح والمُدخَل مش الجديد → ده الباسورد القديم (حتى لو Auth يقبله)
-      _finish(onError, '🔑 كلمة المرور اتغيّرت من قبل — استخدم الكلمة الجديدة');
+      // ★ v88: فرّق بين "باسورد قديم اتغيّر" (المُدخَل من القدامى المعروفين) و"باسورد غلط خالص"
+      const _prevList = Array.isArray(_bpa0.prevHashes) ? _bpa0.prevHashes : [];
+      const _isOldPass = _prevList.includes(_shaP) || _prevList.includes(_passHash);
+      if (_isOldPass) {
+        console.log('[نور-دخول] ⛔ فرع: رفض القديمة (باسورد قديم معروف)');
+        // ⛔ المُدخَل باسورد قديم اتغيّر → وجّهه للجديد
+        _finish(onError, '🔑 كلمة المرور اتغيّرت من قبل — استخدم الكلمة الجديدة');
+      } else {
+        console.log('[نور-دخول] ⛔ فرع: باسورد غلط (مش من القدامى)');
+        // ⛔ باسورد غلط خالص (مش من القدامى المعروفين)
+        _finish(onError, 'الإيميل أو كلمة المرور خاطئة');
+      }
       return;
     }
 
@@ -1557,11 +1566,23 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
 
     // ★ v63: كتابة بـ retry ×3 + قراءة تحقق — مفيش نجاح كاذب
     const _writeBypassVerified = async () => {
+      // ★ v88: خزّن الـ hash القديم في prevHashes — عشان نفرّق بين "باسورد قديم اتغيّر" و"باسورد غلط خالص"
+      let _prevHashes = [];
+      try {
+        const _oldBpa = await get(ref(db, 'users/' + _key + '/bypassAuth')).then(s => s.exists() ? s.val() : null);
+        if (_oldBpa) {
+          if (Array.isArray(_oldBpa.prevHashes)) _prevHashes = _oldBpa.prevHashes.slice(-4);
+          if (_oldBpa.passHash && _oldBpa.passHash !== _passHash && !_prevHashes.includes(_oldBpa.passHash)) {
+            _prevHashes.push(_oldBpa.passHash);
+          }
+        }
+      } catch (e) {}
       for (let _try = 0; _try < 3; _try++) {
         try {
           await Promise.race([
             set(ref(db, 'users/' + _key + '/bypassAuth'), {
               email, passHash: _passHash, updatedAt: Date.now(), changedAt: Date.now(),
+              prevHashes: _prevHashes,
             }),
             new Promise((_, rej) => setTimeout(() => rej('timeout'), 6000)),
           ]);
