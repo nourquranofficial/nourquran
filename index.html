@@ -1154,7 +1154,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   // ═══ نسخة التطبيق — بتتحدّث مع كل تسليم ═══
-  window.NOUR_VERSION = 'v89 — 2026-06-14';
+  window.NOUR_VERSION = 'v90 — 2026-06-14';
   console.log('%c🌙 نور ' + window.NOUR_VERSION, 'color:#F5D98B;font-weight:bold;font-size:14px');
   try {
     const _verEl = document.getElementById('appVerTag');
@@ -2014,6 +2014,9 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
       if (typeof updateHomeStats === 'function') updateHomeStats();
       // ★ v89: حدّث كارت الترتيب كمان (مش بس الهوم) عشان يطابق النقاط المصحّحة
       if (typeof updateGlobalRankChip === 'function') updateGlobalRankChip();
+      // ★ v90: أعِد رسم لوحة الشرف كمان (مع debounce) عشان صفّي فيها يطابق النقاط المصحّحة
+      //   (تعديل v82 بيخلّي صفّي = currentUser عند الرسم — فلازم نعيد الرسم بعد التصحيح)
+      try { clearTimeout(window._lbReRenderT); window._lbReRenderT = setTimeout(() => { if (typeof renderLeaderboard === 'function') renderLeaderboard(); }, 400); } catch(e) {}
     };
     let _lastFb = null;
     // ★ v87: اقرا resetAt الأول (يمنع سباق: تكون جاهزة وقت أول مصالحة)، بعدين راقب
@@ -2945,9 +2948,15 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         const _localNameTs = (() => { try { return parseInt(localStorage.getItem('nour_name_ts_' + username) || '0', 10) || 0; } catch(e) { return 0; } })();
         const _finalNameTs = Math.max(merged.nameUpdatedAt || 0, _localNameTs);
 
-        // ★ v89: نقاط الصف الموحّد = حساب اللاعب الحالي (الحقيقة، زي التوتال) لو هو نفسه —
-        //   مش max مع بقايا قديمة. ده بيخلّي اللوحة تطابق الهوم وتثبت مع الخروج/الدخول.
-        const _cuMine = (window.currentUser && window.currentUser.username === username && !window.currentUser.isGuest) ? window.currentUser : null;
+        // ★ v89/v90: نقاط الصف الموحّد = حساب اللاعب الحالي (الحقيقة، زي التوتال) لو هو نفسه.
+        //   ★ v90: نطابق بالـ normKey مش بالـ username بالظبط — لأن الكليناب بيتنده بالإيميل
+        //   بينما currentUser.username ممكن يكون الاسم (انقسام المفتاح). المهم نفس الشخص.
+        const _cuMine = (() => {
+          const _c = window.currentUser;
+          if (!_c || _c.isGuest || !_c.username) return null;
+          const _cn = window._normLbKey ? window._normLbKey(dataKey(_c.username)) : String(_c.username).toLowerCase();
+          return (_cn === canonNorm) ? _c : null;
+        })();
         const _outH = _cuMine ? (_cuMine.totalHasanat || 0) : (merged.totalHasanat || 0);
         const _outS = _cuMine ? (_cuMine.totalScore   || 0) : (merged.totalScore   || 0);
         const _outG = _cuMine ? (_cuMine.totalGames   || 0) : (merged.totalGames   || 0);
