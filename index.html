@@ -1154,7 +1154,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   // ═══ نسخة التطبيق — بتتحدّث مع كل تسليم ═══
-  window.NOUR_VERSION = 'v88 — 2026-06-14';
+  window.NOUR_VERSION = 'v89 — 2026-06-14';
   console.log('%c🌙 نور ' + window.NOUR_VERSION, 'color:#F5D98B;font-weight:bold;font-size:14px');
   try {
     const _verEl = document.getElementById('appVerTag');
@@ -2012,6 +2012,8 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         localStorage.setItem('nour_users', JSON.stringify(_lu));
       } catch(e) {}
       if (typeof updateHomeStats === 'function') updateHomeStats();
+      // ★ v89: حدّث كارت الترتيب كمان (مش بس الهوم) عشان يطابق النقاط المصحّحة
+      if (typeof updateGlobalRankChip === 'function') updateGlobalRankChip();
     };
     let _lastFb = null;
     // ★ v87: اقرا resetAt الأول (يمنع سباق: تكون جاهزة وقت أول مصالحة)، بعدين راقب
@@ -2943,13 +2945,19 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         const _localNameTs = (() => { try { return parseInt(localStorage.getItem('nour_name_ts_' + username) || '0', 10) || 0; } catch(e) { return 0; } })();
         const _finalNameTs = Math.max(merged.nameUpdatedAt || 0, _localNameTs);
 
+        // ★ v89: نقاط الصف الموحّد = حساب اللاعب الحالي (الحقيقة، زي التوتال) لو هو نفسه —
+        //   مش max مع بقايا قديمة. ده بيخلّي اللوحة تطابق الهوم وتثبت مع الخروج/الدخول.
+        const _cuMine = (window.currentUser && window.currentUser.username === username && !window.currentUser.isGuest) ? window.currentUser : null;
+        const _outH = _cuMine ? (_cuMine.totalHasanat || 0) : (merged.totalHasanat || 0);
+        const _outS = _cuMine ? (_cuMine.totalScore   || 0) : (merged.totalScore   || 0);
+        const _outG = _cuMine ? (_cuMine.totalGames   || 0) : (merged.totalGames   || 0);
         set(ref(db, LB_PATH + canonical), {
           name:             _finalName,
           tag:              (String(username).includes('@') ? String(username).split('@')[0].toLowerCase() : (merged.tag || null)),
           nameUpdatedAt:    _finalNameTs,
-          totalHasanat:     merged.totalHasanat || 0,
-          totalScore:       merged.totalScore   || 0,
-          totalGames:       merged.totalGames   || 0,
+          totalHasanat:     _outH,
+          totalScore:       _outS,
+          totalGames:       _outG,
           isGuest:          merged.isGuest || false,
           updatedAt:        Date.now(),
           mistakesClearedAt: merged.mistakesClearedAt || 0,
@@ -9903,30 +9911,30 @@ function updateGlobalRankChip() {
   const _canonK = window._dataKey ? window._dataKey(cu.username) : cu.username;
   const _emailLoc = String(cu.username||'').toLowerCase().includes('@') ? String(cu.username).toLowerCase().split('@')[0] : '';
   const _isEmailRowW = (k) => { const s = String(k || ''); return s.includes('_') && !s.startsWith('guest__') && !/^u[0-9a-f]{4,}$/i.test(s); };
-  const idx = _listArr.findIndex(([k, d]) =>
+  const _isMineRow = ([k, d]) =>
     (mk && (k === mk(cu.username, false) || k === mk(cu.username, true) || k === mk(cu.username, cu.isGuest || false))) ||
     (_normK(k) === _normK(_canonK)) ||
     (_emailLoc && (String(k).toLowerCase() === _emailLoc || _normK(k) === _emailLoc)) ||
     // ★ v78: مطابقة الاسم بس لصفوف legacy/guest — صف بمفتاح إيميل تاني = شخص تاني
-    //   (كان بيلاقي حساب تاني بنفس الاسم "Mariam" ويعرض نقاطه في الودجت)
-    (!_isEmailRowW(k) && d && d.name && cuDisplayName && d.name.trim().toLowerCase() === cuDisplayName.trim().toLowerCase())
-  );
+    (!_isEmailRowW(k) && d && d.name && cuDisplayName && d.name.trim().toLowerCase() === cuDisplayName.trim().toLowerCase());
+  const idx = _listArr.findIndex(_isMineRow);
   let rank, total, myHasanat;
   // ★ v76: نقاطي 0 → اخفي الودجت كله (مش في الترتيب)
   if ((cu.totalHasanat || 0) <= 0) { hide(); return; }
   // ★ v83: مركز كثيف — عدد قيم النقاط المختلفة الأعلى مني + 1 (متسق مع قائمة الترتيب العام)
+  //   ★ v89: استبعد صفوفي القديمة/المكررة عشان صفّي القديم ما يحسبش نفسه "أعلى مني"
   const _denseRankByPts = (h) => {
     const _ab = new Set();
-    for (const [, _d] of _listArr) { const _hh = (_d && _d.totalHasanat) || 0; if (_hh > h) _ab.add(_hh); }
+    for (const _row of _listArr) { if (_isMineRow(_row)) continue; const _hh = (_row[1] && _row[1].totalHasanat) || 0; if (_hh > h) _ab.add(_hh); }
     return _ab.size + 1;
   };
+  // ★ v89: نقاطي = حسابي الحالي (الحقيقة، زي الهوم) — مش صف اللوحة اللي ممكن يكون قديم
+  myHasanat = cu.totalHasanat || 0;
   if (idx >= 0) {
-    myHasanat = (_listArr[idx][1] && _listArr[idx][1].totalHasanat) || 0;
     rank = _denseRankByPts(myHasanat);
     total = _listArr.length;
   } else {
     // ★ مش لاقي صفّي في اللوحة → احسب ترتيبي من نقاطي مباشرة (الكارت/الميدالية ما يختفوش)
-    myHasanat = cu.totalHasanat || 0;
     if (myHasanat <= 0) { hide(); return; }
     rank = _denseRankByPts(myHasanat);
     total = _listArr.length + 1;
