@@ -1154,7 +1154,7 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   // ═══ نسخة التطبيق — بتتحدّث مع كل تسليم ═══
-  window.NOUR_VERSION = 'v90 — 2026-06-14';
+  window.NOUR_VERSION = 'v91 — 2026-06-14';
   console.log('%c🌙 نور ' + window.NOUR_VERSION, 'color:#F5D98B;font-weight:bold;font-size:14px');
   try {
     const _verEl = document.getElementById('appVerTag');
@@ -3008,8 +3008,26 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
         data = { ...data, name: _lsName, nameUpdatedAt: _lsTs };
       }
     }
+    // ★ v91: توحيد مفتاح اللوحة على الإيميل لنفس اللاعب — يمنع انقسام الصف.
+    //   كان الدخول بيكتب بمفتاح الإيميل واللعب بيكتب بمفتاح الاسم → صفّين لنفس الشخص
+    //   (بيتلمّوا في عرضي بس الحسابات التانية بتشوف Amir مكرر). لو الكتابة دي تخصّ
+    //   اللاعب الحالي المسجّل، استخدم إيميله كمفتاح موحّد — فاللعب والدخول يكتبوا نفس الصف.
+    let _canonUser = username;
+    if (!isGuest && window.currentUser && !window.currentUser.isGuest &&
+        window.currentUser.email && String(window.currentUser.email).includes('@')) {
+      const _cuEmail = String(window.currentUser.email);
+      const _nrm = window._normLbKey || (x => String(x||'').toLowerCase());
+      const _passNorm  = _nrm(dataKey(username));
+      const _emailNorm = _nrm(dataKey(_cuEmail));
+      const _uLow = String(username).trim().toLowerCase();
+      const _nameMatch = window.currentUser.name && !String(window.currentUser.name).includes('@') &&
+                         _uLow === String(window.currentUser.name).trim().toLowerCase();
+      if (_passNorm === _emailNorm || _uLow === _cuEmail.toLowerCase() || _nameMatch) {
+        _canonUser = _cuEmail; // وحّد على الإيميل (مفتاح واحد للّاعب الحالي)
+      }
+    }
     // ★ للمسجّلين: مفتاح موحّد (lowercase) عشان نفس الشخص = صفّ واحد بس في اللوحة
-    const key    = isGuest ? makeKey(username, true) : dataKey(username);
+    const key    = isGuest ? makeKey(username, true) : dataKey(_canonUser);
     const oldKey = makeKey(username, isGuest); // المفتاح القديم الحسّاس للأحرف
     const entryRef = ref(db, LB_PATH + key);
     if (oldKey !== key) remove(ref(db, LB_PATH + oldKey)).catch(() => {});
