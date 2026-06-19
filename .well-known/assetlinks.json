@@ -1,8 +1,0 @@
-[{
-  "relation": ["delegate_permission/common.handle_all_urls"],
-  "target": {
-    "namespace": "android_app",
-    "package_name": "io.github.nourquranofficial.twa",
-    "sha256_cert_fingerprints": ["4D:DF:5E:FD:DB:27:72:D8:F7:3A:34:22:AF:F9:66:AD:0A:13:28:DA:5A:82:7F:AF:D7:3E:FF:E0:CF:89:F0:44"]
-  }
-}]
