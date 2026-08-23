@@ -10217,9 +10217,8 @@ function closeFullRank() {
   const o = document.getElementById('fullRankOverlay');
   if (o) o.classList.remove('open');
 }
-const _origOpenFullRank = openFullRank;
 window.openFullRank = function() {
-  _origOpenFullRank();
+  openFullRank();
   history.pushState({ overlay: 'fullRank' }, '');
 };
 window.closeFullRank = closeFullRank;
