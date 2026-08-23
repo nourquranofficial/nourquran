@@ -9363,28 +9363,11 @@ function showScreen(id) {
 
 // لما Android يضغط Back → يطلق popstate بدل ما يغلق التطبيق
 window.addEventListener('popstate', function(e) {
-  // ★ لو overlay مفتوح → اقفله الأول
-  const rankOverlay = document.getElementById('fullRankOverlay');
-  if (rankOverlay && rankOverlay.classList.contains('open')) {
-    rankOverlay.classList.remove('open');
-    return;
-  }
-
   const stack = window._screenStack;
-
-  // ★ multiScreen دايماً يرجع للـ home مباشرة
-  const currentScreen = stack[stack.length - 1];
-  if (currentScreen === 'multiScreen') {
-    window._screenStack = ['homeScreen'];
-    history.replaceState({ screen: 'homeScreen' }, '');
-    document.querySelectorAll('.screen').forEach(s => s.classList.remove('show'));
-    document.getElementById('homeScreen').classList.add('show');
-    return;
-  }
-
   if (stack.length > 1) {
-    stack.pop();
+    stack.pop(); // نشيل الشاشة الحالية
     const prev = stack[stack.length - 1];
+    // نظهر الشاشة السابقة بدون pushState عشان مانعملش loop
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('show'));
     const el = document.getElementById(prev);
     if (el) el.classList.add('show');
@@ -10217,10 +10200,7 @@ function closeFullRank() {
   const o = document.getElementById('fullRankOverlay');
   if (o) o.classList.remove('open');
 }
-window.openFullRank = function() {
-  openFullRank();
-  history.pushState({ overlay: 'fullRank' }, '');
-};
+window.openFullRank = openFullRank;
 window.closeFullRank = closeFullRank;
 
 function showToast(msg, dur=2500) {
