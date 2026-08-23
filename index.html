@@ -1147,57 +1147,25 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   display:flex; align-items:center;
 }
 .pw-eye:hover { color:var(--gold); }
-/* 1. منع السحب للإسفل والـ Pull-to-Refresh (تعزيز عبر CSS، والـ JS بعده كضمان إضافي) */
+/* 1. منع السحب للإسفل والـ Pull-to-Refresh */
 html, body {
   overscroll-behavior-y: none !important;
-  overscroll-behavior-x: none !important;
   touch-action: pan-x pan-y;
-  overflow-x: hidden;
 }
 
-/* 2. منع ظهور قائمة التحديد واللمس المزعجة (تحديد النص / القائمة المنبثقة) وأثر اللمس اللي بيدي إحساس المتصفح */
+/* 2. منع ظهور قائمة التحديد واللمس المزعجة في الأندرويد */
 * {
   -webkit-touch-callout: none !important; /* يمنع قائمة خيارات الضغط المطول */
   -webkit-user-select: none !important;   /* يمنع تحديد النصوص */
-  -moz-user-select: none !important;
-  -ms-user-select: none !important;
   user-select: none !important;
-  -webkit-tap-highlight-color: transparent !important; /* يمنع فلاش التظليل الرمادي/الأزرق عند اللمس */
 }
 
 /* 3. استثناء الخانات التي يحتاج المستخدم الكتابة فيها */
 input, textarea, [contenteditable="true"] {
   -webkit-user-select: text !important;
-  -moz-user-select: text !important;
-  -ms-user-select: text !important;
   user-select: text !important;
 }
 </style>
-
-<script>
-/* حماية إضافية (JS) لمنع الـ Pull-to-Refresh ومنع قائمة اللمس الطويل التي تظهر كأنها متصفح،
-   وذلك كضمان في حالة أن بعض إصدارات WebView على أندرويد لا تحترم overscroll-behavior في الـ CSS.
-   لا تعدّل أي منطق آخر في التطبيق. */
-(function(){
-  var _startY = 0;
-  document.addEventListener('touchstart', function(e){
-    if (e.touches && e.touches.length === 1) _startY = e.touches[0].clientY;
-  }, {passive:true});
-
-  document.addEventListener('touchmove', function(e){
-    if (!e.touches || e.touches.length !== 1) return;
-    var y = e.touches[0].clientY;
-    var scrollTop = window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
-    // لو المستخدم عند أعلى الصفحة وبيسحب لتحت -> امنع السحب (يمنع الـ refresh والخروج للصفحة الرئيسية)
-    if (scrollTop <= 0 && y > _startY) {
-      e.preventDefault();
-    }
-  }, {passive:false});
-
-  // منع قائمة الضغط المطول (نسخ / مشاركة / بحث ويب) التي تظهر بشكل متصفح وليس تطبيق
-  document.addEventListener('contextmenu', function(e){ e.preventDefault(); }, false);
-})();
-</script>
 
 <!-- Firebase -->
 <script type="module">
@@ -9413,6 +9381,15 @@ window.addEventListener('popstate', function(e) {
     return;
   }
 
+  // ★ أولوية: لو نافذة الترتيب العام مفتوحة → نقفلها بس ونرجع للرئيسية
+  const fullRank = document.getElementById('fullRankOverlay');
+  if (fullRank && fullRank.classList.contains('open')) {
+    fullRank.classList.remove('open');
+    // نثبّت الـ state على homeScreen عشان ما يحصلش خروج
+    history.replaceState({ screen: 'homeScreen' }, '');
+    return;
+  }
+
   const stack = window._screenStack;
   if (stack.length > 1) {
     stack.pop();
@@ -10240,6 +10217,8 @@ function openFullRank() {
     }).join('');
   }
   overlay.classList.add('open');
+  // ★ الباك يقفل النافذة ويرجع للرئيسية بدل ما يخرج من التطبيق
+  history.pushState({ sheet: 'fullRankOverlay' }, '');
   // ★ عدّاد اللاعبين في العنوان + تلميح التمرير
   try {
     const _t = overlay.querySelector('.sheet-title');
@@ -10250,7 +10229,14 @@ function openFullRank() {
 }
 function closeFullRank() {
   const o = document.getElementById('fullRankOverlay');
-  if (o) o.classList.remove('open');
+  if (!o) return;
+  const wasOpen = o.classList.contains('open');
+  if (!wasOpen) return;
+  o.classList.remove('open');
+  // لو اتقفل بـ click (مش بـ back) → نمسح الـ history entry يدوياً بدون ما نطلع برا
+  if (history.state && history.state.sheet === 'fullRankOverlay') {
+    history.replaceState({ screen: 'homeScreen' }, '');
+  }
 }
 window.openFullRank = openFullRank;
 window.closeFullRank = closeFullRank;
