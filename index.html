@@ -9339,10 +9339,50 @@ function renderMistakesForDay(mistakes, dayKey) {
   }).join('');
 }
 
+// ─── Android Back Button Fix ───────────────────────────────
+// نحتفظ بـ stack الشاشات عشان زر الباك يرجع للشاشة السابقة
+window._screenStack = ['homeScreen'];
+
 function showScreen(id) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('show'));
   document.getElementById(id).classList.add('show');
+
+  // لو الشاشة الجديدة مختلفة عن الحالية → ندفع state جديد في الـ history
+  const stack = window._screenStack;
+  if (stack[stack.length - 1] !== id) {
+    if (id === 'homeScreen') {
+      // الرجوع للـ home يمسح الـ stack
+      window._screenStack = ['homeScreen'];
+      history.replaceState({ screen: 'homeScreen' }, '');
+    } else {
+      window._screenStack.push(id);
+      history.pushState({ screen: id }, '');
+    }
+  }
 }
+
+// لما Android يضغط Back → يطلق popstate بدل ما يغلق التطبيق
+window.addEventListener('popstate', function(e) {
+  const stack = window._screenStack;
+  if (stack.length > 1) {
+    stack.pop(); // نشيل الشاشة الحالية
+    const prev = stack[stack.length - 1];
+    // نظهر الشاشة السابقة بدون pushState عشان مانعملش loop
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('show'));
+    const el = document.getElementById(prev);
+    if (el) el.classList.add('show');
+  } else {
+    // الـ stack فاضي → المستخدم على الـ home → اسمح للـ Android يخرج طبيعي
+    history.back();
+  }
+});
+
+// تأكد من وجود state ابتدائي في الـ history عند فتح التطبيق
+(function initHistory() {
+  if (!history.state || !history.state.screen) {
+    history.replaceState({ screen: 'homeScreen' }, '');
+  }
+})();
 
 // ============================================================
 // ===== SURAH REVIEW SYSTEM =====
