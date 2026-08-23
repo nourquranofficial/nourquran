@@ -9108,11 +9108,12 @@ function openGameSheet() {
 function closeGameSheet(e) {
   if (e && e.target !== document.getElementById('gameSheet')) return;
   const wasOpen = document.getElementById('gameSheet').classList.contains('open');
+  if (!wasOpen) return;
   document.getElementById('gameSheet').classList.remove('open');
   document.body.style.overflow = '';
-  // لو اتقفل بـ click مش بـ back-button → نرجع الـ history entry اللي أضفناه
-  if (wasOpen && history.state && history.state.sheet === 'gameSheet') {
-    history.back();
+  // لو اتقفل بـ click (مش بـ back) → نمسح الـ history entry يدوياً بدون ما نطلع برا
+  if (history.state && history.state.sheet === 'gameSheet') {
+    history.replaceState({ screen: 'homeScreen' }, '');
   }
 }
 
@@ -9370,25 +9371,29 @@ function showScreen(id) {
 
 // لما Android يضغط Back → يطلق popstate بدل ما يغلق التطبيق
 window.addEventListener('popstate', function(e) {
-  // ★ أولوية: لو gameSheet مفتوح → نقفله ونرجع للشاشة الحالية (homeScreen)
+  // ★ أولوية: لو gameSheet مفتوح → نقفله فقط، مش نعمل حاجة تانية
   const sheet = document.getElementById('gameSheet');
   if (sheet && sheet.classList.contains('open')) {
     sheet.classList.remove('open');
     document.body.style.overflow = '';
+    // نثبّت الـ state على homeScreen عشان ما يحصلش خروج
+    history.replaceState({ screen: 'homeScreen' }, '');
     return;
   }
 
   const stack = window._screenStack;
   if (stack.length > 1) {
-    stack.pop(); // نشيل الشاشة الحالية
+    stack.pop();
     const prev = stack[stack.length - 1];
-    // نظهر الشاشة السابقة بدون pushState عشان مانعملش loop
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('show'));
     const el = document.getElementById(prev);
     if (el) el.classList.add('show');
+    // نثبّت الـ state على الشاشة الحالية
+    history.replaceState({ screen: prev }, '');
   } else {
-    // الـ stack فاضي → المستخدم على الـ home → اسمح للـ Android يخرج طبيعي
-    history.back();
+    // على الـ home → نضيف entry جديد عشان الباك التالي يطلع من التطبيق طبيعي
+    history.replaceState({ screen: 'homeScreen' }, '');
+    history.pushState({ screen: 'homeScreen' }, '');
   }
 });
 
