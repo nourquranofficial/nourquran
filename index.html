@@ -1147,6 +1147,24 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   display:flex; align-items:center;
 }
 .pw-eye:hover { color:var(--gold); }
+/* 1. منع السحب للإسفل والـ Pull-to-Refresh */
+html, body {
+  overscroll-behavior-y: none !important;
+  touch-action: pan-x pan-y;
+}
+
+/* 2. منع ظهور قائمة التحديد واللمس المزعجة في الأندرويد */
+* {
+  -webkit-touch-callout: none !important; /* يمنع قائمة خيارات الضغط المطول */
+  -webkit-user-select: none !important;   /* يمنع تحديد النصوص */
+  user-select: none !important;
+}
+
+/* 3. استثناء الخانات التي يحتاج المستخدم الكتابة فيها */
+input, textarea, [contenteditable="true"] {
+  -webkit-user-select: text !important;
+  user-select: text !important;
+}
 </style>
 
 <!-- Firebase -->
