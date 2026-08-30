@@ -1165,6 +1165,102 @@ input, textarea, [contenteditable="true"] {
   -webkit-user-select: text !important;
   user-select: text !important;
 }
+
+/* ═══════ التسميع الصوتي (Voice Recitation) ═══════ */
+.mic-recite-btn {
+  background: linear-gradient(135deg,#2ecc71,#27ae60);
+  color: #fff;
+  border: none;
+  border-radius: 24px;
+  padding: 9px 18px;
+  font-family: 'Cairo', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 3px 12px rgba(46,204,113,0.3);
+  transition: transform .2s cubic-bezier(.175,.885,.32,1.275), background-color .3s ease, box-shadow .3s ease;
+  outline: none;
+  margin: 8px auto 0;
+  position: relative;
+}
+.mic-recite-btn:active { transform: scale(0.93); }
+.mic-recite-btn.recording {
+  background: linear-gradient(135deg,#e67e22,#d35400);
+  box-shadow: 0 3px 12px rgba(230,126,34,0.4);
+}
+.mic-recite-btn.recording::before,
+.mic-recite-btn.recording::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 24px;
+  border: 2px solid #e67e22;
+  opacity: .8;
+  animation: micPulseWave 1.6s linear infinite;
+  pointer-events: none;
+}
+.mic-recite-btn.recording::after { animation-delay: .8s; }
+@keyframes micPulseWave {
+  0%   { transform: scale(1); opacity: .8; }
+  100% { transform: scale(1.25); opacity: 0; }
+}
+
+.voice-recite-wrap {
+  display: none;
+  text-align: center;
+  margin: 14px 0;
+  opacity: 0;
+  transform: translateY(-8px);
+  transition: opacity .35s ease .1s, transform .35s ease .1s;
+}
+.voice-recite-wrap.fade-in-ayah { opacity: 1; transform: translateY(0); }
+
+.voice-ayah-display {
+  font-family: 'Amiri', serif;
+  font-size: 1.35rem;
+  line-height: 2.4;
+  direction: rtl;
+  padding: 16px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(201,151,58,0.2);
+  border-radius: 14px;
+  margin-bottom: 12px;
+}
+.voice-word {
+  display: inline-block;
+  color: rgba(230,230,230,0.35);
+  margin: 0 3px;
+  transition: color .25s ease, transform .2s ease, font-weight .2s ease;
+}
+.voice-word.correct-word {
+  color: #2ecc71;
+  font-weight: 700;
+  transform: scale(1.04);
+}
+.voice-word.wrong-word {
+  color: #e74c3c;
+  font-weight: 700;
+  animation: voiceWordShake .4s ease-in-out;
+}
+@keyframes voiceWordShake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-4px); }
+  75% { transform: translateX(4px); }
+}
+.voice-status-txt {
+  font-size: 12px;
+  color: rgba(245,217,139,0.6);
+  min-height: 16px;
+}
+.fade-out-content {
+  opacity: 0 !important;
+  transform: translateY(-8px);
+  transition: opacity .3s ease, transform .3s ease;
+  pointer-events: none;
+}
 </style>
 
 <!-- Firebase -->
@@ -4299,7 +4395,7 @@ function _callWhenReady(fn, args) {
       <div style="display:flex;gap:9px;align-items:center;">
         <span id="globalRankChip" class="rank-chip-circle" onclick="openFullRank()" title="ترتيبك العام" style="display:none;width:30px;height:30px;font-size:12px;cursor:pointer;">#٠</span>
         <span style="font-size:13px;color:var(--gold);" id="userLevelDisplay">المستوى ١</span>
-        <span class="user-logout" onclick="resetScore()" style="color:rgba(255,120,100,0.5);" title="تصفير النقاط">🔄</span>
+        <span class="user-logout" onclick="openRecitationPicker()" style="color:rgba(46,204,113,0.75);" title="التسميع الصوتي — سمّع سورة أو جزء كامل">🎤</span>
         <span class="user-logout" onclick="doForgotPassword()" style="color:rgba(245,217,139,0.5);font-size:12px;" title="تغيير كلمة المرور">🔑</span>
         <button onclick="doLogout()" ontouchend="event.preventDefault();doLogout();" style="background:none;border:none;font-size:13px;color:rgba(245,217,139,0.55);cursor:pointer;font-family:'Cairo',sans-serif;padding:6px 10px;border-radius:8px;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">خروج ↩</button>
       </div>
@@ -4660,6 +4756,18 @@ function _callWhenReady(fn, args) {
     </div>
     <div class="q-hint" id="qHint">اختر الكلمة الصحيحة</div>
     <div class="hasanat-multiplier" id="hasanatMultiplier"></div>
+
+    <!-- ★ التسميع الصوتي: طريقة بديلة لحل السؤال بالصوت بدل الاختيار/الكتابة -->
+    <div style="text-align:center;">
+      <button class="mic-recite-btn" id="micReciteBtn" onclick="toggleVoiceRecitation()" title="سمّع الآية بصوتك بدل الإجابة">
+        🎤 <span id="micReciteBtnTxt">سمّع بدل الإجابة</span>
+      </button>
+    </div>
+    <div class="voice-recite-wrap" id="voiceReciteWrap">
+      <div class="voice-ayah-display" id="voiceAyahDisplay"></div>
+      <div class="voice-status-txt" id="voiceStatusTxt">🎙️ بيسمعك دلوقتي... اتكلم بترتيل واضح</div>
+      <div id="voiceInterimTxt" style="font-size:11px;color:rgba(245,217,139,0.4);min-height:14px;margin-top:2px;"></div>
+    </div>
 
     <!-- Hints -->
     <div class="hints-row" id="hintsRow">
@@ -8598,6 +8706,7 @@ function renderQuestion() {
     document.querySelector('.typing-submit').disabled = false;
   }
   resetHintsUI();
+  stopVoiceRecitation(true);
 
   const activeMode = state.isReviewMode ? 'mcq' : state.mode;
 
@@ -8715,6 +8824,629 @@ function checkAnswer(chosen, correct, e) {
     else if ((bText === chosenText || b.textContent === chosenText) && !isRight) b.classList.add('wrong');
   });
   handleResult(isRight, e);
+}
+
+/* ═══════ التسميع الصوتي (Voice Recitation) ═══════
+   طريقة بديلة لحل سؤال شاشة التحدي: بدل الاختيار من متعدد أو الكتابة،
+   يقدر المستخدم يسمّع الآية كاملة بصوته. بمجرد ما يخلّص صح، بنستدعي
+   checkAnswer/handleResult الأصليين عشان النقط والمستوى يتحسبوا زي أي إجابة عادية. */
+let _voiceRecognition = null;
+let _voiceWords = [];
+let _voiceWordIdx = 0;
+
+function _cleanArabicForMatch(text) {
+  if (!text) return '';
+  return text
+    .replace(/[\u064B-\u065F\u0670]/g, '')   // إزالة التشكيل
+    .replace(/[۞۩ۘۙۚۛۗۦٰۧۨ]/g, '')            // رموز الوقف العثمانية
+    .replace(/[أإآ]/g, 'ا')
+    .replace(/ة/g, 'ه')
+    .replace(/ى/g, 'ي')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
+let _voiceManualStop = false;
+let _voiceInterimCounts = {};
+let _voiceRestartCount = 0;
+
+function toggleVoiceRecitation() {
+  const wrap = document.getElementById('voiceReciteWrap');
+  const isOpen = wrap.style.display === 'block';
+  if (isOpen) {
+    stopVoiceRecitation(true);
+  } else {
+    startVoiceRecitation();
+  }
+}
+
+/* ─── مطابقة صوتية ذكية (متسامحة مع فروق التعرف الصوتي البسيطة) ───
+   بدل المطابقة الحرفية اللي كانت بتفشل مع أي اختلاف بسيط في التعرف الصوتي،
+   دلوقتي بنستخدم: (1) تشابه تقريبي (Levenshtein) بدل التطابق الحرفي،
+   (2) معالجة حالة إن التعرف الصوتي قسّم كلمة لكلمتين أو دمج كلمتين في كلمة. */
+function _levenshteinDist(a, b) {
+  const m = a.length, n = b.length;
+  if (!m) return n;
+  if (!n) return m;
+  const dp = new Array(n + 1);
+  for (let j = 0; j <= n; j++) dp[j] = j;
+  for (let i = 1; i <= m; i++) {
+    let prev = dp[0];
+    dp[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const tmp = dp[j];
+      dp[j] = a[i - 1] === b[j - 1] ? prev : 1 + Math.min(prev, dp[j], dp[j - 1]);
+      prev = tmp;
+    }
+  }
+  return dp[n];
+}
+function _wordsSimilar(a, b) {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const maxLen = Math.max(a.length, b.length);
+  if (maxLen <= 2) return false; // كلمات قصيرة جداً لازم تتطابق تماماً (تجنب موجب خاطئ)
+  const dist = _levenshteinDist(a, b);
+  return (1 - dist / maxLen) >= 0.72;
+}
+function _markVoiceWord(prefix, idx, correct) {
+  const el = document.getElementById(prefix + idx);
+  if (el) el.className = 'voice-word ' + (correct ? 'correct-word' : 'wrong-word');
+}
+/* المطابقة الأساسية — مشتركة بين وضع الاختبار والتسميع الحر */
+function _matchSpokenBatch(spokenWords, ctx) {
+  const targetWords = ctx.getWords();
+  let idx = ctx.getIdx();
+  let i = 0;
+  let mistakeHappened = false;
+  while (i < spokenWords.length && idx < targetWords.length) {
+    const spoken = _cleanArabicForMatch(spokenWords[i]);
+    if (!spoken) { i++; continue; }
+    const target = _cleanArabicForMatch(targetWords[idx]);
+
+    if (_wordsSimilar(spoken, target)) {
+      _markVoiceWord(ctx.wordElPrefix, idx, true);
+      if (ctx.onCorrectWord) ctx.onCorrectWord(idx);
+      idx++; i++;
+      continue;
+    }
+    // التعرف الصوتي قسّم كلمة هدف واحدة لكلمتين منطوقتين
+    if (i + 1 < spokenWords.length) {
+      const merged = spoken + _cleanArabicForMatch(spokenWords[i + 1]);
+      if (_wordsSimilar(merged, target)) {
+        _markVoiceWord(ctx.wordElPrefix, idx, true);
+        if (ctx.onCorrectWord) ctx.onCorrectWord(idx);
+        idx++; i += 2;
+        continue;
+      }
+    }
+    // التعرف الصوتي دمج كلمتين هدف (زي حرف جر قصير + اللي بعده) في كلمة منطوقة واحدة
+    if (idx + 1 < targetWords.length) {
+      const mergedTarget = target + _cleanArabicForMatch(targetWords[idx + 1]);
+      if (_wordsSimilar(spoken, mergedTarget)) {
+        _markVoiceWord(ctx.wordElPrefix, idx, true);
+        _markVoiceWord(ctx.wordElPrefix, idx + 1, true);
+        if (ctx.onCorrectWord) { ctx.onCorrectWord(idx); ctx.onCorrectWord(idx + 1); }
+        idx += 2; i++;
+        continue;
+      }
+    }
+    // خطأ فعلي
+    _markVoiceWord(ctx.wordElPrefix, idx, false);
+    mistakeHappened = true;
+    if (ctx.onMistakeWord) ctx.onMistakeWord(idx, spokenWords[i]);
+    idx++; i++;
+    if (ctx.stopOnMistake) break;
+  }
+  ctx.setIdx(idx);
+  if (idx >= targetWords.length) {
+    if (ctx.onDone) ctx.onDone();
+  } else if (mistakeHappened && ctx.onMistake) {
+    ctx.onMistake();
+  }
+}
+
+function startVoiceRecitation() {
+  if (state.answered) return; // السؤال اتجاوب خلاص
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    showToast('التسميع الصوتي غير مدعوم في هذا المتصفح، جرّب Google Chrome 🎙️');
+    return;
+  }
+  const q = state.questions[state.qIndex];
+  if (!q || !q.ayah) return;
+
+  const micBtn = document.getElementById('micReciteBtn');
+  const micBtnTxt = document.getElementById('micReciteBtnTxt');
+  const wrap = document.getElementById('voiceReciteWrap');
+  const display = document.getElementById('voiceAyahDisplay');
+  const statusTxt = document.getElementById('voiceStatusTxt');
+
+  // إخفاء طرق الإجابة العادية بانتقال ناعم، وإظهار شاشة التسميع
+  ['mcqWrap', 'typingWrap', 'listenWrap'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el && el.style.display !== 'none') el.classList.add('fade-out-content');
+  });
+
+  _voiceWords = q.ayah.split(/\s+/);
+  _voiceWordIdx = 0;
+  _voiceManualStop = false;
+  _voiceRestartCount = 0;
+  display.innerHTML = _voiceWords.map((w, i) => `<span class="voice-word" id="voiceWord-${i}">${w}</span>`).join(' ');
+  statusTxt.textContent = '🎙️ بيسمعك دلوقتي... اتكلم بترتيل واضح';
+
+  wrap.style.display = 'block';
+  requestAnimationFrame(() => wrap.classList.add('fade-in-ayah'));
+  micBtn.classList.add('recording');
+  micBtnTxt.textContent = 'إيقاف الاستماع';
+  const voiceInterimReset = document.getElementById('voiceInterimTxt');
+  if (voiceInterimReset) voiceInterimReset.textContent = '';
+
+  _voiceRecognition = new SpeechRecognition();
+  _voiceRecognition.lang = 'ar-SA';
+  _voiceRecognition.interimResults = true;
+  _voiceRecognition.continuous = true;
+  _voiceInterimCounts = {}; // تتبّع عدد الكلمات اللي سبق معالجتها من كل نتيجة مؤقتة
+
+  _voiceRecognition.onresult = function(event) {
+    for (let i = event.resultIndex; i < event.results.length; ++i) {
+      const transcript = event.results[i].transcript.trim();
+      const interimEl = document.getElementById('voiceInterimTxt');
+      if (transcript) _voiceRestartCount = 0; // ★ لسه بيسمع صوت فعلي — مش مشكلة صلاحيات
+      if (interimEl && !event.results[i].isFinal) interimEl.textContent = transcript ? ('سمعت: ' + transcript) : '';
+      const allWords = transcript ? transcript.split(/\s+/) : [];
+      // ★ بعض إصدارات كروم (خصوصاً على أندرويد) نادراً ما بتخلّي isFinal تبقى true
+      // في وضع continuous، فبنعالج الكلمات الجديدة أول ما تظهر في النتيجة المؤقتة
+      // بدل ما ننتظر النتيجة النهائية اللي ممكن ما توصلش أصلاً
+      const already = _voiceInterimCounts[i] || 0;
+      const spokenWords = allWords.slice(already);
+      if (!spokenWords.length) continue;
+      _voiceInterimCounts[i] = allWords.length;
+      if (event.results[i].isFinal && interimEl) interimEl.textContent = '';
+      _matchSpokenBatch(spokenWords, {
+        getWords: () => _voiceWords,
+        getIdx: () => _voiceWordIdx,
+        setIdx: (v) => { _voiceWordIdx = v; },
+        wordElPrefix: 'voiceWord-',
+        stopOnMistake: true,
+        onDone: () => {
+          statusTxt.textContent = '✅ تسميع صحيح ومتقن!';
+          stopVoiceRecitation(false);
+          setTimeout(() => checkAnswer(q.blank, q.blank), 250);
+        },
+        onMistake: () => {
+          statusTxt.textContent = '❌ في اختلاف — دوس الميكروفون وحاول تاني';
+          stopVoiceRecitation(false);
+        }
+      });
+    }
+  };
+
+  _voiceRecognition.onerror = function(event) {
+    // no-speech / aborted مؤقتين وهيعاد المحاولة تلقائياً من onend، مش لازم نوقف أو نبلّغ
+    if (event.error === 'no-speech' || event.error === 'aborted') return;
+    if (event.error === 'not-allowed' || event.error === 'permission-denied') {
+      statusTxt.textContent = '❌ الميكروفون مرفوض — فعّل الإذن من إعدادات المتصفح';
+      _voiceManualStop = true;
+    } else if (event.error === 'network') {
+      statusTxt.textContent = '❌ الاتصال بالإنترنت ضعيف — التعرف الصوتي محتاج نت';
+    }
+  };
+  _voiceRecognition.onend = function() {
+    if (_voiceManualStop || _voiceWordIdx >= _voiceWords.length) {
+      micBtn.classList.remove('recording');
+      micBtnTxt.textContent = 'سمّع بدل الإجابة';
+      return;
+    }
+    _voiceRestartCount++;
+    // ★ لو اتوقف واتعاد كتير من غير ما نسمع ولا كلمة واحدة، الغالب إن كروم
+    // بيطلب إذن الميكروفون في كل مرة بدل ما يفتكره — مش هنفضل نلحّ عليه
+    if (_voiceRestartCount >= 5) {
+      statusTxt.textContent = '⚠️ الميكروفون بيطلب إذن كل مرة — افتح إعدادات الموقع في كروم (🔒 بجانب الرابط) وخلي إذن الميكروفون "مسموح" مش "يسأل كل مرة"';
+      _voiceManualStop = true;
+      micBtn.classList.remove('recording');
+      micBtnTxt.textContent = 'سمّع بدل الإجابة';
+      return;
+    }
+    // ★ كروم بيوقف continuous mode أحياناً بعد أول وقفة قصيرة — نعيد التشغيل تلقائياً
+    setTimeout(() => { if (!_voiceManualStop && _voiceRecognition) { try { _voiceRecognition.start(); } catch (e) {} } }, 250);
+  };
+
+  try { _voiceRecognition.start(); } catch (err) { stopVoiceRecitation(true); }
+}
+
+function stopVoiceRecitation(restoreAnswerUI) {
+  _voiceManualStop = true;
+  if (_voiceRecognition) {
+    try { _voiceRecognition.stop(); } catch (err) {}
+    _voiceRecognition = null;
+  }
+  const micBtn = document.getElementById('micReciteBtn');
+  const micBtnTxt = document.getElementById('micReciteBtnTxt');
+  if (micBtn) micBtn.classList.remove('recording');
+  if (micBtnTxt) micBtnTxt.textContent = 'سمّع بدل الإجابة';
+
+  if (restoreAnswerUI) {
+    const wrap = document.getElementById('voiceReciteWrap');
+    if (wrap) { wrap.classList.remove('fade-in-ayah'); wrap.style.display = 'none'; }
+    ['mcqWrap', 'typingWrap', 'listenWrap'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.classList.remove('fade-out-content');
+    });
+  }
+}
+
+/* ═══════ التسميع الحر لسورة/جزء كامل (بديل زر تصفير النقاط) ═══════ */
+let _reciteTab = 'surah';
+let _freeReciteQueue = [];      // [{surahNum, surahName, num, text}, ...]
+let _freeReciteIdx = 0;         // مؤشر الآية الحالية داخل الطابور
+let _freeReciteWords = [];
+let _freeReciteWordIdx = 0;
+let _freeReciteRecognition = null;
+let _freeReciteManualStop = false;
+let _freeReciteInterimCounts = {};
+let _freeReciteRestartCount = 0;
+let _freeReciteSession = null;  // {startTime, correct, wrong, mistakes:[], ayahsDone, ayahsTotal, titleText}
+let _freeReciteHeardAnything = false; // هل وصلت أي نتيجة (حتى مؤقتة) من الـ Speech API لحد دلوقتي
+let _freeReciteHeardWatchdog = null;  // مؤقّت تحذير لو مفيش نتائج بترجع خالص
+
+function openRecitationPicker() {
+  document.getElementById('recitePickerOverlay').style.display = 'block';
+  document.getElementById('reciteSearchInput').value = '';
+  switchReciteTab('surah');
+}
+function closeRecitationPicker() {
+  document.getElementById('recitePickerOverlay').style.display = 'none';
+}
+function switchReciteTab(tab) {
+  _reciteTab = tab;
+  document.getElementById('reciteTabSurah').style.background = tab === 'surah' ? '' : 'rgba(255,255,255,0.06)';
+  document.getElementById('reciteTabJuz').style.background = tab === 'juz' ? '' : 'rgba(255,255,255,0.06)';
+  renderReciteList();
+}
+function renderReciteList() {
+  const q = (document.getElementById('reciteSearchInput').value || '').trim();
+  const wrap = document.getElementById('reciteListWrap');
+  let html = '';
+  if (_reciteTab === 'surah') {
+    SURAHS_FULL.forEach((s, i) => {
+      const num = i + 1;
+      const name = s[0];
+      if (q && !name.includes(q) && String(num) !== q) return;
+      html += `<div onclick="startFreeRecitationSurah(${num})" style="padding:12px 14px;margin-bottom:6px;background:rgba(255,255,255,0.04);border:1px solid rgba(201,151,58,0.15);border-radius:10px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;font-family:'Cairo',sans-serif;color:rgba(245,217,139,0.9);">
+        <span>${name}</span><span style="font-size:11px;color:rgba(245,217,139,0.5);">${toArabicNum(num)} · ${toArabicNum(s[1])} آية</span>
+      </div>`;
+    });
+  } else {
+    JUZ_NAMES.forEach((jname, i) => {
+      const num = i + 1;
+      if (q && !jname.includes(q) && String(num) !== q) return;
+      html += `<div onclick="startFreeRecitationJuz(${num})" style="padding:12px 14px;margin-bottom:6px;background:rgba(255,255,255,0.04);border:1px solid rgba(201,151,58,0.15);border-radius:10px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;font-family:'Cairo',sans-serif;color:rgba(245,217,139,0.9);">
+        <span>الجزء ${toArabicNum(num)}</span><span style="font-size:11px;color:rgba(245,217,139,0.5);">${jname}</span>
+      </div>`;
+    });
+  }
+  wrap.innerHTML = html || '<div style="text-align:center;color:rgba(245,217,139,0.4);padding:20px;">لا نتائج</div>';
+}
+
+function _buildAyahQueueForSurah(surahNum) {
+  const ayahs = QURAN_LOCAL[surahNum] || [];
+  const surahName = SURAHS_FULL[surahNum - 1] ? SURAHS_FULL[surahNum - 1][0] : ('سورة ' + surahNum);
+  return ayahs.map(a => ({ surahNum, surahName, num: a.n, text: a.t }));
+}
+
+function startFreeRecitationSurah(surahNum) {
+  const queue = _buildAyahQueueForSurah(surahNum);
+  if (!queue.length) { showToast('نص السورة غير متوفر محلياً حالياً'); return; }
+  closeRecitationPicker();
+  _openFreeReciteScreen(queue, SURAHS_FULL[surahNum - 1][0]);
+}
+
+function startFreeRecitationJuz(juzNum) {
+  const ranges = JUZ_SURAHS[juzNum] || [];
+  let queue = [];
+  ranges.forEach(r => {
+    const all = _buildAyahQueueForSurah(r.s);
+    queue = queue.concat(all.filter(a => a.num >= r.a && a.num <= r.e));
+  });
+  if (!queue.length) { showToast('نص الجزء غير متوفر محلياً حالياً'); return; }
+  closeRecitationPicker();
+  _openFreeReciteScreen(queue, 'الجزء ' + toArabicNum(juzNum) + ' — ' + (JUZ_NAMES[juzNum - 1] || ''));
+}
+
+function _openFreeReciteScreen(queue, titleText) {
+  _freeReciteQueue = queue;
+  _freeReciteIdx = 0;
+  _freeReciteSession = { startTime: Date.now(), correct: 0, wrong: 0, mistakes: [], ayahsDone: 0, ayahsTotal: queue.length, titleText };
+  document.getElementById('freeReciteTitle').textContent = titleText;
+  document.getElementById('freeReciteScreen').style.display = 'block';
+  _renderFreeReciteCurrentAyah();
+}
+
+function _renderFreeReciteCurrentAyah() {
+  const item = _freeReciteQueue[_freeReciteIdx];
+  const display = document.getElementById('freeReciteAyahDisplay');
+  const progress = document.getElementById('freeReciteProgress');
+  if (!item) return;
+  progress.textContent = toArabicNum(_freeReciteIdx + 1) + ' / ' + toArabicNum(_freeReciteQueue.length);
+  _freeReciteWords = item.text.split(/\s+/);
+  _freeReciteWordIdx = 0;
+  display.innerHTML = `<div style="font-size:11px;color:rgba(245,217,139,0.5);margin-bottom:8px;">${item.surahName} — آية ${toArabicNum(item.num)}</div>` +
+    _freeReciteWords.map((w, i) => `<span class="voice-word" id="freeWord-${i}">${w}</span>`).join(' ');
+  document.getElementById('freeReciteStatus').textContent = 'اضغط الميكروفون وابدأ 🎙️';
+
+  // زر الاستماع لصوت الشيخ العفاسي — يشتغل باستخدام نفس مشغل الصوت المستخدم في الاختبار
+  const listenBtn = document.getElementById('freeReciteListenBtn');
+  if (listenBtn && item.surahNum && item.num) {
+    listenBtn.textContent = '🔊 استمع للشيخ العفاسي';
+    listenBtn.classList.remove('playing');
+    listenBtn.onclick = () => {
+      const s = String(item.surahNum).padStart(3, '0');
+      const a = String(item.num).padStart(3, '0');
+      _playMp3(`https://everyayah.com/data/Alafasy_128kbps/${s}${a}.mp3`, listenBtn, null);
+    };
+  }
+}
+
+function exitFreeRecitation() {
+  _stopFreeRecitation();
+  document.getElementById('freeReciteScreen').style.display = 'none';
+  const s = _freeReciteSession;
+  _freeReciteSession = null;
+  // نعرض تقرير الجلسة لو المستخدم سمّع كمية كافية تستاهل تقرير
+  if (s && (s.correct + s.wrong) >= 5) _showReciteReport(s, false);
+}
+
+async function toggleFreeRecitation() {
+  const micBtn = document.getElementById('freeReciteMicBtn');
+  if (micBtn.classList.contains('recording')) {
+    _stopFreeRecitation();
+    return;
+  }
+
+  // ★ لازم Secure Context (https أو localhost) — من غيره الـ Speech API بترجع صامتة تماماً
+  if (!window.isSecureContext) {
+    showToast('التسميع الصوتي محتاج اتصال آمن (https) — افتح الموقع بالرابط الرسمي 🔒');
+    return;
+  }
+
+  const SpeechRecognitionCheck = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognitionCheck) {
+    showToast('التسميع الصوتي غير مدعوم في هذا المتصفح — افتح الموقع في Google Chrome (وليس متصفح داخل تطبيق تاني) 🎙️');
+    return;
+  }
+
+  // ★ طلب إذن الميكروفون صراحة أولاً — لو الإذن مرفوض، التعرف الصوتي بيفضل صامت من غير أي خطأ واضح
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    stream.getTracks().forEach(t => t.stop());
+  } catch (permErr) {
+    showToast('محتاجين إذن الميكروفون عشان نسمعك 🎙️ — فعّل الإذن من إعدادات المتصفح/التطبيق');
+    return;
+  }
+  _freeReciteManualStop = false;
+  _freeReciteRestartCount = 0;
+  _freeReciteHeardAnything = false;
+  _startFreeRecitationListening();
+}
+
+function _startFreeRecitationListening() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    showToast('التسميع الصوتي غير مدعوم في هذا المتصفح، جرّب Google Chrome 🎙️');
+    return;
+  }
+  const micBtn = document.getElementById('freeReciteMicBtn');
+  const micTxt = document.getElementById('freeReciteMicTxt');
+  const statusTxt = document.getElementById('freeReciteStatus');
+
+  micBtn.classList.add('recording');
+  micTxt.textContent = 'إيقاف الاستماع';
+  statusTxt.textContent = '🎙️ بيسمعك دلوقتي... اتكلم بترتيل واضح';
+  const interimReset = document.getElementById('freeReciteInterimTxt');
+  if (interimReset) interimReset.textContent = '';
+
+  _freeReciteRecognition = new SpeechRecognition();
+  _freeReciteRecognition.lang = 'ar-SA';
+  _freeReciteRecognition.interimResults = true;
+  _freeReciteRecognition.continuous = true;
+  _freeReciteInterimCounts = {}; // تتبّع عدد الكلمات اللي سبق معالجتها من كل نتيجة مؤقتة
+
+  // ★ Watchdog: لو مرّت 6 ثواني من غير أي نتيجة (ولا حتى مؤقتة)، غالباً الـ Speech API
+  // مش بترجع نتائج أصلاً في البيئة دي (WebView / PWA مش Chrome حقيقي) — نبلّغ المستخدم بوضوح
+  // بدل ما يفضل شايف "بيسمعك دلوقتي" من غير أي تفاعل فعلي.
+  clearTimeout(_freeReciteHeardWatchdog);
+  _freeReciteHeardWatchdog = setTimeout(() => {
+    if (!_freeReciteManualStop && !_freeReciteHeardAnything) {
+      statusTxt.textContent = '⚠️ مش بنسمع صوتك خالص — جرّب افتح الموقع في Google Chrome مباشرة (مش من جوه تطبيق تاني)، وتأكد إن إذن الميكروفون "مسموح"';
+    }
+  }, 6000);
+
+  _freeReciteRecognition.onresult = function(event) {
+    _freeReciteHeardAnything = true;
+    clearTimeout(_freeReciteHeardWatchdog);
+    for (let i = event.resultIndex; i < event.results.length; ++i) {
+      const transcript = event.results[i].transcript.trim();
+      const interimEl = document.getElementById('freeReciteInterimTxt');
+      if (transcript) _freeReciteRestartCount = 0; // ★ لسه بيسمع صوت فعلي — مش مشكلة صلاحيات
+      if (interimEl && !event.results[i].isFinal) interimEl.textContent = transcript ? ('سمعت: ' + transcript) : '';
+      const allWords = transcript ? transcript.split(/\s+/) : [];
+      // ★ بعض إصدارات كروم (خصوصاً على أندرويد) نادراً ما بتخلّي isFinal تبقى true
+      // في وضع continuous، فبنعالج الكلمات الجديدة أول ما تظهر في النتيجة المؤقتة
+      // بدل ما ننتظر النتيجة النهائية اللي ممكن ما توصلش أصلاً — ده أشهر سبب لمشكلة
+      // "بيسجّل بس مش بيصحح خالص"
+      const already = _freeReciteInterimCounts[i] || 0;
+      const spokenWords = allWords.slice(already);
+      if (!spokenWords.length) continue;
+      _freeReciteInterimCounts[i] = allWords.length;
+      if (event.results[i].isFinal && interimEl) interimEl.textContent = '';
+      _matchSpokenBatch(spokenWords, {
+        getWords: () => _freeReciteWords,
+        getIdx: () => _freeReciteWordIdx,
+        setIdx: (v) => { _freeReciteWordIdx = v; },
+        wordElPrefix: 'freeWord-',
+        stopOnMistake: false, // نكمل الاستماع حتى لو غلط في كلمة — بدل ما نوقف كل مرة
+        onCorrectWord: () => { if (_freeReciteSession) _freeReciteSession.correct++; },
+        onMistakeWord: (wIdx) => {
+          if (!_freeReciteSession) return;
+          _freeReciteSession.wrong++;
+          const item = _freeReciteQueue[_freeReciteIdx];
+          _freeReciteSession.mistakes.push({
+            surahName: item.surahName,
+            ayahNum: item.num,
+            expected: _freeReciteWords[wIdx] || ''
+          });
+        },
+        onMistake: () => {
+          statusTxt.textContent = '🎙️ في اختلاف بسيط — كمّل تسميعك، وهنراجعها في التقرير بعدين';
+        },
+        onDone: () => {
+          if (_freeReciteSession) _freeReciteSession.ayahsDone++;
+          _freeReciteIdx++;
+          if (_freeReciteIdx >= _freeReciteQueue.length) {
+            statusTxt.textContent = '🌟 تم تسميع الكل بحمد الله!';
+            const finishedSession = _freeReciteSession;
+            _stopFreeRecitation();
+            setTimeout(() => {
+              document.getElementById('freeReciteScreen').style.display = 'none';
+              _freeReciteSession = null;
+              _showReciteReport(finishedSession, true);
+            }, 900);
+          } else {
+            statusTxt.textContent = '✅ تمام! جاري الانتقال للآية التالية...';
+            setTimeout(() => {
+              _renderFreeReciteCurrentAyah();
+              if (_freeReciteRecognition) statusTxt.textContent = '🎙️ بيسمعك دلوقتي... اتكلم بترتيل واضح';
+            }, 500);
+          }
+        }
+      });
+    }
+  };
+
+  _freeReciteRecognition.onerror = function(event) {
+    // no-speech / aborted مؤقتين، هيعاد المحاولة تلقائياً من onend من غير ما نوقف أو نزعج المستخدم
+    if (event.error === 'no-speech' || event.error === 'aborted') return;
+    if (event.error === 'not-allowed' || event.error === 'permission-denied') {
+      statusTxt.textContent = '❌ الميكروفون مرفوض — فعّل الإذن من الإعدادات';
+      _freeReciteManualStop = true;
+    } else if (event.error === 'service-not-allowed') {
+      statusTxt.textContent = '❌ خدمة التعرف الصوتي مش متاحة في هذا المتصفح — افتح الموقع في Google Chrome';
+      _freeReciteManualStop = true;
+    } else if (event.error === 'audio-capture') {
+      statusTxt.textContent = '❌ مفيش ميكروفون شغال — تأكد إن الجهاز فيه ميكروفون متاح';
+      _freeReciteManualStop = true;
+    } else if (event.error === 'language-not-supported') {
+      statusTxt.textContent = '❌ اللغة العربية مش مدعومة على المتصفح ده';
+      _freeReciteManualStop = true;
+    } else if (event.error === 'network') {
+      statusTxt.textContent = '❌ الاتصال بالإنترنت ضعيف — التعرف الصوتي محتاج نت';
+    } else {
+      statusTxt.textContent = '⚠️ حصل خطأ مؤقت (' + event.error + ') — بنحاول تاني تلقائياً';
+    }
+  };
+
+  _freeReciteRecognition.onend = function() {
+    if (_freeReciteManualStop) {
+      micBtn.classList.remove('recording');
+      micTxt.textContent = 'ابدأ التسميع';
+      return;
+    }
+    _freeReciteRestartCount++;
+    // ★ لو اتوقف واتعاد كتير من غير ما نسمع ولا كلمة واحدة، الغالب إن كروم
+    // بيطلب إذن الميكروفون في كل مرة بدل ما يفتكره — مش هنفضل نلحّ عليه
+    if (_freeReciteRestartCount >= 5) {
+      statusTxt.textContent = '⚠️ الميكروفون بيطلب إذن كل مرة — افتح إعدادات الموقع في كروم (🔒 بجانب الرابط) وخلي إذن الميكروفون "مسموح" مش "يسأل كل مرة"';
+      _freeReciteManualStop = true;
+      micBtn.classList.remove('recording');
+      micTxt.textContent = 'ابدأ التسميع';
+      return;
+    }
+    // ★ كروم (خصوصاً موبايل) بيوقف continuous mode تلقائياً بعد أول وقفة قصيرة —
+    // من غير إعادة التشغيل دي، التسميع "بيوقف من نفسه" وده أكتر سبب شائع للمشكلة
+    setTimeout(() => {
+      if (!_freeReciteManualStop && document.getElementById('freeReciteScreen').style.display !== 'none') {
+        try { _freeReciteRecognition.start(); } catch (e) {}
+      }
+    }, 250);
+  };
+
+  try { _freeReciteRecognition.start(); } catch (err) { _stopFreeRecitation(); }
+}
+
+function _stopFreeRecitation() {
+  _freeReciteManualStop = true;
+  clearTimeout(_freeReciteHeardWatchdog);
+  if (_freeReciteRecognition) {
+    try { _freeReciteRecognition.stop(); } catch (err) {}
+    _freeReciteRecognition = null;
+  }
+  const micBtn = document.getElementById('freeReciteMicBtn');
+  const micTxt = document.getElementById('freeReciteMicTxt');
+  if (micBtn) micBtn.classList.remove('recording');
+  if (micTxt) micTxt.textContent = 'ابدأ التسميع';
+}
+
+/* ═══════ تقرير جلسة التسميع — نصايح تلقائية حسب الأداء ═══════ */
+function _showReciteReport(session, completed) {
+  if (!session) return;
+  const total = session.correct + session.wrong;
+  const accuracy = total > 0 ? Math.round((session.correct / total) * 100) : 100;
+  const minutes = Math.max(1, Math.round((Date.now() - session.startTime) / 60000));
+
+  const tips = [];
+  if (accuracy >= 95) {
+    tips.push('ماشاء الله، حفظك متقن جداً! حافظ على المراجعة الدورية كل أسبوع عشان النقاط ما تخفش.');
+  } else if (accuracy >= 80) {
+    tips.push('أداء جيد! ركّز على مراجعة الآيات اللي أخطأت فيها قبل ما تنتقل لحفظ جديد.');
+  } else {
+    tips.push('محتاج شوية مراجعة إضافية — جرّب تسمع الآية من الشيخ العفاسي (زر 🔊) قبل ما تسمّعها بنفسك، وكرر كل آية 3 مرات على الأقل.');
+  }
+  if (total >= 8) {
+    const wpm = total / minutes;
+    if (wpm > 55) tips.push('كنت بتسمّع بسرعة كبيرة — التمهّل شوية بيحسّن دقة الاستماع وبيدي فرصة أكبر لتثبيت الحفظ.');
+  }
+  if (session.mistakes.length) {
+    const counts = {};
+    session.mistakes.forEach(m => {
+      const key = m.surahName + ' — آية ' + toArabicNum(m.ayahNum);
+      counts[key] = (counts[key] || 0) + 1;
+    });
+    const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+    if (sorted.length) tips.push('أكتر مكان تعثّرت فيه: ' + sorted[0][0] + ' — يستاهل مراجعة زيادة.');
+  }
+
+  let mistakesHtml = '';
+  if (session.mistakes.length) {
+    const shown = session.mistakes.slice(0, 6);
+    mistakesHtml = '<div style="margin-top:10px;">' +
+      shown.map(m => `<div style="font-size:12.5px;color:rgba(255,158,158,0.9);padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.05);">• ${m.surahName} — آية ${toArabicNum(m.ayahNum)}: الكلمة المتوقعة «${m.expected}»</div>`).join('') +
+      (session.mistakes.length > 6 ? `<div style="font-size:11px;color:rgba(245,217,139,0.5);margin-top:4px;">و ${toArabicNum(session.mistakes.length - 6)} ملاحظة تانية...</div>` : '') +
+      '</div>';
+  }
+
+  const html = `
+    <div style="max-width:420px;margin:auto;background:linear-gradient(160deg,#1e1508,#12100a);border:1px solid rgba(201,151,58,0.3);border-radius:18px;padding:20px;box-sizing:border-box;">
+      <div style="text-align:center;font-family:'Cairo',sans-serif;font-weight:900;font-size:17px;color:var(--gold-light,#f5d98b);margin-bottom:4px;">${completed ? '🌟 تم تسميع الكل بحمد الله!' : '📋 تقرير جلسة التسميع'}</div>
+      <div style="text-align:center;font-size:12px;color:rgba(245,217,139,0.55);margin-bottom:16px;">${session.titleText || ''}</div>
+      <div style="display:flex;justify-content:space-around;margin-bottom:16px;">
+        <div style="text-align:center;"><div style="font-size:22px;font-weight:900;color:${accuracy >= 80 ? '#2ecc71' : '#e67e22'};">${toArabicNum(accuracy)}%</div><div style="font-size:11px;color:rgba(245,217,139,0.5);">نسبة الإتقان</div></div>
+        <div style="text-align:center;"><div style="font-size:22px;font-weight:900;color:var(--gold-light,#f5d98b);">${toArabicNum(session.ayahsDone)}</div><div style="font-size:11px;color:rgba(245,217,139,0.5);">آية اتسمّعت</div></div>
+        <div style="text-align:center;"><div style="font-size:22px;font-weight:900;color:var(--gold-light,#f5d98b);">${toArabicNum(minutes)}</div><div style="font-size:11px;color:rgba(245,217,139,0.5);">دقيقة</div></div>
+      </div>
+      <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(201,151,58,0.15);border-radius:12px;padding:12px;">
+        <div style="font-family:'Cairo',sans-serif;font-weight:700;font-size:13px;color:var(--gold-light,#f5d98b);margin-bottom:6px;">💡 نصايح للتحسين</div>
+        ${tips.map(t => `<div style="font-size:12.5px;color:rgba(230,230,230,0.85);line-height:1.7;padding:3px 0;">• ${t}</div>`).join('')}
+        ${mistakesHtml}
+      </div>
+      <button onclick="_closeReciteReport()" class="typing-submit" style="width:100%;margin-top:16px;">تمام</button>
+    </div>
+  `;
+  document.getElementById('reciteReportBody').innerHTML = html;
+  document.getElementById('reciteReportOverlay').style.display = 'block';
+}
+function _closeReciteReport() {
+  document.getElementById('reciteReportOverlay').style.display = 'none';
 }
 
 function checkTyping() {
@@ -12348,5 +13080,51 @@ window.addEventListener('pageshow', function(e) {
   }
 });
 </script>
+
+<!-- ═══════ شاشة اختيار السورة/الجزء للتسميع الحر ═══════ -->
+<div id="recitePickerOverlay" style="display:none;position:fixed;inset:0;background:rgba(10,8,5,0.92);z-index:9000;backdrop-filter:blur(4px);">
+  <div style="max-width:480px;margin:0 auto;height:100%;display:flex;flex-direction:column;padding:16px;box-sizing:border-box;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+      <div style="font-family:'Cairo',sans-serif;font-weight:800;color:var(--gold-light,#f5d98b);font-size:17px;">🎤 اختر ما تريد تسميعه</div>
+      <button onclick="closeRecitationPicker()" style="background:none;border:none;color:rgba(245,217,139,0.7);font-size:22px;cursor:pointer;">×</button>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:10px;">
+      <button id="reciteTabSurah" onclick="switchReciteTab('surah')" class="typing-submit" style="flex:1;">سورة</button>
+      <button id="reciteTabJuz" onclick="switchReciteTab('juz')" class="typing-submit" style="flex:1;background:rgba(255,255,255,0.06);">جزء</button>
+    </div>
+    <input id="reciteSearchInput" oninput="renderReciteList()" placeholder="ابحث بالاسم أو الرقم..." dir="rtl" class="typing-input" style="margin-bottom:10px;">
+    <div id="reciteListWrap" style="flex:1;overflow-y:auto;"></div>
+  </div>
+</div>
+
+<!-- ═══════ شاشة التسميع الحر (سورة/جزء كامل) ═══════ -->
+<div id="freeReciteScreen" style="display:none;position:fixed;inset:0;background:linear-gradient(160deg,#1e1508 0%,#12100a 60%,#0e1810 100%);z-index:9100;overflow-y:auto;">
+  <div style="max-width:480px;margin:0 auto;padding:16px;box-sizing:border-box;min-height:100%;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+      <button onclick="exitFreeRecitation()" style="background:none;border:none;color:rgba(245,217,139,0.7);font-size:14px;cursor:pointer;">→ رجوع</button>
+      <div id="freeReciteTitle" style="font-family:'Cairo',sans-serif;font-weight:800;color:var(--gold-light,#f5d98b);font-size:15px;"></div>
+      <div id="freeReciteProgress" style="font-size:12px;color:rgba(245,217,139,0.6);"></div>
+    </div>
+    <div class="voice-ayah-display" id="freeReciteAyahDisplay" style="min-height:80px;"></div>
+    <div style="text-align:center;margin-bottom:6px;">
+      <button id="freeReciteListenBtn" class="mic-recite-btn" style="background:linear-gradient(135deg,#8B6820,#C9973A);box-shadow:0 3px 12px rgba(201,151,58,0.3);">🔊 استمع للشيخ العفاسي</button>
+    </div>
+    <div class="voice-status-txt" id="freeReciteStatus" style="text-align:center;margin-bottom:2px;">اضغط الميكروفون وابدأ 🎙️</div>
+    <div id="freeReciteInterimTxt" style="font-size:11px;color:rgba(245,217,139,0.4);min-height:14px;text-align:center;margin-bottom:12px;"></div>
+    <div style="text-align:center;">
+      <button class="mic-recite-btn" id="freeReciteMicBtn" onclick="toggleFreeRecitation()" style="font-size:16px;padding:14px 26px;">
+        🎤 <span id="freeReciteMicTxt">ابدأ التسميع</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════ تقرير جلسة التسميع — إتقان الأداء ونصايح تلقائية ═══════ -->
+<div id="reciteReportOverlay" style="display:none;position:fixed;inset:0;background:rgba(10,8,5,0.92);z-index:9200;backdrop-filter:blur(4px);overflow-y:auto;">
+  <div style="min-height:100%;display:flex;align-items:center;padding:16px;box-sizing:border-box;">
+    <div id="reciteReportBody" style="width:100%;"></div>
+  </div>
+</div>
+
 </body>
 </html>
