@@ -1166,13 +1166,6 @@ input, textarea, [contenteditable="true"] {
   user-select: text !important;
 }
 
-/* ===== NOUR NOTIFICATIONS: toggle switch ===== */
-.nour-switch { position:relative; display:inline-block; width:44px; height:25px; flex-shrink:0; }
-.nour-switch input { opacity:0; width:0; height:0; }
-.nour-switch-slider { position:absolute; cursor:pointer; inset:0; background:rgba(245,217,139,0.15); border:1px solid rgba(245,217,139,0.25); border-radius:99px; transition:.25s; }
-.nour-switch-slider::before { content:""; position:absolute; height:17px; width:17px; right:3px; top:3px; background:var(--cream); border-radius:50%; transition:.25s; }
-.nour-switch input:checked + .nour-switch-slider { background:var(--emerald); border-color:var(--emerald-light); }
-.nour-switch input:checked + .nour-switch-slider::before { transform:translateX(-19px); background:var(--gold-light); }
 </style>
 
 <!-- Firebase -->
@@ -4306,7 +4299,6 @@ function _callWhenReady(fn, args) {
       <div class="user-name" id="userNameDisplay">👤 مستخدم</div>
       <div style="display:flex;gap:9px;align-items:center;">
         <span id="globalRankChip" class="rank-chip-circle" onclick="openFullRank()" title="ترتيبك العام" style="display:none;width:30px;height:30px;font-size:12px;cursor:pointer;">#٠</span>
-        <button id="notifBellBtn" onclick="openNotifSettings()" title="إشعارات التذكير" style="background:none;border:none;font-size:17px;cursor:pointer;color:rgba(245,217,139,0.7);padding:4px;position:relative;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">🔔<span id="notifDot" style="display:none;position:absolute;top:2px;right:2px;width:7px;height:7px;border-radius:50%;background:var(--emerald-light);"></span></button>
         <span style="font-size:13px;color:var(--gold);" id="userLevelDisplay">المستوى ١</span>
         <span class="user-logout" onclick="resetScore()" style="color:rgba(255,120,100,0.5);" title="تصفير النقاط">🔄</span>
         <span class="user-logout" onclick="doForgotPassword()" style="color:rgba(245,217,139,0.5);font-size:12px;" title="تغيير كلمة المرور">🔑</span>
@@ -4383,54 +4375,6 @@ function _callWhenReady(fn, args) {
         <button onclick="closeFullRank()" style="width:100%;margin-top:16px;padding:13px;background:rgba(201,151,58,0.15);border:1px solid rgba(201,151,58,0.4);border-radius:14px;color:var(--gold);font-family:'Cairo',sans-serif;font-size:14px;font-weight:700;cursor:pointer;">إغلاق</button>
       </div>
     </div>
-
-    <!-- ===== NOUR NOTIFICATIONS: settings sheet ===== -->
-    <div class="sheet-overlay" id="notifSettingsOverlay" onclick="if(event.target===this)closeNotifSettings()">
-      <div class="sheet-box">
-        <div class="sheet-handle"></div>
-        <div class="sheet-title">🔔 إشعارات التذكير</div>
-        <div style="font-size:12px;color:rgba(245,217,139,0.55);line-height:1.8;margin-bottom:14px;">
-          تذكيرات لطيفة ومخصّصة ليك بس — لما ترتيبك يتغيّر، أو عندك سورة شغّال فيها، أو سلسلتك في خطر.
-          تقدر تتحكم فيها أو توقفها تمامًا من هنا في أي وقت.
-        </div>
-
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 4px;border-bottom:1px solid rgba(245,217,139,0.1);">
-          <div>
-            <div style="font-size:14px;font-weight:700;color:var(--cream);">تفعيل الإشعارات</div>
-            <div style="font-size:11px;color:rgba(245,217,139,0.45);margin-top:2px;">المفتاح الرئيسي — لو مقفول الباقي ما بيشتغلش</div>
-          </div>
-          <label class="nour-switch"><input type="checkbox" id="notifToggleMain" onchange="onNotifToggleMain(this.checked)"><span class="nour-switch-slider"></span></label>
-        </div>
-
-        <div id="notifSubOptions" style="opacity:0.4;pointer-events:none;transition:opacity .2s;">
-          <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 4px;border-bottom:1px solid rgba(245,217,139,0.1);">
-            <div style="font-size:13px;color:var(--cream);">تنبيه تغيّر الترتيب</div>
-            <label class="nour-switch"><input type="checkbox" id="notifToggleRank" onchange="saveNotifPrefs()"><span class="nour-switch-slider"></span></label>
-          </div>
-          <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 4px;">
-            <div style="font-size:13px;color:var(--cream);">تحدي اليوم المخصص بسورتك</div>
-            <label class="nour-switch"><input type="checkbox" id="notifToggleDaily" onchange="saveNotifPrefs()"><span class="nour-switch-slider"></span></label>
-          </div>
-        </div>
-
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 4px 4px;margin-top:10px;border-top:1px solid rgba(245,217,139,0.1);">
-          <div>
-            <div style="font-size:13px;font-weight:700;color:var(--cream);">⏰ وقت الإشعار المفضل</div>
-            <div style="font-size:11px;color:rgba(245,217,139,0.45);margin-top:2px;">هيوصلك التذكير قريب من الوقت ده</div>
-          </div>
-          <input type="time" id="notifPreferredTime" min="07:00" max="22:59" onchange="saveNotifPrefs()" style="background:rgba(0,0,0,0.3);border:1px solid rgba(245,217,139,0.25);border-radius:10px;color:var(--cream);padding:8px 10px;font-family:'Cairo',sans-serif;font-size:13px;color-scheme:dark;">
-        </div>
-
-        <div style="font-size:10px;color:rgba(245,217,139,0.35);margin-top:14px;line-height:1.7;">
-          بحد أقصى إشعار واحد كل ٢٠ ساعة تقريبًا، ومفيش أي إشعارات من ١١ بالليل لحد ٧ الصبح.
-          ملحوظة: لو التطبيق مقفول تمامًا لفترة طويلة، بعض الأجهزة ممكن تمنع وصول الإشعار حسب إعدادات توفير البطارية عندك.
-        </div>
-
-        <button onclick="sendTestNotification()" style="width:100%;margin-top:14px;padding:11px;background:rgba(46,175,120,0.12);border:1px solid rgba(46,175,120,0.4);border-radius:14px;color:var(--emerald-light);font-family:'Cairo',sans-serif;font-size:13px;font-weight:700;cursor:pointer;">🔔 جرّب إشعار الآن</button>
-        <button onclick="closeNotifSettings()" style="width:100%;margin-top:10px;padding:13px;background:rgba(201,151,58,0.15);border:1px solid rgba(201,151,58,0.4);border-radius:14px;color:var(--gold);font-family:'Cairo',sans-serif;font-size:14px;font-weight:700;cursor:pointer;">إغلاق</button>
-      </div>
-    </div>
-
 
     <div style="text-align:center;font-size:12px;color:rgba(245,217,139,0.3);line-height:1.8;margin-top:20px;">
       كل آية تحفظها صدقة جارية 🤍<br>
@@ -6111,12 +6055,6 @@ function _finishLogin(username, isGuest) {
   populateJuzFilter();
   loadMemorizedSurahs();
   showToast('مرحباً ' + (_disp||'') + '! 🌙');
-
-  // ★ لو المستخدم فتح التطبيق من ضغطة إشعار فيه ديب لينك مستني، نطبّقه دلوقتي
-  //   بعد ما بياناته (تقدّم السور/الترتيب) بقت جاهزة
-  if (typeof window.applyNourDeepLink === 'function' && window._nourPendingDeepLink) {
-    setTimeout(function () { window.applyNourDeepLink(); }, 700);
-  }
 
   // ★ safety net: لو الاسم مش ظهر صح، بعد ثانية نحاول تاني من كل المصادر
   setTimeout(() => {
@@ -9443,14 +9381,6 @@ window.addEventListener('popstate', function(e) {
     return;
   }
 
-  // ★ أولوية: لو شيت إعدادات الإشعارات مفتوح → نقفله بس ونرجع للرئيسية
-  const notifOv = document.getElementById('notifSettingsOverlay');
-  if (notifOv && notifOv.classList.contains('open')) {
-    notifOv.classList.remove('open');
-    history.replaceState({ screen: 'homeScreen' }, '');
-    return;
-  }
-
   // ★ أولوية: لو نافذة الترتيب العام مفتوحة → نقفلها بس ونرجع للرئيسية
   const fullRank = document.getElementById('fullRankOverlay');
   if (fullRank && fullRank.classList.contains('open')) {
@@ -12345,9 +12275,6 @@ document.addEventListener('DOMContentLoaded', function() {
     }));
     if (typeof showToast === 'function' && _dispName) showToast('مرحباً ' + _dispName + '! 🌙');
     if (typeof window.fbSignInAnon === 'function') window.fbSignInAnon();
-    if (typeof window.applyNourDeepLink === 'function' && window._nourPendingDeepLink) {
-      setTimeout(function () { window.applyNourDeepLink(); }, 700);
-    }
   }
 });
 </script>
@@ -12426,348 +12353,15 @@ window.addEventListener('pageshow', function(e) {
 });
 </script>
 
-<!-- ===== NOUR NOTIFICATIONS: shared logic + engine ===== -->
-<script src="notif-logic.js"></script>
+<!-- ===== تسجيل Service Worker للكاش بس (زيرو علاقة بالإشعارات) ===== -->
+<!-- ده اللي بيخلي فتح التطبيق فوري لما تسيبه وترجعله، بدل ما يعمل ريفرش شبكة كامل زي أي موقع عادي -->
 <script>
-(function () {
-  'use strict';
-
-  var PREFS_KEY = 'nour_notif_prefs';
-  var TICK_MS = 5 * 60 * 1000; // فحص كل 5 دقايق وهو فاتح التطبيق
-
-  function defaultPrefs() {
-    return { enabled: false, rankAlerts: true, dailyChallenge: true, notifTime: '19:00' };
-  }
-
-  function loadPrefs() {
-    try { return Object.assign(defaultPrefs(), JSON.parse(localStorage.getItem(PREFS_KEY) || '{}')); }
-    catch (e) { return defaultPrefs(); }
-  }
-
-  function savePrefsToStorage(p) {
-    try { localStorage.setItem(PREFS_KEY, JSON.stringify(p)); } catch (e) {}
-  }
-
-  // ─── Deep Link: نوصّل ضغطة الإشعار لمكانها بالظبط جوه التطبيق ───
-  // مصدرين للديب لينك:
-  //  (أ) التطبيق كان مفتوح فعلاً في تاب → الـ SW بيبعت postMessage.
-  //  (ب) التطبيق كان مقفول → الـ SW بيفتح تاب جديد برابط فيه ?deeplink=...
-  // في الحالتين لازم نستنى لحد ما اليوزر يكون داخل فعلاً (بعد auto-login/login)
-  // قبل ما نحاول ننتقل، عشان الشاشات والداتا (تقدّم السور، الترتيب) تكون جاهزة.
-  window._nourPendingDeepLink = null;
-
-  window.applyNourDeepLink = function (dl) {
-    dl = dl || window._nourPendingDeepLink;
-    if (!dl || !dl.deeplink) return;
-
-    if (!window.currentUser || !window.currentUser.username) {
-      // لسه مفيش يوزر داخل — نأجّل ونستنى نداء تاني بعد ما يخلص تسجيل الدخول
-      window._nourPendingDeepLink = dl;
-      return;
-    }
-    window._nourPendingDeepLink = null;
-
-    if (dl.deeplink === 'surah' && dl.surah && typeof startSurahReview === 'function') {
-      startSurahReview(dl.surah);
-    } else if (dl.deeplink === 'leaderboard') {
-      showScreen('homeScreen');
-      // scrollIntoView بياخد وقت بسيط لحد ما الهوم يترندر بالكامل
-      setTimeout(function () { if (typeof goToLeaderboard === 'function') goToLeaderboard(); }, 300);
-    } else {
-      showScreen('homeScreen');
-    }
-  };
-
-  // (أ) رسالة من الـ SW لما التطبيق يكون مفتوح فعلاً
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.addEventListener('message', function (event) {
-      var msg = event.data || {};
-      if (msg.type === 'NOUR_DEEPLINK') window.applyNourDeepLink(msg);
-    });
-  }
-
-  // (ب) قراءة الديب لينك من رابط الفتح لو التطبيق كان مقفول
-  (function readDeepLinkFromUrl() {
-    try {
-      var params = new URLSearchParams(window.location.search);
-      var deeplink = params.get('deeplink');
-      if (!deeplink) return;
-      window._nourPendingDeepLink = {
-        deeplink: deeplink,
-        surah: params.get('surah') || undefined
-      };
-      // ننضّف الرابط عشان ريفريش الصفحة ميكررش نفس الانتقال
-      if (window.history && window.history.replaceState) {
-        window.history.replaceState({}, '', window.location.pathname);
-      }
-    } catch (e) {}
-  })();
-
-  // ─── تسجيل الـ Service Worker ─────────────────────────────
-  var swRegistration = null;
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js').then(function (reg) {
-      swRegistration = reg;
-      // محاولة تسجيل Periodic Background Sync (best-effort — مفيش ضمان دعم)
-      try {
-        if ('periodicSync' in reg) {
-          navigator.permissions.query({ name: 'periodic-background-sync' }).then(function (status) {
-            if (status.state === 'granted') {
-              reg.periodicSync.register('nour-daily-check', { minInterval: 12 * 60 * 60 * 1000 }).catch(function () {});
-            }
-          }).catch(function () {});
-        }
-      } catch (e) {}
-    }).catch(function () {});
-  }
-
-  // ─── جمع بيانات الحالة الحالية من التطبيق ─────────────────
-  function gatherContext() {
-    var cu = window.currentUser;
-    if (!cu || cu.isGuest || !cu.username) return null;
-
-    // الترتيب الحالي من قائمة اللوحة المحمّلة في الذاكرة
-    var rank = null;
-    try {
-      var list = window._lbAllList;
-      if (list && list.length && window._makeKey) {
-        for (var i = 0; i < list.length; i++) {
-          var k = list[i][0];
-          if (k === window._makeKey(cu.username, false) || k === window._makeKey(cu.username, true) ||
-              k === window._makeKey(cu.username, cu.isGuest || false)) { rank = i + 1; break; }
-        }
-      }
-    } catch (e) {}
-
-    // هل لعب النهارده؟
-    var playedToday = false;
-    try {
-      if (cu.lastPlay) {
-        var today = new Date().toDateString();
-        var last = new Date(cu.lastPlay).toDateString();
-        playedToday = (today === last);
-      }
-    } catch (e) {}
-
-    // السور اللي بدأها ولسه ما خلصهاش (نفس منطق renderInProgressSurahs)
-    var surahs = [];
-    try {
-      var progData = JSON.parse(localStorage.getItem('nour_surahprog_' + cu.username) || '{}');
-      var revData  = JSON.parse(localStorage.getItem('nour_revprog_'  + cu.username) || '{}');
-      var allPool = (typeof QURAN_DB !== 'undefined') ? Object.values(QURAN_DB).flat() : [];
-      var surahTotals = {};
-      allPool.forEach(function (q) { if (q.surah) surahTotals[q.surah] = (surahTotals[q.surah] || 0) + 1; });
-
-      var byRecency = [];
-      Object.entries(progData).forEach(function (entry) {
-        var surah = entry[0], nextIdx = entry[1];
-        if (nextIdx > 0 && surahTotals[surah]) byRecency.push({ surah: surah, nextIdx: nextIdx, total: surahTotals[surah], lastPlay: 0 });
-      });
-      Object.entries(revData).forEach(function (entry) {
-        var surah = entry[0], prog = entry[1] || {};
-        if (prog.inProgress && surahTotals[surah]) {
-          byRecency.push({ surah: surah, nextIdx: prog.done || 0, total: prog.total || surahTotals[surah], lastPlay: prog.lastPlay || 0 });
-        }
-      });
-      byRecency.sort(function (a, b) { return (b.lastPlay || 0) - (a.lastPlay || 0); });
-      surahs = byRecency.slice(0, 1);
-    } catch (e) {}
-
-    return { rank: rank, streak: cu.streak || 0, playedToday: playedToday, surahs: surahs };
-  }
-
-  // ─── الدورة الرئيسية: تقارن، تقرر، تعرض، وتحدّث IndexedDB لصالح الفحص الخلفي ───
-  function tick() {
-    var prefs = loadPrefs();
-    if (!prefs.enabled) return;
-    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
-
-    var live = gatherContext();
-    if (!live) return;
-
-    window.NourNotif.idbGet('current').then(function (state) {
-      state = state || {};
-      var now = Date.now();
-      var prevRank = (typeof state.rank === 'number') ? state.rank : null;
-      var cooldownActive = state.lastNotifiedAt && (now - state.lastNotifiedAt) < window.NourNotif.COOLDOWN_MS;
-
-      var ctx = {
-        rank: live.rank, prevRank: prevRank, streak: live.streak,
-        playedToday: live.playedToday, surahs: live.surahs, prefs: prefs,
-        hour: new Date().getHours()
-      };
-
-      if (!cooldownActive) {
-        var decision = window.NourNotif.decideNotification(ctx);
-        if (decision) {
-          showNotificationNow(decision.title, decision.body, decision.data);
-          state.lastNotifiedAt = now;
-        }
-      }
-
-      // حدّث الحالة المخزّنة عشان الفحص الخلفي (لو حصل) يلاقي أحدث بيانات
-      state.rank = live.rank;
-      state.streak = live.streak;
-      state.playedToday = live.playedToday;
-      state.surahs = live.surahs;
-      state.prefs = prefs;
-      state.username = window.currentUser ? window.currentUser.username : null;
-      window.NourNotif.idbSet('current', state).catch(function () {});
-    }).catch(function () {});
-  }
-
-  function showNotificationNow(title, body, data) {
-    if (swRegistration && swRegistration.showNotification) {
-      swRegistration.showNotification(title, {
-        body: body, icon: './icon-192.png', badge: './icon-512.png', image: './icon-512.png',
-        tag: 'nour-daily', renotify: false, dir: 'rtl', lang: 'ar',
-        vibrate: [120, 60, 120],
-        data: data || null
-      }).catch(function () { try { showRawNotificationWithDeepLink(title, body, data); } catch (e) {} });
-    } else {
-      showRawNotificationWithDeepLink(title, body, data);
-    }
-  }
-
-  // ★ فولباك بدون Service Worker: مفيش notificationclick هنا، فبنربط الضغط
-  //   على الإشعار مباشرة بنفس دالة تطبيق الديب لينك (الصفحة أصلاً مفتوحة في نفس التاب).
-  function showRawNotificationWithDeepLink(title, body, data) {
-    try {
-      var n = new Notification(title, { body: body, icon: './icon-192.png' });
-      n.onclick = function () {
-        try { window.focus(); } catch (e) {}
-        if (typeof window.applyNourDeepLink === 'function') window.applyNourDeepLink(data);
-        n.close();
-      };
-    } catch (e) {}
-  }
-
-  var tickTimer = null;
-  function startEngine() {
-    if (tickTimer) clearInterval(tickTimer);
-    tick();
-    tickTimer = setInterval(tick, TICK_MS);
-  }
-  document.addEventListener('visibilitychange', function () { if (!document.hidden) tick(); });
-  window.addEventListener('load', function () { setTimeout(startEngine, 3000); });
-
-  // ─── UI: فتح/إغلاق شيت الإعدادات ─────────────────────────
-  window.openNotifSettings = function () {
-    var prefs = loadPrefs();
-    document.getElementById('notifToggleMain').checked   = !!prefs.enabled;
-    document.getElementById('notifToggleRank').checked   = !!prefs.rankAlerts;
-    document.getElementById('notifToggleDaily').checked  = !!prefs.dailyChallenge;
-    document.getElementById('notifPreferredTime').value  = clampNotifTime(prefs.notifTime);
-    document.getElementById('notifSubOptions').style.opacity = prefs.enabled ? '1' : '0.4';
-    document.getElementById('notifSubOptions').style.pointerEvents = prefs.enabled ? 'auto' : 'none';
-    var ov = document.getElementById('notifSettingsOverlay');
-    if (ov) ov.classList.add('open');
-    // ★ الباك يقفل النافذة ويرجع للرئيسية بدل ما يخرج من التطبيق
-    history.pushState({ sheet: 'notifSettingsOverlay' }, '');
-  };
-  window.closeNotifSettings = function () {
-    var ov = document.getElementById('notifSettingsOverlay');
-    if (!ov) return;
-    var wasOpen = ov.classList.contains('open');
-    if (!wasOpen) return;
-    ov.classList.remove('open');
-    // لو اتقفل بـ click (مش بـ back) → نمسح الـ history entry يدوياً بدون ما نطلع برا
-    if (history.state && history.state.sheet === 'notifSettingsOverlay') {
-      history.replaceState({ screen: 'homeScreen' }, '');
-    }
-  };
-
-  // ★ حماية دفاعية: بغض النظر عن min/max في حقل الـ <input type="time">
-  //   (بعض المتصفحات مبتمنعش الكتابة اليدوية لقيمة برا النطاق)، لازم نضمن
-  //   إن الوقت المحفوظ فعلياً يفضل جوه ساعات السماح (7 الصبح لحد 10:59 بالليل)
-  //   عشان مايتصادمش مع ساعات الهدوء (11 بالليل–7 الصبح) في notif-logic.js
-  //   ويسبب حالة "المستخدم مش هيستلم إشعار خالص".
-  function clampNotifTime(timeVal) {
-    if (!timeVal || typeof timeVal !== 'string') return '19:00';
-    var parts = timeVal.split(':');
-    var h = parseInt(parts[0], 10);
-    var m = parts[1] || '00';
-    if (isNaN(h)) return '19:00';
-    if (h < 7) h = 7;
-    if (h >= 23) h = 22;
-    var hh = (h < 10 ? '0' : '') + h;
-    return hh + ':' + m;
-  }
-
-  window.saveNotifPrefs = function () {
-    var prefs = loadPrefs();
-    prefs.rankAlerts     = document.getElementById('notifToggleRank').checked;
-    prefs.dailyChallenge = document.getElementById('notifToggleDaily').checked;
-    var timeVal = clampNotifTime(document.getElementById('notifPreferredTime').value);
-    document.getElementById('notifPreferredTime').value = timeVal; // نعكس أي تصحيح على الواجهة كمان
-    prefs.notifTime = timeVal;
-    savePrefsToStorage(prefs);
-  };
-
-  window.onNotifToggleMain = function (checked) {
-    var prefs = loadPrefs();
-    var subEl = document.getElementById('notifSubOptions');
-
-    if (!checked) {
-      prefs.enabled = false;
-      savePrefsToStorage(prefs);
-      subEl.style.opacity = '0.4';
-      subEl.style.pointerEvents = 'none';
-      if (typeof showToast === 'function') showToast('تم إيقاف الإشعارات 🔕');
-      return;
-    }
-
-    // طلب الإذن فقط لما المستخدم يفعّل بنفسه (مش تلقائي عند فتح التطبيق)
-    if (typeof Notification === 'undefined') {
-      document.getElementById('notifToggleMain').checked = false;
-      if (typeof showToast === 'function') showToast('المتصفح ده مش بيدعم الإشعارات');
-      return;
-    }
-    if (Notification.permission === 'granted') {
-      prefs.enabled = true;
-      savePrefsToStorage(prefs);
-      subEl.style.opacity = '1';
-      subEl.style.pointerEvents = 'auto';
-      tick();
-      if (typeof showToast === 'function') showToast('تم تفعيل الإشعارات 🔔');
-    } else if (Notification.permission === 'denied') {
-      document.getElementById('notifToggleMain').checked = false;
-      if (typeof showToast === 'function') showToast('الإشعارات موقوفة من إعدادات الجهاز/المتصفح');
-    } else {
-      Notification.requestPermission().then(function (perm) {
-        if (perm === 'granted') {
-          prefs.enabled = true;
-          savePrefsToStorage(prefs);
-          subEl.style.opacity = '1';
-          subEl.style.pointerEvents = 'auto';
-          tick();
-          if (typeof showToast === 'function') showToast('تم تفعيل الإشعارات 🔔');
-        } else {
-          document.getElementById('notifToggleMain').checked = false;
-        }
-      });
-    }
-  };
-
-  window.sendTestNotification = function () {
-    var prefs = loadPrefs();
-    if (!prefs.enabled || typeof Notification === 'undefined' || Notification.permission !== 'granted') {
-      if (typeof showToast === 'function') showToast('فعّل الإشعارات الأول 🔔');
-      return;
-    }
-    // ★ نجرّب الديب لينك كمان لو المستخدم عنده سورة شغال عليها دلوقتي
-    var _testData = null;
-    try {
-      var _live = gatherContext();
-      if (_live && _live.surahs && _live.surahs.length) {
-        _testData = { deeplink: 'surah', surah: _live.surahs[0].surah };
-      } else {
-        _testData = { deeplink: 'leaderboard' };
-      }
-    } catch (e) {}
-    showNotificationNow('📖 تحدي اليوم', 'كده هيوصلك إشعارك — خمس دقايق حفظ كفاية تفرق 🌙', _testData);
-  };
-})();
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function () {
+    navigator.serviceWorker.register('./sw.js').catch(function () {});
+  });
+}
 </script>
+
 </body>
 </html>
