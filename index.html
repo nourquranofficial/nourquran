@@ -132,6 +132,16 @@
 </script>
 
 <link rel="manifest" href="manifest.json">
+<script>
+// ★ تسجيل الـ Service Worker — شرط أساسي عشان التطبيق يتثبّت ويشتغل standalone حقيقي
+//   من غيره، "إضافة للشاشة الرئيسية" بتفتح اختصار متصفح عادي (شريط تحميل + دومين ظاهر)
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/nour/service-worker.js', { scope: '/nour/' })
+      .catch(err => console.error('SW register failed:', err));
+  });
+}
+</script>
 <meta name="theme-color" content="#C9973A">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -4316,7 +4326,19 @@ input, textarea, [contenteditable="true"] {
 <script>
 // ── إخفاء شاشة التحميل: بعد حد أدنى من الوقت + جهوزية بيانات الترتيب/الدخول ──
 (function() {
-  const MIN_MS = 1100;   // أقل مدة عرض عشان تحس بلودينج حقيقي
+  // ★ لو التطبيق مفتوح كنسخة مثبّتة (PWA standalone) نشيل اللودينج الصناعي فورًا —
+  //   الملفات أصلاً جاية من الكاش، فمفيش داعي نحاكي تحميل الويب هنا.
+  const isInstalledApp = window.matchMedia('(display-mode: standalone)').matches
+    || window.navigator.standalone === true; // دعم Safari/iOS القديم
+  if (isInstalledApp) {
+    const el = document.getElementById('appSplash');
+    if (el) el.style.display = 'none';
+    window._appSplashReady = function() {};
+    window._checkSplashReady = function() {};
+    return;
+  }
+
+  const MIN_MS = 1100;   // أقل مدة عرض عشان تحس بلودينج حقيقي (للموقع في المتصفح فقط)
   const MAX_MS = 4500;   // سقف أمان لو الاتصال بطيء/فشل
   const startAt = Date.now();
   let hidden = false;
