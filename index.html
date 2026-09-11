@@ -4472,7 +4472,10 @@ function _callWhenReady(fn, args) {
       <div style="display:flex;gap:9px;align-items:center;">
         <span id="globalRankChip" class="rank-chip-circle" onclick="openFullRank()" title="ترتيبك العام" style="display:none;width:30px;height:30px;font-size:12px;cursor:pointer;">#٠</span>
         <span style="font-size:13px;color:var(--gold);" id="userLevelDisplay">المستوى ١</span>
-        <span class="user-logout" onclick="openRecitationPicker()" style="color:rgba(46,204,113,0.75);" title="التسميع الصوتي — سمّع سورة أو جزء كامل">🎤</span>
+        <span onclick="openRecitationPicker()" title="التسميع الصوتي — سمّع سورة أو جزء كامل" style="display:inline-flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">
+          <span style="font-size:13px;color:var(--gold-light);line-height:1;">🎤</span>
+          <span style="font-size:10px;color:var(--gold-light);white-space:nowrap;line-height:1;opacity:0.85;">تسميع صوتي</span>
+        </span>
         <span class="user-logout" onclick="doForgotPassword()" style="color:rgba(245,217,139,0.5);font-size:12px;" title="تغيير كلمة المرور">🔑</span>
         <button onclick="doLogout()" ontouchend="event.preventDefault();doLogout();" style="background:none;border:none;font-size:13px;color:rgba(245,217,139,0.55);cursor:pointer;font-family:'Cairo',sans-serif;padding:6px 10px;border-radius:8px;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">خروج ↩</button>
       </div>
@@ -10167,6 +10170,8 @@ function _renderFreeReciteCurrentAyah() {
   display.innerHTML = `<div style="font-size:11px;color:rgba(245,217,139,0.5);margin-bottom:8px;">${item.surahName} — آية ${toArabicNum(item.num)}</div>` +
     _fBuilt.displayWords.map((w, i) => `<span class="voice-word" id="freeWord-${i}">${w}</span>`).join(' ');
   document.getElementById('freeReciteStatus').textContent = 'اضغط الميكروفون وابدأ 🎙️';
+  const _freeInterimReset = document.getElementById('freeReciteInterimTxt');
+  if (_freeInterimReset) _freeInterimReset.textContent = '';
 }
 
 function exitFreeRecitation() {
