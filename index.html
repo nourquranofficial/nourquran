@@ -14990,5 +14990,16 @@ window.addEventListener('pageshow', function(e) {
   </div>
 </div>
 
+<script>
+// ─── تسجيل الـ Service Worker: مطلوب عشان Chrome يعتبر الموقع تطبيق قابل للتثبيت (PWA) حقيقي ───
+// من غيره، "إضافة للشاشة الرئيسية" بترجع مجرد اختصار بيفتح بشريط المتصفح، مش تطبيق standalone
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/nourquran/sw.js')
+      .catch(err => console.warn('SW registration failed:', err));
+  });
+}
+</script>
+
 </body>
 </html>
