@@ -143,7 +143,7 @@
 <meta property="og:description" content="اختبر حفظك للقرآن الكريم بصوت الشيخ مشاري بن راشد العفاسي، مجاناً بدون إعلانات أو اشتراكات">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Cairo:wght@400;600;700;900&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Aref+Ruqaa:wght@400;700&family=Cairo:wght@400;600;700;900&display=swap" rel="stylesheet">
 
 <style>
 :root {
@@ -1165,6 +1165,105 @@ input, textarea, [contenteditable="true"] {
   -webkit-user-select: text !important;
   user-select: text !important;
 }
+
+/* ═══════ التسميع الصوتي (Voice Recitation) ═══════ */
+.mic-recite-btn {
+  background: linear-gradient(135deg,#2ecc71,#27ae60);
+  color: #fff;
+  border: none;
+  border-radius: 24px;
+  padding: 9px 18px;
+  font-family: 'Cairo', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 3px 12px rgba(46,204,113,0.3);
+  transition: transform .2s cubic-bezier(.175,.885,.32,1.275), background-color .3s ease, box-shadow .3s ease;
+  outline: none;
+  margin: 8px auto 0;
+  position: relative;
+}
+.mic-recite-btn:active { transform: scale(0.93); }
+.mic-recite-btn.recording {
+  background: linear-gradient(135deg,#e67e22,#d35400);
+  box-shadow: 0 3px 12px rgba(230,126,34,0.4);
+}
+.mic-recite-btn.recording::before,
+.mic-recite-btn.recording::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 24px;
+  border: 2px solid #e67e22;
+  opacity: .8;
+  animation: micPulseWave 1.6s linear infinite;
+  pointer-events: none;
+}
+.mic-recite-btn.recording::after { animation-delay: .8s; }
+@keyframes micPulseWave {
+  0%   { transform: scale(1); opacity: .8; }
+  100% { transform: scale(1.25); opacity: 0; }
+}
+
+.voice-recite-wrap {
+  display: none;
+  text-align: center;
+  margin: 14px 0;
+  opacity: 0;
+  transform: translateY(-8px);
+  transition: opacity .35s ease .1s, transform .35s ease .1s;
+}
+.voice-recite-wrap.fade-in-ayah { opacity: 1; transform: translateY(0); }
+
+.voice-ayah-display {
+  font-family: 'Amiri', serif;
+  font-size: 1.35rem;
+  line-height: 2.4;
+  direction: rtl;
+  padding: 16px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(201,151,58,0.2);
+  border-radius: 14px;
+  margin-bottom: 12px;
+}
+.voice-word {
+  display: inline-block;
+  color: var(--cream);
+  opacity: 0;
+  margin: 0 3px;
+  transition: color .15s ease, opacity .15s ease, transform .2s ease, font-weight .2s ease;
+}
+.voice-word.correct-word {
+  color: #2ecc71;
+  opacity: 1;
+  font-weight: 700;
+  transform: scale(1.04);
+}
+.voice-word.wrong-word {
+  color: #e74c3c;
+  opacity: 1;
+  font-weight: 700;
+  animation: voiceWordShake .4s ease-in-out;
+}
+@keyframes voiceWordShake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-4px); }
+  75% { transform: translateX(4px); }
+}
+.voice-status-txt {
+  font-size: 12px;
+  color: rgba(245,217,139,0.6);
+  min-height: 16px;
+}
+.fade-out-content {
+  opacity: 0 !important;
+  transform: translateY(-8px);
+  transition: opacity .3s ease, transform .3s ease;
+  pointer-events: none;
+}
 </style>
 
 <!-- Firebase -->
@@ -1174,7 +1273,7 @@ input, textarea, [contenteditable="true"] {
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   // ═══ نسخة التطبيق — بتتحدّث مع كل تسليم ═══
-  window.NOUR_VERSION = 'v91 — 2026-06-14';
+  window.NOUR_VERSION = 'v104 — دقة التصحيح';
   console.log('%c🌙 نور ' + window.NOUR_VERSION, 'color:#F5D98B;font-weight:bold;font-size:14px');
   try {
     const _verEl = document.getElementById('appVerTag');
@@ -2547,6 +2646,9 @@ input, textarea, [contenteditable="true"] {
   window._markAuthDone  = () => { _authDone = true;  };
 
   onAuthStateChanged(auth, (user) => {
+    // ★ حالة الدخول بقت معروفة (مسجّل أو لأ) — جزء من شرط إخفاء شاشة اللودينج
+    window._authKnown = true;
+    if (typeof window._checkSplashReady === 'function') window._checkSplashReady();
     if (window._isLoggingOut) return; // ★ logout جاري — امنع أي re-login
     // ★ لو اليوزر طلب logout صريح — منعملش أي دخول تلقائي
     if (!user) {
@@ -4001,6 +4103,7 @@ input, textarea, [contenteditable="true"] {
     //   ومش بتأثر في الترتيب — فلما ما تتحسبش بتفضل undefined والـ tag ما بيظهرش.)
 
     window._lbAllList = list;
+    if (typeof window._checkSplashReady === 'function') window._checkSplashReady();
 
     // ★★ مزامنة مسح الغلطات فقط — النقاط بقت تتزامن عبر users/data (مصدر الحقيقة) مش من اللوحة ★★
     try {
@@ -4089,6 +4192,8 @@ input, textarea, [contenteditable="true"] {
 
     // ★ حدّث شارة الترتيب العام لحظياً مع كل تحديث للوحة الشرف
     if (typeof window.updateGlobalRankChip === 'function') window.updateGlobalRankChip();
+    // ★ أول مرة توصل بيانات الترتيب — سيب شاشة اللودينج تختفي (لو حالة الدخول عرفت برضو)
+    if (typeof window._checkSplashReady === 'function') window._checkSplashReady();
 
     if (dotsEl) dotsEl.innerHTML = top3.map((_, i) =>
       `<div class="lb-dot${i===0?' active':''}" onclick="lbGoTo(${i})"></div>`
@@ -4165,6 +4270,79 @@ input, textarea, [contenteditable="true"] {
 
 </head>
 <body>
+
+<!-- ═══════ SPLASH SCREEN — شاشة تحميل وهمية بشعار وإسم التطبيق ═══════ -->
+<style>
+#appSplash {
+  position:fixed; inset:0; z-index:99999;
+  display:flex; align-items:center; justify-content:center;
+  background:radial-gradient(circle at 50% 40%, #1e1710 0%, #120f0a 55%, #0a0805 100%);
+  transition:opacity .45s ease, visibility .45s ease;
+}
+#appSplash.hide { opacity:0; visibility:hidden; pointer-events:none; }
+#appSplash .splash-inner { text-align:center; }
+#appSplash .splash-moon {
+  font-size:64px; line-height:1; display:block; margin-bottom:8px;
+  filter:drop-shadow(0 0 22px rgba(201,151,58,0.65));
+  animation:splashGlow 2.2s ease-in-out infinite;
+}
+#appSplash .splash-title {
+  font-family:'Amiri',serif; font-size:44px; color:var(--gold-light);
+  letter-spacing:4px; text-shadow:0 0 28px rgba(201,151,58,0.55);
+  animation:splashFade .9s ease both;
+}
+#appSplash .splash-sub {
+  font-size:12px; color:rgba(245,217,139,0.6); margin-top:6px;
+  letter-spacing:0.5px; animation:splashFade 1.1s ease both;
+}
+#appSplash .splash-ring {
+  width:34px; height:34px; margin:26px auto 0;
+  border:3px solid rgba(201,151,58,0.18); border-top-color:var(--gold);
+  border-radius:50%; animation:splashSpin .8s linear infinite;
+}
+@keyframes splashGlow {
+  0%,100% { transform:scale(1); filter:drop-shadow(0 0 16px rgba(201,151,58,0.5)); }
+  50%     { transform:scale(1.08); filter:drop-shadow(0 0 30px rgba(201,151,58,0.85)); }
+}
+@keyframes splashFade { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
+@keyframes splashSpin { to { transform:rotate(360deg); } }
+</style>
+<div id="appSplash">
+  <div class="splash-inner">
+    <span class="splash-moon">🌙</span>
+    <div class="splash-title">نـور</div>
+    <div class="splash-sub">تحدي حفظ القرآن الكريم</div>
+    <div class="splash-ring"></div>
+  </div>
+</div>
+<script>
+// ── إخفاء شاشة التحميل: بعد حد أدنى من الوقت + جهوزية بيانات الترتيب/الدخول ──
+(function() {
+  const MIN_MS = 1100;   // أقل مدة عرض عشان تحس بلودينج حقيقي
+  const MAX_MS = 4500;   // سقف أمان لو الاتصال بطيء/فشل
+  const startAt = Date.now();
+  let hidden = false;
+  function _hideSplash() {
+    if (hidden) return;
+    hidden = true;
+    const el = document.getElementById('appSplash');
+    if (!el) return;
+    el.classList.add('hide');
+    setTimeout(() => { el.style.display = 'none'; }, 500);
+  }
+  window._appSplashReady = function() {
+    const elapsed = Date.now() - startAt;
+    if (elapsed >= MIN_MS) { _hideSplash(); }
+    else { setTimeout(_hideSplash, MIN_MS - elapsed); }
+  };
+  // ★ ما نسيبش اللودينج يختفي غير لما: حالة الدخول اتعرفت + بيانات الترتيب أول مرة جاهزة
+  //   (كده الترتيب اللي هيظهر للمستخدم يكون نهائي فوراً من غير ما يشوفه بيتغيّر ١، ٢، ٣...)
+  window._checkSplashReady = function() {
+    if (window._authKnown && window._lbAllList) window._appSplashReady();
+  };
+  setTimeout(_hideSplash, MAX_MS); // سقف أمان
+})();
+</script>
 
 <script>
 // ── Stubs مبكرة تضمن إن الـ onclick تشتغل حتى لو الـ scripts لم تكتمل ──
@@ -4299,7 +4477,7 @@ function _callWhenReady(fn, args) {
       <div style="display:flex;gap:9px;align-items:center;">
         <span id="globalRankChip" class="rank-chip-circle" onclick="openFullRank()" title="ترتيبك العام" style="display:none;width:30px;height:30px;font-size:12px;cursor:pointer;">#٠</span>
         <span style="font-size:13px;color:var(--gold);" id="userLevelDisplay">المستوى ١</span>
-        <span class="user-logout" onclick="resetScore()" style="color:rgba(255,120,100,0.5);" title="تصفير النقاط">🔄</span>
+        <span class="user-logout" onclick="openRecitationPicker()" style="color:rgba(46,204,113,0.75);" title="التسميع الصوتي — سمّع سورة أو جزء كامل">🎤</span>
         <span class="user-logout" onclick="doForgotPassword()" style="color:rgba(245,217,139,0.5);font-size:12px;" title="تغيير كلمة المرور">🔑</span>
         <button onclick="doLogout()" ontouchend="event.preventDefault();doLogout();" style="background:none;border:none;font-size:13px;color:rgba(245,217,139,0.55);cursor:pointer;font-family:'Cairo',sans-serif;padding:6px 10px;border-radius:8px;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">خروج ↩</button>
       </div>
@@ -4660,6 +4838,13 @@ function _callWhenReady(fn, args) {
     </div>
     <div class="q-hint" id="qHint">اختر الكلمة الصحيحة</div>
     <div class="hasanat-multiplier" id="hasanatMultiplier"></div>
+
+    <!-- ★ التسميع الصوتي: طريقة بديلة لحل السؤال بالصوت بدل الاختيار/الكتابة -->
+    <div class="voice-recite-wrap" id="voiceReciteWrap">
+      <div class="voice-ayah-display" id="voiceAyahDisplay"></div>
+      <div class="voice-status-txt" id="voiceStatusTxt">🎙️ بيسمعك دلوقتي... اتكلم بترتيل واضح</div>
+      <div id="voiceInterimTxt" style="font-size:11px;color:rgba(245,217,139,0.4);min-height:14px;margin-top:2px;"></div>
+    </div>
 
     <!-- Hints -->
     <div class="hints-row" id="hintsRow">
@@ -8598,6 +8783,7 @@ function renderQuestion() {
     document.querySelector('.typing-submit').disabled = false;
   }
   resetHintsUI();
+  stopVoiceRecitation(true);
 
   const activeMode = state.isReviewMode ? 'mcq' : state.mode;
 
@@ -8715,6 +8901,2367 @@ function checkAnswer(chosen, correct, e) {
     else if ((bText === chosenText || b.textContent === chosenText) && !isRight) b.classList.add('wrong');
   });
   handleResult(isRight, e);
+}
+
+/* ═══════ التسميع الصوتي (Voice Recitation) ═══════
+   طريقة بديلة لحل سؤال شاشة التحدي: بدل الاختيار من متعدد أو الكتابة،
+   يقدر المستخدم يسمّع الآية كاملة بصوته. بمجرد ما يخلّص صح، بنستدعي
+   checkAnswer/handleResult الأصليين عشان النقط والمستوى يتحسبوا زي أي إجابة عادية. */
+let _voiceRecognition = null;
+let _voiceWords = [];
+let _voiceWordDisplayMap = [];  // ★ رقم كلمة المطابقة → رقم الكلمة المعروضة (للحروف المقطعة)
+let _voiceWordIdx = 0;
+
+/* ★ تطبيع قرآني كامل.
+   نص المصحف هنا مكتوب بالرسم العثماني، وفيه رموز مبتوصلش أبداً من التعرف الصوتي:
+   - السكون برمز خاص (ۡ) وعلامات وقف/وصل صغيرة (ۖۗۘۙۚۛۜ۞۠ۢۤۥۦۧۨ۩ۭ۬)
+   - الألف الخنجرية (ٰ) — موجودة 9844 مرة في قاعدة البيانات دي
+   الألف الخنجرية هي أخطر حاجة: أحياناً بتتنطق ألف (مَٰلِك = "مالك") وأحياناً لأ
+   (هَٰذَا = "هذا"). عشان كده الدالة دي بتاخد restore عشان نولّد الصيغتين ونقبل
+   أي واحدة فيهم، بدل ما نخمّن ونحكم غلط على تسميع سليم 100%.
+   restore = true  → الألف الخنجرية تبقى ألف عادية
+   restore = false → الألف الخنجرية تتشال */
+function _qNormWord(text, restore) {
+  if (!text) return '';
+  return String(text)
+    .replace(/\u0640/g, '')
+    .replace(/[\u06D6-\u06ED]/g, function (m) {
+      if (m === '\u06E5') return restore ? '\u0648' : '';
+      if (m === '\u06E6') return restore ? '\u064A' : '';
+      return '';
+    })
+    .replace(/\u0670/g, restore ? '\u0627' : '')
+    .replace(/[\u064B-\u065F]/g, '')
+    .replace(/[\u0623\u0625\u0622\u0671]/g, '\u0627')
+    .replace(/\u0624/g, '\u0648')
+    .replace(/\u0626/g, '\u064A')
+    .replace(/\u0621/g, '\u0627')
+    .replace(/\u0629/g, '\u0647')
+    .replace(/\u0649/g, '\u064A')
+    .replace(/[^\u0621-\u064A ]/g, '')
+    // دمج التكرار لحروف المد بس (ناتج توحيد الهمزة: اسراائيل → اسرائيل).
+    // مهم جداً إننا منجمعش الحروف الصحيحة: لو عملنا كده، "ٱللَّه" و"إِلَٰه"
+    // هيبقوا نفس الشكل والمطابقة هتلخبط بينهم في آيات فيها الاتنين.
+    .replace(/([\u0627\u0648\u064A])\1+/g, '$1')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+/* الاسم القديم لسه شغال لأي كود تاني ممكن يستخدمه */
+function _cleanArabicForMatch(text) { return _qNormWord(text, true); }
+
+/* ★ توليد صيغ الكلمة القرآنية — ده قلب الإصلاح.
+   بدل ما نخمّن شكل واحد، بنولّد كل الأشكال المشروعة اللي ممكن التعرف الصوتي
+   يكتب الكلمة بيها، وبنقبل أي واحدة. مع كاش عشان السرعة تفضل لحظية. */
+var _qVarCache = Object.create(null);
+var _qVarCacheN = 0;
+function _qVariants(rawTarget) {
+  var k = String(rawTarget || '');
+  var hit = _qVarCache[k];
+  if (hit) return hit;
+  // سقف للكاش عشان مايكبرش على الأجهزة الضعيفة في الجلسات الطويلة
+  if (_qVarCacheN > 30000) { _qVarCache = Object.create(null); _qVarCacheN = 0; }
+  var alt = k.replace(/[\u0648\u064A]\u0670/g, '\u0627');
+  var out = [], cand = [_qNormWord(k, false), _qNormWord(k, true), _qNormWord(alt, false), _qNormWord(alt, true)];
+  for (var i = 0; i < cand.length; i++) if (cand[i] && out.indexOf(cand[i]) === -1) out.push(cand[i]);
+  _qVarCache[k] = out;
+  _qVarCacheN++;
+  return out;
+}
+
+/* ★ الحروف المقطّعة (فواتح السور): بتتنطق في التلاوة حرف حرف باسمه
+   (الف - لام - ميم)، مش ككلمة موصولة زي ما هي مكتوبة في المصحف. لو سبنا
+   المطابقة تدوّر على "الٓمٓ" كـ"كلمة واحدة" هي هتفشل دايماً لأن المتصفح
+   هيسمع "ألف لام ميم" كلمات منفصلة. الحل: لكل آية فيها حروف مقطعة (مُحدّدة
+   برقم السورة ورقم الآية عشان منلخبطش كلمات عادية زي "الله" اللي حروفها
+   كلها موجودة في مجموعة الحروف المقطعة بالصدفة)، بنستبدل الكلمة الأولى
+   (الحروف نفسها) بمصفوفة أسماء الحروف. */
+const _MUQATTA_OPENINGS = {
+  2:  { 1: ['ألف','لام','ميم'] },
+  3:  { 1: ['ألف','لام','ميم'] },
+  7:  { 1: ['ألف','لام','ميم','صاد'] },
+  10: { 1: ['ألف','لام','راء'] },
+  11: { 1: ['ألف','لام','راء'] },
+  12: { 1: ['ألف','لام','راء'] },
+  13: { 1: ['ألف','لام','ميم','راء'] },
+  14: { 1: ['ألف','لام','راء'] },
+  15: { 1: ['ألف','لام','راء'] },
+  19: { 1: ['كاف','هاء','ياء','عين','صاد'] },
+  20: { 1: ['طاء','هاء'] },
+  26: { 1: ['طاء','سين','ميم'] },
+  27: { 1: ['طاء','سين'] },
+  28: { 1: ['طاء','سين','ميم'] },
+  29: { 1: ['ألف','لام','ميم'] },
+  30: { 1: ['ألف','لام','ميم'] },
+  31: { 1: ['ألف','لام','ميم'] },
+  32: { 1: ['ألف','لام','ميم'] },
+  36: { 1: ['ياء','سين'] },
+  38: { 1: ['صاد'] },
+  40: { 1: ['حاء','ميم'] },
+  41: { 1: ['حاء','ميم'] },
+  42: { 1: ['حاء','ميم'], 2: ['عين','سين','قاف'] },
+  43: { 1: ['حاء','ميم'] },
+  44: { 1: ['حاء','ميم'] },
+  45: { 1: ['حاء','ميم'] },
+  46: { 1: ['حاء','ميم'] },
+  50: { 1: ['قاف'] },
+  68: { 1: ['نون'] },
+};
+function _muqattaLetterWords(surahNum, ayahNum) {
+  const s = _MUQATTA_OPENINGS[surahNum];
+  return (s && s[ayahNum]) ? s[ayahNum] : null;
+}
+/* ★ مهم جداً: العرض على الشاشة لازم يفضل بالرسم العثماني الأصلي زي ما هو
+   في المصحف ("الٓمٓ" كلمة واحدة) — إحنا مش بنغيّر شكل الآية المكتوب.
+   اللي بيتغيّر هو "المتوقَّع سماعه" بس جوه محرك المطابقة الصوتية: بدل ما
+   يستنى المستخدم ينطق "الٓمٓ" كتوكن واحد (حاجة مستحيلة صوتياً)، بيستنى
+   تسلسل أسماء الحروف. عشان كده بترجع 3 حاجات:
+   - words: الكلمات اللي المطابقة الصوتية شغالة عليها (فيها التوسيع)
+   - displayWords: الكلمات الأصلية زي ما هي مكتوبة (من غير أي تغيير) — دي
+     اللي بتتعرض على الشاشة
+   - map: لكل كلمة في words، رقم الكلمة المقابلة لها في displayWords —
+     كذا كلمة (حروف) بترجع لنفس رقم الكلمة المعروضة، عشان لما المطابقة
+     تتقدّم حرف حرف، الهايلايت يفضل واقف على نفس الكلمة المعروضة لحد ما
+     كل حروفها تتنطق، وبعدين يتحرك للكلمة اللي بعدها. */
+function _buildRecitationWords(text, surahNum, ayahNum) {
+  const displayWords = String(text || '').split(/\s+/).filter(Boolean);
+  const letters = _muqattaLetterWords(surahNum, ayahNum);
+  const words = [];
+  const map = [];
+  displayWords.forEach((w, di) => {
+    if (di === 0 && letters) {
+      letters.forEach(l => { words.push(l); map.push(di); });
+    } else {
+      words.push(w); map.push(di);
+    }
+  });
+  return { words, displayWords, map };
+}
+
+/* ★ هل الصفحة شغالة جوه تطبيق نور (TWA) ولا في متصفح عادي؟
+   لما كروم يفتح الصفحة كـ Trusted Web Activity، بيحط document.referrer
+   بالشكل ده: "android-app://<package>" — مفيش طريقة تانية موثوقة نتأكد بيها.
+   بنستخدمها بس عشان نديله رسالة مفهومة، مش عشان نغيّر سلوك التسميع نفسه. */
+function _isRunningInsideTwaApp() {
+  try { return /^android-app:\/\//.test(document.referrer || ''); }
+  catch (e) { return false; }
+}
+
+/* رسالة واحدة موحّدة لما الـ Speech API نفسها مش متاحة —
+   داخل تطبيق نور (TWA) المتصفح الفعلي اللي بيعرض الصفحة هو كروم المثبّت
+   على الموبايل نفسه (مفيش محرك منفصل جوه التطبيق)، فلو التسميع مش شغال
+   هنا غالباً السبب إن كروم مش هو المتصفح الافتراضي/مش متاح على الجهاز،
+   مش مشكلة في إذن المايك ولا في كود الموقع. */
+function _speechUnsupportedMessage() {
+  return _isRunningInsideTwaApp()
+    ? 'التسميع الصوتي محتاج جوجل كروم مثبّت على الموبايل عشان يشتغل (تطبيق نور بيعتمد عليه في الخلفية) — لو عندك متصفح تاني هو الافتراضي، ثبّت Google Chrome وخليه الافتراضي وجرّب تاني 🎙️'
+    : 'التسميع الصوتي غير مدعوم في هذا المتصفح — افتح الموقع في Google Chrome 🎙️';
+}
+
+let _voiceManualStop = false;
+let _voiceInterimCounts = {};
+let _voicePendingFlush = null; // مؤقّت يفرّغ آخر كلمة مؤجلة لو محصلش تحديث جديد يبطلها
+let _voicePendingToken = 0;    // نسخة لكل كلمة مؤجلة عشان نتأكد إنها لسه صالحة وقت التفريغ
+let _voiceRestartCount = 0;
+let _voiceHeardAnything = false; // هل وصلت أي نتيجة (حتى مؤقتة) من الـ Speech API لحد دلوقتي
+let _voiceHeardWatchdog = null;  // مؤقّت تحذير لو مفيش نتائج بترجع خالص
+
+/* ★ نتأكد إن إذن الميكروفون ممنوح من غير ما نفتح نافذة الإذن كل مرة —
+   لو الـ Permissions API قالت "granted" فعلاً، منعملش getUserMedia تاني
+   (ده اللي كان بيفتح نافذة/طلب الإذن من جديد كل مرة حتى لو اتوافق عليه قبل كده).
+   منستخدم getUserMedia فعلياً غير لو الحالة "prompt" (أول مرة) أو الـ API مش مدعومة. */
+async function _ensureMicPermission() {
+  try {
+    if (navigator.permissions && navigator.permissions.query) {
+      const status = await navigator.permissions.query({ name: 'microphone' });
+      if (status.state === 'granted') return { ok: true, freshRequest: false };
+      if (status.state === 'denied') return { ok: false, freshRequest: false };
+      // status.state === 'prompt' → لسه محتاجين نطلبه فعلياً (هيفتح نافذة النظام مرة واحدة)
+    }
+  } catch (e) { /* بعض المتصفحات/الـ WebView مش بتدعم استعلام حالة الميكروفون — نكمل بالطريقة القديمة */ }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    stream.getTracks().forEach(t => t.stop());
+    return { ok: true, freshRequest: true };
+  } catch (permErr) {
+    return { ok: false, freshRequest: true };
+  }
+}
+
+async function toggleVoiceRecitation() {
+  const micBtn = document.getElementById('micReciteBtn');
+  if (micBtn && micBtn.classList.contains('recording')) {
+    stopVoiceRecitation(true);
+    return;
+  }
+
+  if (state.answered) return; // السؤال اتجاوب خلاص
+
+  // ★ لازم Secure Context (https أو localhost) — من غيره الـ Speech API بترجع صامتة تماماً
+  if (!window.isSecureContext) {
+    showToast('التسميع الصوتي محتاج اتصال آمن (https) — افتح الموقع بالرابط الرسمي 🔒');
+    return;
+  }
+
+  const SpeechRecognitionCheck = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognitionCheck) {
+    showToast(_speechUnsupportedMessage());
+    return;
+  }
+
+  // ★ مبقناش بنطلب إذن المايك بأنفسنا (getUserMedia) — سيبنا SpeechRecognition
+  // نفسه هو اللي يطلبه لوحده لو محتاج، بدل ما يظهر طلب إذن مرتين.
+  // ده شغال بنفس الطريقة جوه تطبيق نور (TWA) وعلى الويب، لأن المتصفح
+  // اللي بيعرض الصفحة جوه التطبيق هو نفسه كروم المثبّت على الجهاز.
+  _voiceManualStop = false;
+  _voiceRestartCount = 0;
+  _voiceHeardAnything = false;
+  startVoiceRecitation();
+}
+
+/* ─── مطابقة صوتية ذكية (متسامحة مع فروق التعرف الصوتي البسيطة) ───
+   بدل المطابقة الحرفية اللي كانت بتفشل مع أي اختلاف بسيط في التعرف الصوتي،
+   دلوقتي بنستخدم: (1) تشابه تقريبي (Levenshtein) بدل التطابق الحرفي،
+   (2) معالجة حالة إن التعرف الصوتي قسّم كلمة لكلمتين أو دمج كلمتين في كلمة. */
+function _levenshteinDist(a, b) {
+  const m = a.length, n = b.length;
+  if (!m) return n;
+  if (!n) return m;
+  const dp = new Array(n + 1);
+  for (let j = 0; j <= n; j++) dp[j] = j;
+  for (let i = 1; i <= m; i++) {
+    let prev = dp[0];
+    dp[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const tmp = dp[j];
+      dp[j] = a[i - 1] === b[j - 1] ? prev : 1 + Math.min(prev, dp[j], dp[j - 1]);
+      prev = tmp;
+    }
+  }
+  return dp[n];
+}
+/* ★ المقارنة النهائية — بتاخد الكلمة المنطوقة والكلمة المستهدفة بشكلهم الخام.
+   ثلاث بوابات بالترتيب:
+   1) تطابق تام مع أي صيغة مشروعة للكلمة القرآنية
+   2) فرق حرف مد واحد في آخر الكلمة بس (شَيۡء = "شي" ، ٱلسَّمَآء = "السما")
+   3) للكلمات الطويلة: الهيكل الصامت لازم يتطابق حرف بحرف، والتسامح في المد فقط.
+      البوابة دي هي اللي بتمنع قبول كلمة مختلفة فعلاً:
+      "العالمين" مقابل "الظالمين" → علمن ≠ ظلمن → مرفوضة
+      "الفلق"   مقابل "الغلق"    → فلق  ≠ غلق  → مرفوضة */
+var _QVOWELS = { '\u0627': 1, '\u0648': 1, '\u064A': 1 };
+function _qSkeleton(w) {
+  var s = '';
+  for (var i = 0; i < w.length; i++) if (!_QVOWELS[w[i]]) s += w[i];
+  return s;
+}
+/* ★ اتجاهية بقصد: بنسمح بس إن الكلمة المنطوقة تكون أقصر بحرف مد أخير عن صيغة
+   الهدف (المحرك بيبلع الهمزة/المد في آخر الكلمة: ٱلسَّمَآء → "السما" ، شَيۡء → "شي").
+   العكس ممنوع: لو المنطوق أطول، ده غالباً كلمتين هدف اتدمجوا في توكن واحد
+   (يَعۡلَمُ + مَا → "يعلمما")، ولازم يتصرّف فيها منطق الدمج مش دي، وإلا هنعلّم
+   الكلمة اللي بعدها غلط بالباطل. */
+function _qTailOnly(spoken, variant) {
+  if (spoken.length < 2) return false;   // حرف واحد مش كفاية — بيفتح باب مطابقات وهمية
+  if (variant.length - spoken.length !== 1) return false;
+  var last = variant.charAt(variant.length - 1);
+  return variant.slice(0, spoken.length) === spoken && (_QVOWELS[last] || last === '\u0647');
+}
+/* ★ تطابق تام مع أي صيغة مشروعة للكلمة — بيتجرّب قبل أي تسامح، عشان لو
+   المحرك دمج كلمتين هدف في توكن واحد ما نصرفهاش على الكلمة الأولى بالتقريب. */
+function _wordsExact(spokenRaw, targetRaw) {
+  if (!spokenRaw || !targetRaw) return false;
+  var sp = _qNormWord(spokenRaw, true);
+  if (!sp) return false;
+  var vars = _qVariants(targetRaw);
+  for (var n = 0; n < vars.length; n++) if (sp === vars[n]) return true;
+  return false;
+}
+/* ★ فئات صوتية عربية: حروف محرك التعرف بيخلط بينها كتير وصوتها متقارب.
+   بتتستخدم كطبقة أخيرة بعد ما التطابق التام يفشل — مش بديل عنه. */
+function _qPhon(w) {
+  return w.replace(/\u0637/g, '\u062A')            // ط → ت
+          .replace(/[\u0635\u062B]/g, '\u0633')    // ص ث → س
+          .replace(/\u0636/g, '\u062F')            // ض → د
+          .replace(/[\u0632\u0638]/g, '\u0630');   // ز ظ → ذ
+}
+/* أداة التعريف — المحرك بياكلها أو بيزوّدها كتير */
+function _qNoAl(w) {
+  return (w.length > 4 && w.charCodeAt(0) === 0x627 && w.charCodeAt(1) === 0x644) ? w.slice(2) : w;
+}
+
+/* ★★ مقياس فضفاض جداً — غرضه الوحيد إنه يمنع حكم الغلط.
+   الفكرة: عشان نحكم إنك "قلت كلمة تانية"، لازم يكون اللي اتقال بعيد فعلاً عن
+   الكلمة اللي قصادك. لو فيه أي شبه معقول، يبقى الأرجح إنك قلتها صح واحنا
+   اللي فشلنا نطابقها — وساعتها تتحسب صح. الشك دايماً لصالح المسمّع.
+   ده منفصل تماماً عن _wordsSimilar اللي بيقرر التقدّم في الآية. */
+function _wordsMaybe(spokenRaw, targetRaw) {
+  if (!spokenRaw || !targetRaw) return true;      // مش عارفين → مانحكمش بالغلط
+  var sp = _qNormWord(spokenRaw, true);
+  var vars = _qVariants(targetRaw);
+  if (!sp) return true;
+  for (var n = 0; n < vars.length; n++) {
+    var v = vars[n];
+    if (!v) continue;
+    if (sp === v) return true;
+    // واحدة جوّه التانية (المحرك قصّ أو زوّد)
+    if (sp.length >= 3 && v.indexOf(sp) >= 0) return true;
+    if (v.length >= 3 && sp.indexOf(v) >= 0) return true;
+    // نفس الهيكل الصامت
+    if (_qSkeleton(sp) === _qSkeleton(v)) return true;
+    // قريبة صوتياً
+    var a = _qPhon(sp), b = _qPhon(v);
+    if (a === b) return true;
+    if (_qPhon(_qNoAl(sp)) === _qPhon(_qNoAl(v))) return true;
+    // مسافة تحرير سخية: لحد ٤٥٪ من طول الكلمة
+    var L = a.length > b.length ? a.length : b.length;
+    var allow = Math.floor(L * 0.45); if (allow < 1) allow = 1;
+    if (_levenshteinDist(a, b) <= allow) return true;
+
+    /* ★ المحرك بيلزق كلمتين (وأحياناً تلاتة) في توكن واحد ويحرّفهم كمان
+       ("بيوتهم"+"خاوية" → "بوطهمخاوية"). ساعتها التوكن أطول بكتير من الكلمة،
+       فبندوّر على الكلمة جوّه التوكن بنافذة متحرّكة بدل ما نقارن الطول كله. */
+    if (a.length > b.length + 1 && b.length >= 3) {
+      var allowW = Math.floor(b.length * 0.45); if (allowW < 1) allowW = 1;
+      for (var off = 0; off + b.length <= a.length; off++) {
+        if (_levenshteinDist(a.substr(off, b.length), b) <= allowW) return true;
+      }
+    }
+  }
+  return false;
+}
+
+function _wordsSimilar(spokenRaw, targetRaw) {
+  if (!spokenRaw || !targetRaw) return false;
+  var sp = _qNormWord(spokenRaw, true);
+  if (!sp) return false;
+  var spSk = _qSkeleton(sp), spAl = _qNoAl(sp), spPh = _qPhon(sp);
+  var vars = _qVariants(targetRaw);
+  for (var n = 0; n < vars.length; n++) {
+    var v = vars[n];
+    if (sp === v) return true;
+    if (_qTailOnly(sp, v)) return true;
+
+    var L = sp.length > v.length ? sp.length : v.length;
+    var dLen = sp.length - v.length; if (dLen < 0) dLen = -dLen;
+
+    /* (أ) الفرق في حروف المدّ بس (ا و ي) — ده اختلاف رسم مش اختلاف كلمة.
+       مقصورة على الكلمات ٥ حروف فأكتر عمداً: في الكلمات القصيرة حرف المدّ
+       بيغيّر الكلمة نفسها (قل/قال · علم/عالم · كتب/كتاب) فمنتسامحش فيها. */
+    if (L >= 5 && spSk === _qSkeleton(v) && dLen <= (L >= 8 ? 2 : 1)) return true;
+
+    /* (ب) أداة التعريف اتاكلت أو اتزوّدت */
+    var vAl = _qNoAl(v);
+    if (spAl.length >= 3 && spAl === vAl) return true;
+
+    /* (ج) خلط بين حروف متقاربة صوتياً — للكلمات ٤ حروف فأكتر،
+       وبتطابق تام بعد التوحيد (مش تقريبي) عشان مانوسّعش أكتر من اللازم. */
+    if (L >= 4) {
+      if (spPh === _qPhon(v)) return true;
+      if (spAl.length >= 3 && _qPhon(spAl) === _qPhon(vAl)) return true;
+    }
+
+    /* ★ مافيش تسامح في تعديل الحروف الصامتة (Levenshtein) عن قصد.
+       جرّبناه وقِسناه: بيوصل الأخطاء الوهمية لـ ٠٫٠٥٪ بس بيهبّط كشف الغلط
+       الحقيقي من ٩٨٫٢٪ لـ ٨٥٫٩٪ — يعني ١ من كل ٧ غلطات حقيقية بتعدّي.
+       ده تطبيق حفظ، والغلطة اللي بتعدّي مش أقل ضرراً من الغلطة الوهمية.
+       الطبقات (أ) و(ب) و(ج) بتغطّي اختلافات الرسم والنطق من غير الثمن ده. */
+  }
+  return false;
+}
+function _markVoiceWord(prefix, idx, correct) {
+  const el = document.getElementById(prefix + idx);
+  if (el) el.className = 'voice-word ' + (correct ? 'correct-word' : 'wrong-word');
+}
+/* تتبّع عدد مرات الاختلاف على نفس الكلمة — عشان منحكمش غلط من أول مرة (نديله فرصة تانية) */
+let _voiceMismatchTracker = {};
+/* ★ ذاكرة الكلمات المتجاهَلة — لازم تعيش عبر الدفعات المتتالية، لأن محرك التعرف
+   بيبعت الكلمات على دفعات صغيرة، وممكن جزئين الكلمة الواحدة ييجوا في دفعتين
+   مختلفتين ("يا" في دفعة و"أيها" في اللي بعدها). */
+var _qPendingBuf = [];
+/* ★ عدّاد الكلمات اللي المسمّع نطقها فعلاً ومعرفناش نطابقها منذ آخر كلمة صح.
+   ده اللي بيفرّق بين حالتين مختلفتين تماماً:
+   - قال كلمة تانية غلط  → العدّاد > صفر → حكم بالغلط
+   - الكلمة ضاعت من محرك التعرف وهو قايلها صح → العدّاد = صفر → تتحسب صح
+   من غير الفرق ده، ضياع كلمة من كروم كان بيتحسب غلطة على المسمّع. */
+var _qGhostRun = 0;
+var _qGhostWords = [];
+/* كلمات الحشو والتردد اللي محرك التعرف بيرجّعها من الضجيج. دي مش دليل على
+   إنك قلت كلمة غلط. مابنصفّيش بالطول عشان القرآن مليان كلمات من حرفين
+   وتلاتة (٣٤٪ من كلمات المصحف) ولازم الغلط فيها يتكشف. */
+var _QFILLER = { 'اه':1,'اهه':1,'ااه':1,'ههه':1,'مم':1,'همم':1,'امم':1,
+                 'يعني':1,'طب':1,'ايوه':1,'اوك':1,'اها':1,'اا':1,'ااا':1 };
+/* ★ طابور التأجيل: لو الكلمة الأخيرة في الدفعة شكلها تخطي لكن مفيش كلمة بعدها
+   تأكّد القرار، منرميهاش ومنحكمش بيها — بنأجّلها للدفعة الجاية. من غير ده كانت
+   الكلمة تضيع والآية تقف مكانها (بيحصل كتير لو المحرك سقّط كلمة أثناء التلاوة
+   السريعة). _qDeferAge بيمنع التأجيل اللانهائي. */
+var _qGhostRun = 0;      // عدد الكلمات الغريبة من غير تطابق منذ آخر كلمة صح
+var _qDeferred = [];
+var _qDeferAge = 0;
+var _qDeferFlush = null;
+/* المطابقة الأساسية — مشتركة بين وضع الاختبار والتسميع الحر */
+/* ★★ المطابقة التسلسلية — القاعدة الذهبية:
+   الكلمة ما تتعلّمش غلط أبداً إلا لما نتأكد بدليلين إن المسمّع عدّاها فعلاً.
+   أي كلمة منطوقة مش مفهومة أو ضوضاء أو تلعثم أو سماع خاطئ بتتجاهل تماماً.
+   ده اللي بيمنع أي "غلط وهمي" حتى لو محرك التعرف نفسه غلط. */
+var _QFWD_WINDOW  = 5;  // نطاق البحث قدام (كشف التخطي الحقيقي)
+var _QBACK_WINDOW = 4;  // نطاق البحث ورا (المسمّع بيعيد كلمة قالها)
+var _QJOIN_MAX    = 4;  // أقصى عدد كلمات بندمجها من الناحيتين (4 عشان التلاوة السريعة
+                        // اللي المحرك بيلزق فيها 3-4 كلمات في توكن واحد)
+
+/* ★ عربي بس.
+   محرك كروم أحياناً بيسمع التلاوة كأنها إنجليزي ويرجّع نص لاتيني (بيكتر مع
+   التلاوة السريعة). الدالة دي بتاخد كل البدائل اللي المحرك رجّعها وتختار أول
+   واحد فيه حروف عربية فعلاً. لو مفيش ولا بديل عربي، بترجّع فاضي والنتيجة كلها
+   بتتجاهل بدل ما نحاول نطابق كلام إنجليزي على آية. */
+/* ★★ محرك التعرف بيرجّع لحد ٤ احتمالات لكل نتيجة (maxAlternatives = 4).
+   كنا بناخد أول احتمال عربي ونرمي الباقي — وده إهدار لمعلومة مهمة: كتير
+   الاحتمال التاني أو التالت بيكون هو المطابق للآية بالظبط.
+   دلوقتي بنجرّب كل الاحتمالات على الكلمات المتوقّعة ونختار أقربها للآية.
+   ده تحسين في الدقة من غير أي تخفيض في معايير الحكم — بنستخدم معلومات
+   أكتر، مش بنتساهل أكتر. */
+function _pickArabicAlt(res, expected) {
+  if (!res) return '';
+  var arabic = /[\u0621-\u064A]/;
+  var n = res.length || 1;
+  var best = '', bestScore = -1, firstArabic = '';
+  for (var a = 0; a < n; a++) {
+    var alt = res[a];
+    var t = (alt && alt.transcript ? String(alt.transcript) : '').trim();
+    if (!t || !arabic.test(t)) continue;
+    if (!firstArabic) firstArabic = t;
+    if (!expected || !expected.length) return t;      // مفيش سياق نقارن بيه
+    // نحسب كام كلمة من الاحتمال ده بتطابق الكلمات المتوقّعة بالترتيب
+    var words = t.split(/\s+/).filter(Boolean);
+    var score = 0, e = 0;
+    for (var k = 0; k < words.length && e < expected.length; k++) {
+      var hit = false;
+      for (var f = e; f < expected.length && f < e + 3; f++) {
+        if (_wordsExact(words[k], expected[f])) { score += 2; e = f + 1; hit = true; break; }
+      }
+      if (!hit) {
+        for (var f2 = e; f2 < expected.length && f2 < e + 3; f2++) {
+          if (_wordsSimilar(words[k], expected[f2])) { score += 1; e = f2 + 1; break; }
+        }
+      }
+    }
+    if (score > bestScore) { bestScore = score; best = t; }
+  }
+  return best || firstArabic;
+}
+
+function _matchSpokenBatch(spokenWords, ctx) {
+  if (_qDeferred.length) { spokenWords = _qDeferred.concat(spokenWords); _qDeferred = []; }
+  clearTimeout(_qDeferFlush);
+  var targetWords = ctx.getWords();
+  var idx = ctx.getIdx();
+  // ★★ نسجّل موقع البداية. onDone لازم تتنادى مرة واحدة بس — في الاستدعاء اللي
+  // الآية اكتملت فيه فعلاً. من غير الشرط ده، أي استدعاء تاني والآية خلصانة
+  // (زي مؤقّت الكلمة المؤجلة اللي بيضرب بعد 400ms) كان بيزوّد مؤشر الآية تاني
+  // فتتقفز آية كاملة: يعرض ٢ وبعدها ٤ ويسيب ٣.
+  var _startIdx = idx;
+  var i = 0;
+  var mistakeHappened = false;
+
+  // ★ لو فيه خريطة (حروف مقطعة اتوسّعت لعدة كلمات مطابقة)، بنحوّل رقم كلمة
+  // المطابقة لرقم الكلمة المعروضة فعلياً على الشاشة قبل الهايلايت.
+  function _dispIdx(k) { return ctx.mapIdx ? ctx.mapIdx(k) : k; }
+  function markCorrect(k) {
+    _markVoiceWord(ctx.wordElPrefix, _dispIdx(k), true);
+    if (ctx.onCorrectWord) ctx.onCorrectWord(k);
+  }
+  function resetGhosts() { _qGhostRun = 0; }
+  function markWrong(k, heard) {
+    _markVoiceWord(ctx.wordElPrefix, _dispIdx(k), false);
+    mistakeHappened = true;
+    if (ctx.onMistakeWord) ctx.onMistakeWord(k, heard);
+  }
+
+  /* ذاكرة الكلمات المتجاهَلة مؤخراً. سببها: المحرك ممكن يقسّم كلمة هدف واحدة
+     لجزئين وتقع بينهم ضوضاء ("يا" + "اه" + "أيها" وهدفها يَٰٓأَيُّهَا). من غير
+     الذاكرة دي كانت الكلمة تتعلّم غلط رغم إن المسمّع قالها صح كاملة. */
+  var pending = _qPendingBuf;
+  /* ★ العدّاد بيتزوّد في مكان واحد بس: مكان الكلمة الشبح، وبشرط إنها كلمة
+     معتبرة (٣ حروف فأكتر) — عشان ضجيج زي "اه" مايتحسبش نُطق كلمة غلط.
+     ما نزوّدهوش هنا: pushPending بتتنادى كمان من مسار تقسيم الكلمة الواحدة،
+     واللي هناك مش كلام غريب أصلاً — ده باقي كلمة صحيحة مستني توكنها الجاي. */
+  function clearPending() { pending.length = 0; _qGhostRun = 0; _qGhostWords.length = 0; }
+  function pushPending(w) { pending.push(w); if (pending.length > 3) pending.shift(); }
+
+  while (i < spokenWords.length && idx < targetWords.length) {
+    // ★ حزام أمان: لو كلمة الهدف نفسها مالهاش حروف عربية (رمز لوحده مثلاً)،
+    // مستحيل حد ينطقها — نعديها بدل ما توقف الآية كلها.
+    if (!_qNormWord(targetWords[idx], true)) { markCorrect(idx); idx++; continue; }
+
+    var spokenRaw = spokenWords[i];
+    // رمز أو رقم أو كلمة بحروف أجنبية رجّعها المحرك — مالهاش أي وزن
+    if (!_qNormWord(spokenRaw, true)) { i++; continue; }
+
+    /* (1) تطابق تام مع الكلمة المتوقعة — أعلى أولوية */
+    if (_wordsExact(spokenRaw, targetWords[idx])) {
+      markCorrect(idx); idx++; i++; clearPending(); _qDeferAge = 0; resetGhosts(); continue;
+    }
+
+
+    /* (2) دمج/تقسيم معمّم: نجرّب كل تركيبات "س كلمة منطوقة ↔ ت كلمة هدف"
+       لحد 3×3، بالترتيب من الأصغر للأكبر. ده بيغطي كل حالات محرك التعرف:
+       - قسّم كلمة هدف لكلمتين  (يَٰٓأَيُّهَا → "يا" + "أيها")
+       - دمج كلمتين هدف في واحدة (مِن بَعۡدِ → "منبعد")
+       - وحتى الحالات المختلطة (نص كلمة + الكلمة اللي بعدها في توكن واحد) */
+    // البدايات المحتملة: من غير أي كلمة متجاهَلة، أو مسبوقة بواحدة أو أكتر منها.
+    // ده بيغطي أصعب حالة: توكن بيجمع كلمة هدف كاملة + بداية اللي بعدها
+    // ("فَقَالُوا۟"+"يَٰ" في توكن واحد، وبعده "ليتنا" لوحدها).
+    var prefixes = [''];
+    for (var pi = pending.length - 1; pi >= 0; pi--) {
+      var one = pending[pi];                      // كلمة متجاهَلة واحدة بس (الضوضاء اللي بينها تتشال)
+      var run = pending.slice(pi).join('');       // أو سلسلة متصلة منها
+      if (prefixes.indexOf(one) === -1) prefixes.push(one);
+      if (prefixes.indexOf(run) === -1) prefixes.push(run);
+    }
+
+    // tStart = idx-1 بيغطي حالة إن المسمّع كرّر آخر كلمة والمحرك لزقها باللي بعدها
+    // ("هُم" + "بِهِۦ" في توكن واحد "همبهي" بعد ما "هم" اتحسبت خلاص).
+    var hitS = 0, hitT = 0, hitStart = idx;
+
+    var _tryJoin = function (ts, sN, tN, exactOnly) {
+      if (tN < 1 || tN > _QJOIN_MAX || sN < 1 || sN > _QJOIN_MAX) return false;
+      if (ts + tN <= idx) return false;               // لازم تغطي الكلمة المتوقعة على الأقل
+      if (ts < idx && sN > 1) return false;           // الرجوع للخلف لتوكن واحد بس — من غير
+                                                      // القيد ده بيبلع توكن تاني بيخص كلمات بعدين
+      if (i + sN > spokenWords.length || ts + tN > targetWords.length) return false;
+      var sJoin = spokenWords.slice(i, i + sN).join('');
+      var tJoin = targetWords.slice(ts, ts + tN).join('');
+      for (var px = 0; px < prefixes.length; px++) {
+        // (1×1) من غير بادئة اتجرّبت خلاص في الخطوة (1)
+        if (sN === 1 && tN === 1 && px === 0 && ts === idx) continue;
+        var cand = prefixes[px] + sJoin;
+        if (exactOnly ? _wordsExact(cand, tJoin) : _wordsSimilar(cand, tJoin)) {
+          hitS = sN; hitT = tN; hitStart = ts; return true;
+        }
+      }
+      return false;
+    };
+
+    // مرحلة أولى: تطابق تام، وبنفضّل اللي يغطي كلمات هدف أكتر.
+    // ضرورية لأن التقريب ممكن يصرف توكن زي "افرايتما" على "أَفَرَءَيۡتُم" لوحدها،
+    // والصح إنه "أَفَرَءَيۡتُم"+"مَّا" بالتمام — وبعدين "ما" كانت هتتعلّم غلط بالباطل.
+    for (var ts0 = idx; ts0 >= idx - 1 && ts0 >= 0 && !hitS; ts0--)
+      for (var tNa = _QJOIN_MAX; tNa >= 1 && !hitS; tNa--)
+        for (var sNa = 1; sNa <= _QJOIN_MAX && !hitS; sNa++)
+          _tryJoin(ts0, sNa, tNa, true);
+
+    // مرحلة تانية: تطابق تقريبي، وهنا بنفضّل الأقل تغطية عشان منبلعش زيادة
+    for (var ts1 = idx; ts1 >= idx - 1 && ts1 >= 0 && !hitS; ts1--)
+      for (var tot = 2; tot <= _QJOIN_MAX * 2 && !hitS; tot++)
+        for (var sNb = 1; sNb <= _QJOIN_MAX && !hitS; sNb++)
+          _tryJoin(ts1, sNb, tot - sNb, false);
+    if (hitS) {
+      for (var g = idx; g < hitStart + hitT; g++) markCorrect(g);
+      idx = hitStart + hitT; i += hitS; clearPending(); _qDeferAge = 0; resetGhosts(); continue;
+    }
+
+    /* (2ج) التوكن بيغطي الكلمة المتوقعة كاملة + بداية اللي بعدها
+       ("لِّقَوۡمِهِۦ"+"يَٰ" في توكن واحد). بناخد المغطّى ونشيل الباقي في الذاكرة
+       عشان يتلزق بالتوكن الجاي. لازم يتجرّب قبل التطابق التقريبي، وإلا التقريب
+       هيبلع التوكن كله وهيضيّع بداية الكلمة اللي بعدها. */
+    var spN = _qNormWord(spokenRaw, true);
+    var ate = 0;
+    for (var tc = 1; tc <= 2 && !ate; tc++) {
+      if (idx + tc > targetWords.length) break;
+      var tVars = _qVariants(targetWords.slice(idx, idx + tc).join(''));
+      for (var tv = 0; tv < tVars.length && !ate; tv++) {
+        var head = tVars[tv];
+        if (head.length >= 3 && spN.length > head.length && spN.slice(0, head.length) === head) {
+          for (var q = 0; q < tc; q++) markCorrect(idx + q);
+          idx += tc;
+          clearPending();
+          pushPending(spN.slice(head.length));   // الباقي يستنى التوكن الجاي
+          ate = 1;
+        }
+      }
+    }
+    if (ate) { i++; continue; }
+
+    /* (2ب) تطابق تقريبي مع الكلمة المتوقعة — بيتجرّب بعد الدمج مش قبله.
+       لو جرّبناه قبل الدمج كان هيخطف الحالة: المحرك بيدمج كلمتين هدف في توكن
+       واحد ("فَرِجَالًا"+"أَوۡ" → "فرجالاو")، والتقريب كان بيصرفه على الكلمة
+       الأولى بس ويخلّي التانية تتعلّم غلط بالباطل. */
+    if (_wordsSimilar(spokenRaw, targetWords[idx])) {
+      markCorrect(idx); idx++; i++; clearPending(); _qDeferAge = 0; resetGhosts(); continue;
+    }
+
+    /* (3) تكرار — المسمّع رجع وأعاد كلمة سمّعها خلاص (عادي جداً في التحفيظ)،
+       أو المحرك بعت نفس الكلمة مرتين. نتجاهلها من غير أي حكم. */
+    var repeated = false, repeatExact = false;
+    for (var b = idx - 1; b >= 0 && b >= idx - _QBACK_WINDOW; b--) {
+      if (_wordsExact(spokenRaw, targetWords[b])) { repeated = true; repeatExact = true; break; }
+      if (!repeated && _wordsSimilar(spokenRaw, targetWords[b])) repeated = true;
+    }
+    if (repeated) {
+      i++;
+      pending.length = 0;
+      /* ★ تكرار حرفي = المسمّع فعلاً رجع وأعاد كلمة قالها → مش دليل على غلط.
+         أما تكرار "تقريبي" فممكن يكون كلمة تانية خالص اتشابهت صدفة مع كلمة
+         فاتت — فنحتفظ بالدليل بدل ما نمسحه ونضيّع غلطة حقيقية. */
+      if (repeatExact) _qGhostRun = 0; else _qGhostRun++;
+      continue;
+    }
+
+    /* (4) الكلمة موجودة قدام → احتمال تخطي حقيقي.
+       بس ما نحكمش بالغلط غير لما الكلمة المنطوقة اللي بعدها كمان تكمّل التسلسل
+       صح. من غير التأكيد ده، أي كلمة شبح بتتشابه صدفة مع كلمة قدام كانت
+       هتخلّي كلمتين تلاتة يتعلّموا غلط بالباطل. */
+    // ★ هنا بنستخدم التطابق التام مش التقريبي بقصد. كشف التخطي هو الطريق
+    // الوحيد اللي بيعلّم كلمة غلط، فلازم يكون أضيق حاجة في النظام. أي تسامح هنا
+    // بيخلّي كلمة شبح تتشابه صدفة مع كلمة قدام وتحكم غلط على كلمتين بالباطل.
+    // البحث قدام لازم يفهم الدمج كمان: أثناء التلاوة السريعة الكلمة اللي بعد
+    // التخطي بتيجي ملزوقة باللي بعدها ("الخوف"+"والجوع"+"ونقص" في توكن واحد).
+    // من غير ده كان التخطي ما يتكشفش، الكلمة تترمي، والآية تقف في نصّها.
+    var found = -1, fndS = 1, fndT = 1;
+    for (var k = idx + 1; k < targetWords.length && k <= idx + _QFWD_WINDOW && found < 0; k++) {
+      for (var fs2 = 1; fs2 <= _QJOIN_MAX && found < 0; fs2++) {
+        if (i + fs2 > spokenWords.length) break;
+        var fsJoin = spokenWords.slice(i, i + fs2).join('');
+        for (var ft2 = 1; ft2 <= _QJOIN_MAX && found < 0; ft2++) {
+          if (k + ft2 > targetWords.length) break;
+          if (_wordsExact(fsJoin, targetWords.slice(k, k + ft2).join(''))) {
+            found = k; fndS = fs2; fndT = ft2;
+          }
+        }
+      }
+    }
+    if (found > -1) {
+      // التأكيد لازم يفهم الدمج كمان: أثناء التلاوة السريعة الكلمة اللي بعد
+      // التخطي بتيجي ملزوقة باللي بعدها. لو اكتفينا بمقارنة كلمة بكلمة، التأكيد
+      // بيفشل وبنرمي الكلمة — وده كان بيوقّف الآية في نص التسميع.
+      // توكن منطوق واحد = عدة كلمات هدف بالتطابق التام → دليل قوي لوحده.
+      // أما لو لزقنا توكنين منطوقين مع بعض، فده ممكن يحصل بالصدفة مع كلمة شبح،
+      // فبنطلب التأكيد العادي.
+      var confirmed = (fndS === 1 && fndT >= 2);
+      if (!confirmed && i + 1 < spokenWords.length && found + 1 < targetWords.length) {
+        var _s1 = spokenWords[i + 1];
+        confirmed = _wordsExact(_s1, targetWords[found + 1]);
+        if (!confirmed && found + 2 < targetWords.length)
+          confirmed = _wordsExact(_s1, targetWords[found + 1] + targetWords[found + 2]);
+        if (!confirmed && found + 3 < targetWords.length)
+          confirmed = _wordsExact(_s1, targetWords[found + 1] + targetWords[found + 2] + targetWords[found + 3]);
+        if (!confirmed && i + 2 < spokenWords.length)
+          confirmed = _wordsExact(_s1 + spokenWords[i + 2], targetWords[found + 1]);
+      } else if (!confirmed && found === targetWords.length - 1 && i === spokenWords.length - 1) {
+        // آخر كلمة في الآية وآخر كلمة منطوقة — مفيش حاجة بعدها نتأكد بيها
+        confirmed = true;
+      }
+      // مفيش كلمة بعدها في الدفعة دي نتأكد بيها؟ نأجّلها للدفعة الجاية بدل ما
+      // نرميها (رميها كان بيوقّف الآية) وبدل ما نحكم غلط من غير دليل.
+      if (!confirmed && i + 1 >= spokenWords.length) {
+        if (_qDeferAge < 2) {
+          _qDeferAge++;
+          _qDeferred = spokenWords.slice(i);
+          i = spokenWords.length;
+          break;
+        }
+        confirmed = true;   // استنينا دفعتين — نعتمد التخطي
+      }
+      if (confirmed) {
+        /* ★★ الكلمة ما تتحسبش غلط إلا لو فيه دليل إنك قلت كلمة تانية مكانها.
+           الفرق المهم:
+           - لو المحرك رجّع كلمة غريبة قبل ما يكمّل صح → يبقى فعلاً قلت حاجة
+             تانية → غلط. (الكلمات الغريبة دي محفوظة في pending)
+           - لو المحرك ببساطة ما نقلش الكلمة خالص (بيحصل كتير جداً في التلاوة
+             السريعة أو لما الصوت يتقطّع) → مافيش أي دليل إنك غلطت → صح.
+           عدد الكلمات اللي نحكم عليها بالغلط = عدد الكلمات الغريبة اللي
+           اتقالت فعلاً، مش عدد الكلمات اللي المحرك فوّتها. */
+        /* ★★★ القاعدة: الكلمة تتحسب غلط في حالة واحدة بس — إنك نطقت كلمة
+           تانية غيرها. يعني لازم يتحقق شرطين مع بعض:
+             (١) تكون نطقت حاجة فعلاً مكانها (مش المحرك اللي فوّتها)
+             (٢) واللي نطقته يكون كلمة مختلفة فعلاً — مش مجرد نُطق قريب
+                 فشلنا نطابقه. لو فيه أي شبه معقول → تتحسب صح.
+           غير كده، الكلمة صح. */
+        for (var w = idx; w < found; w++) {
+          var _heard = _qGhostWords[w - idx];
+          var _isWrong = false;
+          if (_heard && !_wordsMaybe(_heard, targetWords[w])) {
+            /* ★ شرط أخير قبل الحكم: هل اللي اتقال يشبه أي كلمة تانية قريبة في
+               الآية؟ لو أيوه، يبقى المسمّع قال كلمة من الآية بس إحنا اتلخبطنا
+               في محاذاتها — مش كلمة تانية من برّه. الحكم بالغلط مايتاخدش إلا
+               لما اللي اتقال ما يشبهش أي حاجة في الجوار خالص. */
+            /* جرّبنا نضيف فحص إضافي: هل اللي اتقال يشبه كلمة تانية قريبة في
+               الآية؟ قِسناه فطلع مكلّف جداً — بيوفّر خطأ وهمي واحد من كل ٥٠٠٠
+               آية، مقابل هبوط كشف الغلط الحقيقي من ٩٢٫٨٪ لـ٨٣٪. مرفوض. */
+            _isWrong = true;
+          }
+          if (_isWrong) markWrong(w, _heard); else markCorrect(w);
+        }
+        for (var w2 = found; w2 < found + fndT; w2++) markCorrect(w2);
+        idx = found + fndT; i += fndS; clearPending(); _qDeferAge = 0; resetGhosts();
+        if (ctx.stopOnMistake) break;
+        continue;
+      }
+    }
+
+    /* (5) لا هي المتوقعة، ولا تكرار، ولا تخطي مؤكد → كلمة شبح من محرك التعرف.
+       بس قبل ما نتجاهلها: ممكن التوكن يكون بيغطي الكلمة المتوقعة كاملة + بداية
+       الكلمة اللي بعدها ("لِّقَوۡمِهِۦ"+"يَٰ" في توكن واحد). ساعتها بناخد الكلمة
+       المغطّاة ونشيل الباقي في الذاكرة عشان يتلزق بالتوكن الجاي. */
+
+    /* غير كده — كلمة شبح. نتجاهلها ونحتفظ بيها تحسّباً.
+       ★ ونسجّل إن المسمّع نطق حاجة هنا ومعرفناش نطابقها. بنشترط ٣ حروف فأكتر
+       عشان ضجيج زي "اه" و"ام" مايتحسبش نُطق كلمة غلط. */
+    /* ★ شرط `found < 0` مهم جداً: لو الكلمة دي موجودة قدام في الآية، يبقى
+       دي كلمة صحيحة من الآية فشل تأكيدها في الدفعة دي — مش كلمة غريبة.
+       من غير الشرط ده كانت كلمة صح بتتسجّل كدليل ضد المسمّع وتخلّي كلمة
+       قبلها تتعلّم غلط بالباطل. */
+    if (found < 0 && !_QFILLER[_qNormWord(spokenRaw, true)]) {
+      _qGhostRun++; _qGhostWords.push(spokenRaw);
+    }
+    pushPending(spokenRaw);
+    i++;
+  }
+
+  ctx.setIdx(idx);
+  if (idx >= targetWords.length && _startIdx < targetWords.length) {
+    if (ctx.onDone) ctx.onDone();
+  } else if (mistakeHappened && ctx.onMistake) {
+    ctx.onMistake();
+  }
+  // بنرجّع الكلمات المنطوقة اللي ما اتستهلكتش. لو الآية خلصت والدفعة لسه فيها
+  // كلام (بيحصل مع التلاوة السريعة لما المسمّع يكمّل على الآية اللي بعدها في نفس
+  // النَفَس)، المتبقي بيتنقل للآية الجديدة بدل ما يضيع.
+  return spokenWords.slice(i);
+}
+
+function startVoiceRecitation() {
+  if (state.answered) return; // السؤال اتجاوب خلاص
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    showToast(_speechUnsupportedMessage());
+    return;
+  }
+  const q = state.questions[state.qIndex];
+  if (!q || !q.ayah) return;
+
+  // ★ زر الميكروفون في شاشة التحدي مش موجود في الـ HTML حالياً (الميزة بتتفتح
+  // من أيقونة 🎤 اللي فوق). بنستخدم كائن وهمي بدل ما نعتمد على عنصر مش موجود
+  // ونكسر الصفحة لو حد وصل للدالة دي بأي طريقة.
+  const _noEl = { classList: { add() {}, remove() {}, contains() { return false; } }, style: {}, textContent: '' };
+  const micBtn = document.getElementById('micReciteBtn') || _noEl;
+  const micBtnTxt = document.getElementById('micReciteBtnTxt') || _noEl;
+  const wrap = document.getElementById('voiceReciteWrap');
+  const display = document.getElementById('voiceAyahDisplay');
+  const statusTxt = document.getElementById('voiceStatusTxt');
+  if (!wrap || !display || !statusTxt) return;   // الشاشة مش جاهزة — منكملش
+
+  // إخفاء طرق الإجابة العادية بانتقال ناعم، وإظهار شاشة التسميع
+  ['mcqWrap', 'typingWrap', 'listenWrap'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el && el.style.display !== 'none') el.classList.add('fade-out-content');
+  });
+
+  // ★ words = المتوقَّع سماعه فعلياً (الحروف المقطعة موسّعة لأسمائها)،
+  // displayWords = نص الآية زي ما هو مكتوب بالظبط (من غير أي تغيير)،
+  // voiceWordDisplayMap = تحويل من رقم كلمة المطابقة لرقم الكلمة المعروضة
+  const _built = _buildRecitationWords(q.ayah, q.surahNum || SURAH_NAME_TO_NUM[q.surah],
+    q.fromApi ? q.ayahNum : (getAyahNum(q) || q.ayahNum));
+  _voiceWords = _built.words;   // ★ نفس الحماية (filter(Boolean) متضمّن جوه الدالة)
+  _voiceWordDisplayMap = _built.map;
+  _voiceWordIdx = 0;
+  _qPendingBuf.length = 0; _qGhostRun = 0; _qGhostWords.length = 0;
+  _qDeferred = []; _qDeferAge = 0; clearTimeout(_qDeferFlush);
+  _voiceManualStop = false;
+  _voiceRestartCount = 0;
+  _voiceMismatchTracker = {};
+  display.innerHTML = _built.displayWords.map((w, i) => `<span class="voice-word" id="voiceWord-${i}">${w}</span>`).join(' ');
+  statusTxt.textContent = '🎙️ بيسمعك دلوقتي... اتكلم بترتيل واضح';
+
+  wrap.style.display = 'block';
+  requestAnimationFrame(() => wrap.classList.add('fade-in-ayah'));
+  micBtn.classList.add('recording');
+  micBtnTxt.textContent = 'إيقاف الاستماع';
+  const voiceInterimReset = document.getElementById('voiceInterimTxt');
+  if (voiceInterimReset) voiceInterimReset.textContent = '';
+
+  _voiceRecognition = new SpeechRecognition();
+  _voiceRecognition.lang = (window._nourSpeechLang || 'ar-SA');
+  _voiceRecognition.interimResults = true;
+  try { _voiceRecognition.maxAlternatives = 4; } catch (e) {}
+  _voiceRecognition.continuous = true;
+  _voiceInterimCounts = {}; // تتبّع عدد الكلمات اللي سبق معالجتها من كل نتيجة مؤقتة
+  clearTimeout(_voicePendingFlush);
+  _voicePendingFlush = null;
+  _voicePendingToken++;
+  // ★ ما نبدأش نطابق أو نقيّم أي نتيجة قبل ما المستخدم يبدأ يتكلم فعلاً —
+  // بنستنى onspeechstart الحقيقي (مش مجرد audiostart لضوضاء خلفية)
+  _voiceUserStartedSpeaking = false;
+
+  // ★ Watchdog: لو مرّت 6 ثواني من غير أي نتيجة (ولا حتى مؤقتة)، نبلّغ المستخدم بوضوح
+  // بدل ما يفضل شايف "بيسمعك دلوقتي" من غير أي تفاعل فعلي.
+  clearTimeout(_voiceHeardWatchdog);
+  _voiceHeardWatchdog = setTimeout(() => {
+    if (!_voiceManualStop && !_voiceHeardAnything) {
+      if ((window._nourSpeechLang || 'ar-SA') === 'ar-SA') {
+        // ★ جرّب لغة تعرف صوتي بديلة (بعض الأجهزة مش عندها حزمة ar-SA لكن عندها ar-EG)
+        window._nourSpeechLang = 'ar-EG';
+        try { _voiceRecognition && _voiceRecognition.stop(); } catch (e) {}
+        _voiceRestartCount = 0;
+        setTimeout(() => { if (!_voiceManualStop) startVoiceRecitation(); }, 300);
+      } else {
+        statusTxt.textContent = '⚠️ مش بنسمع كلام عربي — لو المحرك بيسمعك إنجليزي، غيّر لغة الإدخال للعربية. وتأكد إن إذن الميكروفون "مسموح"';
+      }
+    }
+  }, 10000);
+
+  _voiceRecognition.onstart = function() {
+    // ★★ كروم بيوقف continuous تلقائياً وبنعيد تشغيله من onend. ساعتها resultIndex
+    // بيرجع لصفر لكن عدّاد الكلمات المعالجة كان فاضل بقيمته القديمة، فكانت الكلمات
+    // الجديدة تتبلع وتفضل الآية واقفة. التصفير هنا بيحصل مع كل تشغيل وإعادة تشغيل.
+    _voiceInterimCounts = {};
+    clearTimeout(_voicePendingFlush);
+    _voicePendingFlush = null;
+    _voicePendingToken++;
+    statusTxt.textContent = '🎙️ الميكروفون شغال دلوقتي... اتكلم بترتيل واضح';
+  };
+
+  _voiceRecognition.onaudiostart = function() {
+    const interimEl = document.getElementById('voiceInterimTxt');
+    if (interimEl) interimEl.textContent = '🔊 بيستقبل صوت من المايك...';
+  };
+
+  _voiceRecognition.onspeechstart = function() {
+    _voiceUserStartedSpeaking = true;
+    const interimEl = document.getElementById('voiceInterimTxt');
+    if (interimEl) interimEl.textContent = '🗣️ باين إنك بتتكلم... بنحلل الكلام';
+  };
+
+  _voiceRecognition.onnomatch = function() {
+    const interimEl = document.getElementById('voiceInterimTxt');
+    if (interimEl) interimEl.textContent = '⚠️ سمعنا صوت بس مقدرناش نفهم كلمات — قرّب المايك أكتر';
+  };
+
+  _voiceRecognition.onresult = function(event) {
+    // ★★ زي التسميع الحر: "سمعنا" = وصل كلام عربي، مش أي ضجيج
+    for (let i = event.resultIndex; i < event.results.length; ++i) {
+      // ★ عربي بس — لو المحرك رجّع كلام إنجليزي/لاتيني بنتجاهل النتيجة كلها
+      const transcript = _pickArabicAlt(event.results[i],
+        _voiceWords ? _voiceWords.slice(_voiceWordIdx, _voiceWordIdx + 8) : null);
+      const interimEl = document.getElementById('voiceInterimTxt');
+      if (transcript) {
+        _voiceHeardAnything = true;
+        clearTimeout(_voiceHeardWatchdog);
+        _voiceRestartCount = 0;
+      }
+      if (interimEl && !event.results[i].isFinal) interimEl.textContent = transcript ? ('سمعت: ' + transcript) : '';
+      // ★★ كلام عربي فعلي = المسمّع بدأ، حتى لو onspeechstart اتأخر
+      if (transcript) _voiceUserStartedSpeaking = true;
+      // ★ لو المستخدم لسه ما بدأش يتكلم فعلياً (onspeechstart ما اتطلقش)، دي نتيجة
+      // شبح/ضوضاء خلفية — نتجاهلها تماماً وما نديش تقييم قبل الأوان
+      if (!_voiceUserStartedSpeaking) { continue; }
+      const allWords = transcript ? transcript.split(/\s+/) : [];
+      // ★ بعض إصدارات كروم (خصوصاً على أندرويد) نادراً ما بتخلّي isFinal تبقى true
+      // في وضع continuous، فبنعالج الكلمات الجديدة أول ما تظهر في النتيجة المؤقتة
+      // بدل ما ننتظر النتيجة النهائية اللي ممكن ما توصلش أصلاً
+      // ★★ كروم بيعدّل النتيجة المؤقتة وأحياناً بيقصّرها. لو العدّاد بقى أكبر من
+      // عدد الكلمات الحالي، المزامنة اتكسرت — بنعيد ضبطه بدل ما نفضل نبلع كلمات.
+      let already = _voiceInterimCounts[i] || 0;
+      if (already > allWords.length) { already = allWords.length; _voiceInterimCounts[i] = already; }
+      let spokenWords = allWords.slice(already);
+      if (!spokenWords.length) continue;
+      // ★ آخر كلمة في نتيجة مؤقتة (مش isFinal) لسه ممكن تتصحح من كروم — بنسيبها
+      // لحد ما تتأكد (كلمة جديدة بعدها تثبتها، أو النتيجة تتثبت isFinal)، وإلا
+      // بنفرّغها بنفسنا بعد نص ثانية عشان منضيعش آخر كلمة في الآية لو ما اتثبتتش خالص
+      clearTimeout(_voicePendingFlush);
+      _voicePendingFlush = null;
+      if (!event.results[i].isFinal) {
+        _voiceInterimCounts[i] = allWords.length - 1;
+        const pendingWord = allWords[allWords.length - 1];
+        const pendingToken = ++_voicePendingToken;
+        spokenWords = spokenWords.slice(0, -1);
+        _voicePendingFlush = setTimeout(() => {
+          if (_voicePendingToken === pendingToken) {
+            _voiceInterimCounts[i] = allWords.length;
+            _runVoiceMatch([pendingWord]);
+          }
+        }, 400);
+        if (!spokenWords.length) continue;
+      } else {
+        _voiceInterimCounts[i] = allWords.length;
+      }
+      if (event.results[i].isFinal && interimEl) interimEl.textContent = '';
+      _runVoiceMatch(spokenWords);
+    }
+  };
+
+  function _runVoiceMatch(spokenWords) {
+      if (!spokenWords) spokenWords = [];
+      if (!spokenWords.length && !_qDeferred.length) return;
+      _matchSpokenBatch(spokenWords, {
+        getWords: () => _voiceWords,
+        getIdx: () => _voiceWordIdx,
+        setIdx: (v) => { _voiceWordIdx = v; },
+        mapIdx: (k) => _voiceWordDisplayMap[k],
+        wordElPrefix: 'voiceWord-',
+        stopOnMistake: true,
+        onDone: () => {
+          statusTxt.textContent = '✅ تسميع صحيح ومتقن!';
+          stopVoiceRecitation(false);
+          setTimeout(() => checkAnswer(q.blank, q.blank), 250);
+        },
+        onMistake: () => {
+          statusTxt.textContent = '❌ في اختلاف — دوس الميكروفون وحاول تاني';
+          stopVoiceRecitation(false);
+        }
+      });
+      clearTimeout(_qDeferFlush);
+      if (_qDeferred.length) {
+        _qDeferFlush = setTimeout(function () {
+          if (_qDeferred.length && !_voiceManualStop) {
+            _qDeferAge = 9;
+            _runVoiceMatch([]);
+            _qDeferAge = 0;
+          }
+        }, 1100);
+      }
+  }
+
+  _voiceRecognition.onerror = function(event) {
+    const interimEl = document.getElementById('voiceInterimTxt');
+    // no-speech / aborted مؤقتين وهيعاد المحاولة تلقائياً من onend — بس نوريك إنهم بيحصلوا
+    if (event.error === 'no-speech') {
+      if (interimEl) interimEl.textContent = '⚠️ سمعنا صوت بس التعرّف الصوتي معرفش يحوّله لنص — هنعيد المحاولة تلقائياً';
+      return;
+    }
+    if (event.error === 'aborted') return;
+    if (event.error === 'not-allowed' || event.error === 'permission-denied') {
+      statusTxt.textContent = '❌ الميكروفون مرفوض — فعّل الإذن من إعدادات المتصفح';
+      _voiceManualStop = true;
+    } else if (event.error === 'network') {
+      statusTxt.textContent = '❌ الاتصال بالإنترنت ضعيف — التعرف الصوتي محتاج نت';
+    } else {
+      if (interimEl) interimEl.textContent = '⚠️ خطأ (' + event.error + ') — بنحاول تاني';
+    }
+  };
+  _voiceRecognition.onend = function() {
+    if (_voiceManualStop || _voiceWordIdx >= _voiceWords.length) {
+      micBtn.classList.remove('recording');
+      micBtnTxt.textContent = 'سمّع بدل الإجابة';
+      return;
+    }
+    _voiceRestartCount++;
+    // ★ لو اتوقف واتعاد كتير من غير ما نسمع ولا كلمة واحدة، الغالب إن كروم
+    // بيطلب إذن الميكروفون في كل مرة بدل ما يفتكره — مش هنفضل نلحّ عليه
+    if (_voiceRestartCount >= 5 && !_voiceHeardAnything) {
+      statusTxt.textContent = '⚠️ الميكروفون بيطلب إذن كل مرة — افتح إعدادات الموقع في كروم (🔒 بجانب الرابط) وخلي إذن الميكروفون "مسموح" مش "يسأل كل مرة"';
+      _voiceManualStop = true;
+      micBtn.classList.remove('recording');
+      micBtnTxt.textContent = 'سمّع بدل الإجابة';
+      return;
+    }
+    // ★ كروم بيوقف continuous mode أحياناً بعد أول وقفة قصيرة — نعيد التشغيل تلقائياً
+    setTimeout(() => { if (!_voiceManualStop && _voiceRecognition) { _voiceUserStartedSpeaking = false; try { _voiceRecognition.start(); } catch (e) {} } }, 250);
+  };
+
+  try { _voiceRecognition.start(); } catch (err) { stopVoiceRecitation(true); }
+}
+
+function stopVoiceRecitation(restoreAnswerUI) {
+  _voiceManualStop = true;
+  _qPendingBuf.length = 0; _qGhostRun = 0; _qGhostWords.length = 0;
+  _qDeferred = []; _qDeferAge = 0; clearTimeout(_qDeferFlush);
+  clearTimeout(_voiceHeardWatchdog);
+  clearTimeout(_voicePendingFlush);
+  _voicePendingToken++;
+  if (_voiceRecognition) {
+    try { _voiceRecognition.stop(); } catch (err) {}
+    _voiceRecognition = null;
+  }
+  const micBtn = document.getElementById('micReciteBtn');
+  const micBtnTxt = document.getElementById('micReciteBtnTxt');
+  if (micBtn) micBtn.classList.remove('recording');
+  if (micBtnTxt) micBtnTxt.textContent = 'سمّع بدل الإجابة';
+
+  if (restoreAnswerUI) {
+    const wrap = document.getElementById('voiceReciteWrap');
+    if (wrap) { wrap.classList.remove('fade-in-ayah'); wrap.style.display = 'none'; }
+    ['mcqWrap', 'typingWrap', 'listenWrap'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.classList.remove('fade-out-content');
+    });
+  }
+}
+
+/* ═══════ التسميع الحر لسورة/جزء كامل (بديل زر تصفير النقاط) ═══════ */
+let _reciteTab = 'surah';
+let _freeReciteQueue = [];      // [{surahNum, surahName, num, text}, ...]
+let _freeReciteIdx = 0;         // مؤشر الآية الحالية داخل الطابور
+let _freeReciteWords = [];
+let _freeReciteWordDisplayMap = [];  // ★ رقم كلمة المطابقة → رقم الكلمة المعروضة (للحروف المقطعة)
+let _freeReciteWordIdx = 0;
+let _freeReciteRecognition = null;
+let _freeReciteManualStop = false;
+let _freeReciteInterimCounts = {};
+let _freeRecitePendingFlush = null; // مؤقّت يفرّغ آخر كلمة مؤجلة لو محصلش تحديث جديد يبطلها
+let _freeRecitePendingToken = 0;    // نسخة لكل كلمة مؤجلة عشان نتأكد إنها لسه صالحة وقت التفريغ
+let _freeReciteRestartCount = 0;
+let _freeReciteSession = null;  // {startTime, correct, wrong, mistakes:[], ayahsDone, ayahsTotal, titleText}
+let _freeReciteHeardAnything = false; // هل وصلت أي نتيجة (حتى مؤقتة) من الـ Speech API لحد دلوقتي
+let _freeReciteHeardWatchdog = null;  // مؤقّت تحذير لو مفيش نتائج بترجع خالص
+/* ★ الكلمات اللي وصلت بعد ما الآية خلصت في نفس الدفعة — بتتنقل للآية الجاية.
+   من غيرها، أول كلمة أو اتنين من كل آية كانوا بيضيعوا لو المسمّع بيقرأ بسرعة
+   ومكمّل على الآية اللي بعدها في نفس النَفَس. */
+let _freeReciteCarry = [];
+let _freeReciteTransitioning = false; // بنمنع أي نتائج زيادة تتعالج أثناء الانتقال بين آية وآية (يمنع تخطي آية)
+
+function openRecitationPicker() {
+  document.getElementById('recitePickerOverlay').style.display = 'block';
+  document.getElementById('reciteSearchInput').value = '';
+  switchReciteTab('surah');
+  history.pushState({ sheet: 'recitePickerOverlay' }, '');
+}
+function closeRecitationPicker() {
+  document.getElementById('recitePickerOverlay').style.display = 'none';
+  if (history.state && history.state.sheet === 'recitePickerOverlay') {
+    history.replaceState({ screen: 'homeScreen' }, '');
+  }
+}
+function switchReciteTab(tab) {
+  _reciteTab = tab;
+  document.getElementById('reciteTabSurah').style.background = tab === 'surah' ? '' : 'rgba(255,255,255,0.06)';
+  document.getElementById('reciteTabJuz').style.background = tab === 'juz' ? '' : 'rgba(255,255,255,0.06)';
+  renderReciteList();
+}
+function renderReciteList() {
+  const q = (document.getElementById('reciteSearchInput').value || '').trim();
+  const wrap = document.getElementById('reciteListWrap');
+  let html = '';
+  if (_reciteTab === 'surah') {
+    SURAHS_FULL.forEach((s, i) => {
+      const num = i + 1;
+      const name = s[0];
+      if (q && !name.includes(q) && String(num) !== q) return;
+      html += `<div onclick="startFreeRecitationSurah(${num})" style="padding:12px 14px;margin-bottom:6px;background:rgba(255,255,255,0.04);border:1px solid rgba(201,151,58,0.15);border-radius:10px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;font-family:'Cairo',sans-serif;color:rgba(245,217,139,0.9);">
+        <span>${name}</span><span style="font-size:11px;color:rgba(245,217,139,0.5);">${toArabicNum(num)} · ${toArabicNum(s[1])} آية</span>
+      </div>`;
+    });
+  } else {
+    JUZ_NAMES.forEach((jname, i) => {
+      const num = i + 1;
+      if (q && !jname.includes(q) && String(num) !== q) return;
+      html += `<div onclick="startFreeRecitationJuz(${num})" style="padding:12px 14px;margin-bottom:6px;background:rgba(255,255,255,0.04);border:1px solid rgba(201,151,58,0.15);border-radius:10px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;font-family:'Cairo',sans-serif;color:rgba(245,217,139,0.9);">
+        <span>الجزء ${toArabicNum(num)}</span><span style="font-size:11px;color:rgba(245,217,139,0.5);">${jname}</span>
+      </div>`;
+    });
+  }
+  wrap.innerHTML = html || '<div style="text-align:center;color:rgba(245,217,139,0.4);padding:20px;">لا نتائج</div>';
+}
+
+function _buildAyahQueueForSurah(surahNum) {
+  const ayahs = QURAN_LOCAL[surahNum] || [];
+  const surahName = SURAHS_FULL[surahNum - 1] ? SURAHS_FULL[surahNum - 1][0] : ('سورة ' + surahNum);
+  return ayahs.map(a => ({ surahNum, surahName, num: a.n, text: a.t }));
+}
+
+function startFreeRecitationSurah(surahNum) {
+  const queue = _buildAyahQueueForSurah(surahNum);
+  if (!queue.length) { showToast('نص السورة غير متوفر محلياً حالياً'); return; }
+  closeRecitationPicker();
+  _reciteRangeMode = 'surah';
+  _reciteRangeNum = surahNum;
+  _openReciteRangeScreen(queue, SURAHS_FULL[surahNum - 1][0], 'كل السورة');
+}
+
+function startFreeRecitationJuz(juzNum) {
+  const ranges = JUZ_SURAHS[juzNum] || [];
+  let queue = [];
+  ranges.forEach(r => {
+    const all = _buildAyahQueueForSurah(r.s);
+    queue = queue.concat(all.filter(a => a.num >= r.a && a.num <= r.e));
+  });
+  if (!queue.length) { showToast('نص الجزء غير متوفر محلياً حالياً'); return; }
+  closeRecitationPicker();
+  _reciteRangeMode = 'juz';
+  _reciteRangeNum = juzNum;
+  _openReciteRangeScreen(queue, 'الجزء ' + toArabicNum(juzNum) + ' — ' + (JUZ_NAMES[juzNum - 1] || ''), 'كل الجزء');
+}
+
+/* ═══════ اختيار نطاق الآيات (من آية كام لآية كام) للتسميع الحر ═══════ */
+let _reciteFullQueue = [];
+let _reciteRangeTitleBase = '';
+let _reciteRangeMode = null; // 'surah' | 'juz'
+let _reciteRangeNum = null;
+let _rDsMin = 1, _rDsMax = 1, _rDsFrom = 1, _rDsTo = 1;
+let _rDsInited = false;
+
+function _openReciteRangeScreen(queue, titleText, resetLabel) {
+  _reciteFullQueue = queue;
+  _reciteRangeTitleBase = titleText;
+  document.getElementById('reciteRangeTitle').textContent = titleText;
+  const resetBtn = document.getElementById('resetReciteRangeBtn');
+  if (resetBtn) resetBtn.textContent = '📖 ' + resetLabel;
+  document.getElementById('reciteRangeOverlay').style.display = 'block';
+  history.pushState({ sheet: 'reciteRangeOverlay' }, '');
+
+  _rDsMin = 1; _rDsMax = queue.length; _rDsFrom = 1; _rDsTo = queue.length;
+
+  const ticksEl = document.getElementById('reciteDualTicks');
+  if (ticksEl) {
+    if (_rDsMax <= 20) {
+      ticksEl.innerHTML = Array.from({length: _rDsMax}, (_, i) => `<span>${toArabicNum(i + 1)}</span>`).join('');
+    } else {
+      const steps = [1, Math.round(_rDsMax * 0.25), Math.round(_rDsMax * 0.5), Math.round(_rDsMax * 0.75), _rDsMax];
+      ticksEl.innerHTML = steps.map(n => `<span>${toArabicNum(n)}</span>`).join('');
+    }
+  }
+
+  if (!_rDsInited) { _rDsInit(); _rDsInited = true; }
+  _rDsRender();
+  _rDsUpdate();
+}
+
+function closeReciteRangeScreen() {
+  document.getElementById('reciteRangeOverlay').style.display = 'none';
+  document.getElementById('recitePickerOverlay').style.display = 'block';
+  if (history.state && history.state.sheet === 'reciteRangeOverlay') {
+    history.replaceState({ sheet: 'recitePickerOverlay' }, '');
+  }
+}
+
+function resetReciteRange() {
+  _rDsFrom = _rDsMin; _rDsTo = _rDsMax;
+  _rDsRender();
+  _rDsUpdate();
+}
+
+function confirmReciteRange() {
+  const sliced = _reciteFullQueue.slice(_rDsFrom - 1, _rDsTo);
+  if (!sliced.length) { showToast('اختار نطاق آيات صحيح'); return; }
+  document.getElementById('reciteRangeOverlay').style.display = 'none';
+
+  let rangeTxt = _reciteRangeTitleBase;
+  if (!(_rDsFrom === _rDsMin && _rDsTo === _rDsMax)) {
+    if (_reciteRangeMode === 'juz') {
+      const rf = _juzPosRef(_reciteRangeNum, _rDsFrom);
+      const rt = _juzPosRef(_reciteRangeNum, _rDsTo);
+      rangeTxt = (rf.surah === rt.surah)
+        ? (rf.surah + ' (آية ' + toArabicNum(rf.ayah) + ' - ' + toArabicNum(rt.ayah) + ')')
+        : (rf.surah + ' ← ' + rt.surah);
+    } else {
+      rangeTxt = _reciteRangeTitleBase + ' (آية ' + toArabicNum(_rDsFrom) + ' - ' + toArabicNum(_rDsTo) + ')';
+    }
+  }
+  _openFreeReciteScreen(sliced, rangeTxt);
+}
+
+function _rDsInit() {
+  const wrap  = document.getElementById('reciteDualTrackWrap');
+  const tFrom = document.getElementById('reciteDualThumbFrom');
+  const tTo   = document.getElementById('reciteDualThumbTo');
+  if (!wrap || !tFrom || !tTo) return;
+
+  function makedragger(thumb, isFrom) {
+    function onMove(clientX) {
+      const rect = wrap.getBoundingClientRect();
+      // RTL: القيمة الكبيرة على اليمين
+      let pct = 1 - (clientX - rect.left) / rect.width;
+      pct = Math.max(0, Math.min(1, pct));
+      let val = Math.round(_rDsMin + pct * (_rDsMax - _rDsMin));
+      if (isFrom) {
+        _rDsFrom = Math.min(val, _rDsTo);
+      } else {
+        _rDsTo = Math.max(val, _rDsFrom);
+      }
+      _rDsRender();
+      _rDsUpdate();
+    }
+    thumb.addEventListener('mousedown', e => {
+      e.preventDefault();
+      const mm = e2 => onMove(e2.clientX);
+      const mu = () => { document.removeEventListener('mousemove', mm); document.removeEventListener('mouseup', mu); };
+      document.addEventListener('mousemove', mm);
+      document.addEventListener('mouseup', mu);
+    });
+    thumb.addEventListener('touchstart', e => {
+      e.preventDefault();
+      const tm = e2 => onMove(e2.touches[0].clientX);
+      const te = () => { document.removeEventListener('touchmove', tm); document.removeEventListener('touchend', te); };
+      document.addEventListener('touchmove', tm, {passive:false});
+      document.addEventListener('touchend', te);
+    }, {passive:false});
+    thumb.addEventListener('keydown', e => {
+      if (e.key === 'ArrowRight') { isFrom ? (_rDsFrom = Math.max(_rDsMin, _rDsFrom-1)) : (_rDsTo = Math.max(_rDsFrom, _rDsTo-1)); _rDsRender(); _rDsUpdate(); }
+      if (e.key === 'ArrowLeft')  { isFrom ? (_rDsFrom = Math.min(_rDsTo, _rDsFrom+1)) : (_rDsTo = Math.min(_rDsMax, _rDsTo+1)); _rDsRender(); _rDsUpdate(); }
+    });
+  }
+
+  makedragger(tFrom, true);
+  makedragger(tTo, false);
+}
+
+function _rDsRender() {
+  const wrap  = document.getElementById('reciteDualTrackWrap');
+  const tFrom = document.getElementById('reciteDualThumbFrom');
+  const tTo   = document.getElementById('reciteDualThumbTo');
+  const fill  = document.getElementById('reciteDualRangeFill');
+  if (!wrap || !tFrom || !tTo || !fill) return;
+  const range = _rDsMax - _rDsMin || 1;
+  const fromPct = 1 - (_rDsFrom - _rDsMin) / range;
+  const toPct   = 1 - (_rDsTo   - _rDsMin) / range;
+  tFrom.style.left = (fromPct * 100) + '%';
+  tTo.style.left   = (toPct   * 100) + '%';
+  const fillLeft  = Math.min(fromPct, toPct) * 100;
+  const fillRight = (1 - Math.max(fromPct, toPct)) * 100;
+  fill.style.left  = fillLeft  + '%';
+  fill.style.right = fillRight + '%';
+}
+
+function _rDsUpdate() {
+  const count = _rDsTo - _rDsFrom + 1;
+  const disp = document.getElementById('reciteQcountDisplay');
+  if (disp) disp.textContent = toArabicNum(count);
+  const summary = document.getElementById('reciteRangeSummary');
+  if (!summary) return;
+  if (_rDsFrom === _rDsMin && _rDsTo === _rDsMax) {
+    summary.textContent = '📖 ' + _reciteRangeTitleBase + ' كاملة — ' + toArabicNum(count) + ' ' + ayatWord(count);
+    return;
+  }
+  if (_reciteRangeMode === 'juz') {
+    const rf = _juzPosRef(_reciteRangeNum, _rDsFrom);
+    const rt = _juzPosRef(_reciteRangeNum, _rDsTo);
+    const fromTxt = rf.surah + ' آية ' + toArabicNum(rf.ayah);
+    const toTxt   = rt.surah + ' آية ' + toArabicNum(rt.ayah);
+    summary.textContent = (fromTxt === toTxt)
+      ? ('📍 ' + fromTxt + ' — آية واحدة')
+      : ('من ' + fromTxt + ' ← إلى ' + toTxt + ' — ' + toArabicNum(count) + ' ' + ayatWord(count));
+  } else {
+    summary.textContent = 'من آية ' + toArabicNum(_rDsFrom) + ' إلى آية ' + toArabicNum(_rDsTo) + ' — ' + toArabicNum(count) + ' ' + ayatWord(count);
+  }
+}
+
+function _openFreeReciteScreen(queue, titleText) {
+  _freeReciteQueue = queue;
+  _freeReciteIdx = 0;
+  _freeReciteTransitioning = false;
+  _freeReciteCarry = [];
+  _freeReciteSession = { startTime: Date.now(), correct: 0, wrong: 0, mistakes: [], ayahsDone: 0, ayahsTotal: queue.length, titleText };
+  document.getElementById('freeReciteTitle').textContent = titleText;
+  document.getElementById('freeReciteScreen').style.display = 'block';
+  if (history.state && history.state.sheet === 'reciteRangeOverlay') {
+    history.replaceState({ sheet: 'freeReciteScreen' }, '');
+  } else {
+    history.pushState({ sheet: 'freeReciteScreen' }, '');
+  }
+  _renderFreeReciteCurrentAyah();
+}
+
+function _renderFreeReciteCurrentAyah() {
+  const item = _freeReciteQueue[_freeReciteIdx];
+  const display = document.getElementById('freeReciteAyahDisplay');
+  const progress = document.getElementById('freeReciteProgress');
+  if (!item) return;
+  progress.textContent = toArabicNum(_freeReciteIdx + 1) + ' / ' + toArabicNum(_freeReciteQueue.length);
+  // ★ filter(Boolean) مهم: أي مسافة زيادة في النص كانت هتنتج "كلمة فاضية"
+  // مستحيل تتطابق، والآية تقف مكانها للأبد.
+  // ★ لو دي آية فيها حروف مقطعة (فاتحة سورة) — المطابقة بتستنى أسماء
+  // الحروف، لكن المعروض على الشاشة بيفضل زي ما هو مكتوب بالظبط.
+  const _fBuilt = _buildRecitationWords(item.text, item.surahNum, item.num);
+  _freeReciteWords = _fBuilt.words;
+  _freeReciteWordDisplayMap = _fBuilt.map;
+  if (!_freeReciteWords.length) {            // آية فاضية (ما يحصلش، بس أمان)
+    _freeReciteIdx++;
+    if (_freeReciteIdx < _freeReciteQueue.length) { _renderFreeReciteCurrentAyah(); }
+    return;
+  }
+  _freeReciteWordIdx = 0;
+  _qPendingBuf.length = 0; _qGhostRun = 0; _qGhostWords.length = 0;
+  _qDeferred = []; _qDeferAge = 0; clearTimeout(_qDeferFlush);
+  display.innerHTML = `<div style="font-size:11px;color:rgba(245,217,139,0.5);margin-bottom:8px;">${item.surahName} — آية ${toArabicNum(item.num)}</div>` +
+    _fBuilt.displayWords.map((w, i) => `<span class="voice-word" id="freeWord-${i}">${w}</span>`).join(' ');
+  document.getElementById('freeReciteStatus').textContent = 'اضغط الميكروفون وابدأ 🎙️';
+}
+
+function exitFreeRecitation() {
+  _stopFreeRecitation();
+  document.getElementById('freeReciteScreen').style.display = 'none';
+  if (history.state && history.state.sheet === 'freeReciteScreen') {
+    history.replaceState({ screen: 'homeScreen' }, '');
+  }
+  const s = _freeReciteSession;
+  _freeReciteSession = null;
+  // نعرض تقرير الجلسة لو المستخدم سمّع كمية كافية تستاهل تقرير
+  if (s && (s.correct + s.wrong) >= 5) _showReciteReport(s, false);
+}
+
+async function toggleFreeRecitation() {
+  const micBtn = document.getElementById('freeReciteMicBtn');
+  if (micBtn.classList.contains('recording')) {
+    _stopFreeRecitation();
+    return;
+  }
+
+  // ★ لازم Secure Context (https أو localhost) — من غيره الـ Speech API بترجع صامتة تماماً
+  if (!window.isSecureContext) {
+    showToast('التسميع الصوتي محتاج اتصال آمن (https) — افتح الموقع بالرابط الرسمي 🔒');
+    return;
+  }
+
+  const SpeechRecognitionCheck = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognitionCheck) {
+    showToast(_speechUnsupportedMessage());
+    return;
+  }
+
+  // ★ مبقناش بنطلب إذن المايك بأنفسنا (getUserMedia) — سيبنا SpeechRecognition
+  // نفسه هو اللي يطلبه لوحده لو محتاج، بدل ما يظهر طلب إذن مرتين.
+  // ده شغال بنفس الطريقة جوه تطبيق نور (TWA) وعلى الويب، لأن المتصفح
+  // اللي بيعرض الصفحة جوه التطبيق هو نفسه كروم المثبّت على الجهاز.
+  _freeReciteManualStop = false;
+  _freeReciteRestartCount = 0;
+  _freeReciteHeardAnything = false;
+  _voiceMismatchTracker = {};
+  // ★ تصفير أي بقايا من جلسة استماع سابقة — من غيره كلمة قديمة كانت ممكن
+  // تتلزق بأول كلمة في الجلسة الجديدة وتدي نتيجة غلط.
+  _qPendingBuf.length = 0; _qGhostRun = 0; _qGhostWords.length = 0;
+  _qDeferred = []; _qDeferAge = 0; clearTimeout(_qDeferFlush);
+  _freeReciteCarry = [];
+  _startFreeRecitationListening();
+}
+
+function _startFreeRecitationListening() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    showToast(_speechUnsupportedMessage());
+    return;
+  }
+  const micBtn = document.getElementById('freeReciteMicBtn');
+  const micTxt = document.getElementById('freeReciteMicTxt');
+  const statusTxt = document.getElementById('freeReciteStatus');
+
+  micBtn.classList.add('recording');
+  micTxt.textContent = 'إيقاف الاستماع';
+  statusTxt.textContent = '🎙️ بيسمعك دلوقتي... اتكلم بترتيل واضح';
+  const interimReset = document.getElementById('freeReciteInterimTxt');
+  if (interimReset) interimReset.textContent = '';
+
+  _freeReciteRecognition = new SpeechRecognition();
+  _freeReciteRecognition.lang = (window._nourSpeechLang || 'ar-SA');
+  _freeReciteRecognition.interimResults = true;
+  // بدائل متعددة عشان لو الأول طلع إنجليزي نلاقي بديل عربي بدل ما نضيع الكلمة
+  try { _freeReciteRecognition.maxAlternatives = 4; } catch (e) {}
+  _freeReciteRecognition.continuous = true;
+  _freeReciteInterimCounts = {}; // تتبّع عدد الكلمات اللي سبق معالجتها من كل نتيجة مؤقتة
+  clearTimeout(_freeRecitePendingFlush);
+  _freeRecitePendingFlush = null;
+  _freeRecitePendingToken++;
+  // ★ ما نبدأش نطابق أو نقيّم أي نتيجة قبل ما المستخدم يبدأ يتكلم فعلاً
+  _freeReciteUserStartedSpeaking = false;
+
+  // ★ Watchdog: لو مرّت 10 ثواني من غير ما يوصل ولا كلمة عربية، يبقى إما الجهاز
+  // مش عنده حزمة ar-SA، أو المحرك بيسمع التلاوة كإنجليزي. في الحالتين بنجرّب
+  // ar-EG تلقائياً. (10 ثواني مش 6 عشان ندي المسمّع وقت يقرأ الآية الأول.)
+  clearTimeout(_freeReciteHeardWatchdog);
+  _freeReciteHeardWatchdog = setTimeout(() => {
+    if (!_freeReciteManualStop && !_freeReciteHeardAnything) {
+      if ((window._nourSpeechLang || 'ar-SA') === 'ar-SA') {
+        // ★ جرّب لغة تعرف صوتي بديلة (بعض الأجهزة مش عندها حزمة ar-SA لكن عندها ar-EG)
+        window._nourSpeechLang = 'ar-EG';
+        try { _freeReciteRecognition && _freeReciteRecognition.stop(); } catch (e) {}
+        _freeReciteRestartCount = 0;
+        setTimeout(() => { if (!_freeReciteManualStop) _startFreeRecitationListening(); }, 300);
+      } else {
+        statusTxt.textContent = '⚠️ مش بنسمع كلام عربي — لو المحرك بيسمعك إنجليزي، غيّر لغة لوحة المفاتيح/الإدخال للعربية. وتأكد إنك في Google Chrome مباشرة وإذن الميكروفون "مسموح"';
+      }
+    }
+  }, 10000);
+
+  _freeReciteRecognition.onstart = function() {
+    // ★★ نفس السبب: إعادة التشغيل التلقائي بترجّع resultIndex لصفر، والعدّاد القديم
+    // كان بيخلّي الكلمات الجديدة تتبلع.
+    _freeReciteInterimCounts = {};
+    clearTimeout(_freeRecitePendingFlush);
+    _freeRecitePendingFlush = null;
+    _freeRecitePendingToken++;
+    statusTxt.textContent = '🎙️ الميكروفون شغال دلوقتي... اتكلم بترتيل واضح';
+  };
+
+  _freeReciteRecognition.onaudiostart = function() {
+    const interimEl = document.getElementById('freeReciteInterimTxt');
+    if (interimEl) interimEl.textContent = '🔊 بيستقبل صوت من المايك...';
+  };
+
+  _freeReciteRecognition.onspeechstart = function() {
+    _freeReciteUserStartedSpeaking = true;
+    const interimEl = document.getElementById('freeReciteInterimTxt');
+    if (interimEl) interimEl.textContent = '🗣️ باين إنك بتتكلم... بنحلل الكلام';
+  };
+
+  _freeReciteRecognition.onnomatch = function() {
+    const interimEl = document.getElementById('freeReciteInterimTxt');
+    if (interimEl) interimEl.textContent = '⚠️ سمعنا صوت بس مقدرناش نفهم كلمات — قرّب المايك أكتر';
+  };
+
+  _freeReciteRecognition.onresult = function(event) {
+    // ★★ مش بنعتبرها "سمعنا" غير لما ييجي كلام عربي فعلاً. لو المحرك بيسمع
+    // التلاوة كإنجليزي، الوتشدوج يفضل شغال ويبدّل لـ ar-EG لوحده بدل ما
+    // المستخدم يفضل قاعد قدام شاشة ساكتة من غير ما يعرف السبب.
+    for (let i = event.resultIndex; i < event.results.length; ++i) {
+      // ★ لو آية خلصت وبنستنى الآية الجديدة تتعرض (خلال الـ 500ms ديّ)، نتجاهل
+      // أي نتائج زيادة جايه في نفس الدفعة أو خلال فترة الانتقال — عشان منقفزش آية
+      if (_freeReciteTransitioning) break;
+      // ★ عربي بس — لو المحرك رجّع كلام إنجليزي/لاتيني بنتجاهل النتيجة كلها
+      const transcript = _pickArabicAlt(event.results[i],
+        _freeReciteWords ? _freeReciteWords.slice(_freeReciteWordIdx, _freeReciteWordIdx + 8) : null);
+      const interimEl = document.getElementById('freeReciteInterimTxt');
+      if (transcript) {
+        _freeReciteHeardAnything = true;
+        clearTimeout(_freeReciteHeardWatchdog);
+        _freeReciteRestartCount = 0; // ★ لسه بيسمع كلام عربي فعلي — مش مشكلة صلاحيات
+      }
+      if (interimEl && !event.results[i].isFinal) interimEl.textContent = transcript ? ('سمعت: ' + transcript) : '';
+      // ★★ وصول كلام عربي فعلي = دليل إن المسمّع بدأ، حتى لو onspeechstart ما اتطلقش
+      // لسه. من غير السطر ده كانت أول كلمات بعد كل إعادة تشغيل تلقائي تضيع —
+      // وده بيحصل كتير جداً مع التلاوة السريعة المتصلة.
+      if (transcript) _freeReciteUserStartedSpeaking = true;
+      if (!_freeReciteUserStartedSpeaking) { continue; }
+      const allWords = transcript ? transcript.split(/\s+/) : [];
+      // ★ بعض إصدارات كروم (خصوصاً على أندرويد) نادراً ما بتخلّي isFinal تبقى true
+      // في وضع continuous، فبنعالج الكلمات الجديدة أول ما تظهر في النتيجة المؤقتة
+      // بدل ما ننتظر النتيجة النهائية اللي ممكن ما توصلش أصلاً — ده أشهر سبب لمشكلة
+      // "بيسجّل بس مش بيصحح خالص"
+      // ★★ نفس الحماية: النتيجة المؤقتة ممكن تقصر بعد مراجعة كروم لكلامه.
+      let already = _freeReciteInterimCounts[i] || 0;
+      if (already > allWords.length) { already = allWords.length; _freeReciteInterimCounts[i] = already; }
+      let spokenWords = allWords.slice(already);
+      if (!spokenWords.length) continue;
+      // ★ آخر كلمة في نتيجة مؤقتة (مش isFinal) لسه ممكن تتصحح من كروم لحظة ما يكمّل
+      // التعرف عليها — فبنسيبها لحد ما تتأكد (إما تظهر كلمة بعدها، أو النتيجة تتثبت)،
+      // وإلا بنفرّغها بنفسنا بعد نص ثانية عشان منضيعش آخر كلمة في الآية لو ما اتثبتتش خالص.
+      clearTimeout(_freeRecitePendingFlush);
+      _freeRecitePendingFlush = null;
+      if (!event.results[i].isFinal) {
+        _freeReciteInterimCounts[i] = allWords.length - 1;
+        const pendingWord = allWords[allWords.length - 1];
+        const pendingToken = ++_freeRecitePendingToken;
+        spokenWords = spokenWords.slice(0, -1);
+        _freeRecitePendingFlush = setTimeout(() => {
+          // ★ ما نشتغلش أثناء الانتقال بين آية وآية — ده كان بيقفز آية
+          if (_freeRecitePendingToken === pendingToken && !_freeReciteTransitioning) {
+            _freeReciteInterimCounts[i] = allWords.length;
+            _runFreeReciteMatch([pendingWord]);
+          }
+        }, 400);
+        if (!spokenWords.length) continue;
+      } else {
+        _freeReciteInterimCounts[i] = allWords.length;
+      }
+      if (event.results[i].isFinal && interimEl) interimEl.textContent = '';
+      _runFreeReciteMatch(spokenWords);
+    }
+  };
+
+  function _runFreeReciteMatch(spokenWords) {
+      if (!spokenWords) spokenWords = [];
+      if (!spokenWords.length && !_qDeferred.length) return;
+      const _leftover = _matchSpokenBatch(spokenWords, {
+        getWords: () => _freeReciteWords,
+        getIdx: () => _freeReciteWordIdx,
+        setIdx: (v) => { _freeReciteWordIdx = v; },
+        mapIdx: (k) => _freeReciteWordDisplayMap[k],
+        wordElPrefix: 'freeWord-',
+        stopOnMistake: false, // نكمل الاستماع حتى لو غلط في كلمة — بدل ما نوقف كل مرة
+        onCorrectWord: () => { if (_freeReciteSession) _freeReciteSession.correct++; },
+        onMistakeWord: (wIdx) => {
+          if (!_freeReciteSession) return;
+          const item = _freeReciteQueue[_freeReciteIdx];
+          if (!item) return;   // حماية: مفيش آية حالية (نهاية الجلسة) — منكسرش الصفحة
+          _freeReciteSession.wrong++;
+          _freeReciteSession.mistakes.push({
+            surahName: item.surahName,
+            ayahNum: item.num,
+            expected: _freeReciteWords[wIdx] || ''
+          });
+        },
+        onMistake: () => {
+          statusTxt.textContent = '🎙️ في اختلاف بسيط — كمّل تسميعك، وهنراجعها في التقرير بعدين';
+        },
+        onDone: () => {
+          if (_freeReciteTransitioning) return;   // ★ حماية إضافية ضد أي تقدّم مزدوج
+          if (_freeReciteSession) _freeReciteSession.ayahsDone++;
+          _freeReciteIdx++;
+          _freeReciteTransitioning = true;
+          if (_freeReciteIdx >= _freeReciteQueue.length) {
+            statusTxt.textContent = '🌟 تم تسميع الكل بحمد الله!';
+            const finishedSession = _freeReciteSession;
+            _stopFreeRecitation();
+            setTimeout(() => {
+              document.getElementById('freeReciteScreen').style.display = 'none';
+              if (history.state && history.state.sheet === 'freeReciteScreen') {
+                history.replaceState({ screen: 'homeScreen' }, '');
+              }
+              _freeReciteSession = null;
+              _freeReciteTransitioning = false;
+              _showReciteReport(finishedSession, true);
+            }, 900);
+          } else {
+            statusTxt.textContent = '✅ تمام! جاري الانتقال للآية التالية...';
+            setTimeout(() => {
+              _renderFreeReciteCurrentAyah();   // بيصفّر _freeReciteWordIdx و _qPendingBuf
+              _freeReciteTransitioning = false;
+              if (_freeReciteRecognition) statusTxt.textContent = '🎙️ بيسمعك دلوقتي... اتكلم بترتيل واضح';
+              // الكلمات اللي المسمّع قالها من الآية دي وهو لسه بيخلّص اللي قبلها
+              if (_freeReciteCarry.length) {
+                const _c = _freeReciteCarry;
+                _freeReciteCarry = [];
+                _runFreeReciteMatch(_c);
+              }
+            }, 220);
+          }
+        }
+      });
+      // لو الآية خلصت والدفعة لسه فيها كلام، نحتفظ بيه للآية الجاية
+      if (_freeReciteTransitioning && _leftover && _leftover.length) {
+        _freeReciteCarry = _leftover;
+      }
+      // مؤقّت أمان: لو المسمّع سكت وفيه كلمة متأجّلة مستنية تأكيد، منسيبهاش
+      // معلّقة للأبد — بنعيد تشغيل المطابقة بعد ثانية عشان الآية ما توقفش.
+      clearTimeout(_qDeferFlush);
+      if (_qDeferred.length) {
+        _qDeferFlush = setTimeout(function () {
+          if (_qDeferred.length && !_freeReciteManualStop && !_freeReciteTransitioning) {
+            _qDeferAge = 9;
+            _runFreeReciteMatch([]);
+            _qDeferAge = 0;
+          }
+        }, 1100);
+      }
+  }
+
+  _freeReciteRecognition.onerror = function(event) {
+    const interimEl = document.getElementById('freeReciteInterimTxt');
+    // no-speech مؤقت وهيعاد المحاولة تلقائياً — بس نوريك إنه بيحصل بدل ما يختفي بصمت
+    if (event.error === 'no-speech') {
+      if (interimEl) interimEl.textContent = '⚠️ سمعنا صوت بس التعرّف الصوتي معرفش يحوّله لنص — هنعيد المحاولة تلقائياً';
+      return;
+    }
+    if (event.error === 'aborted') return;
+    if (event.error === 'not-allowed' || event.error === 'permission-denied') {
+      statusTxt.textContent = '❌ الميكروفون مرفوض — فعّل الإذن من الإعدادات';
+      _freeReciteManualStop = true;
+    } else if (event.error === 'service-not-allowed') {
+      statusTxt.textContent = '❌ خدمة التعرف الصوتي مش متاحة في هذا المتصفح — افتح الموقع في Google Chrome';
+      _freeReciteManualStop = true;
+    } else if (event.error === 'audio-capture') {
+      statusTxt.textContent = '❌ مفيش ميكروفون شغال — تأكد إن الجهاز فيه ميكروفون متاح';
+      _freeReciteManualStop = true;
+    } else if (event.error === 'language-not-supported') {
+      statusTxt.textContent = '❌ اللغة العربية مش مدعومة على المتصفح ده';
+      _freeReciteManualStop = true;
+    } else if (event.error === 'network') {
+      statusTxt.textContent = '❌ الاتصال بالإنترنت ضعيف — التعرف الصوتي محتاج نت';
+    } else {
+      statusTxt.textContent = '⚠️ حصل خطأ مؤقت (' + event.error + ') — بنحاول تاني تلقائياً';
+    }
+  };
+
+  _freeReciteRecognition.onend = function() {
+    if (_freeReciteManualStop) {
+      micBtn.classList.remove('recording');
+      micTxt.textContent = 'ابدأ التسميع';
+      return;
+    }
+    _freeReciteRestartCount++;
+    // ★ لو اتوقف واتعاد كتير من غير ما نسمع ولا كلمة واحدة، الغالب إن كروم
+    // بيطلب إذن الميكروفون في كل مرة بدل ما يفتكره — مش هنفضل نلحّ عليه
+    // ★ الوقف النهائي ده مخصص لحالة إن المايك مش شغال خالص. لو سبق وسمعنا
+    // المسمّع، يبقى كل حاجة تمام وده مجرد وقفة طويلة — نكمّل عادي.
+    if (_freeReciteRestartCount >= 5 && !_freeReciteHeardAnything) {
+      statusTxt.textContent = '⚠️ الميكروفون بيطلب إذن كل مرة — افتح إعدادات الموقع في كروم (🔒 بجانب الرابط) وخلي إذن الميكروفون "مسموح" مش "يسأل كل مرة"';
+      _freeReciteManualStop = true;
+      micBtn.classList.remove('recording');
+      micTxt.textContent = 'ابدأ التسميع';
+      return;
+    }
+    // ★ كروم (خصوصاً موبايل) بيوقف continuous mode تلقائياً بعد أول وقفة قصيرة —
+    // من غير إعادة التشغيل دي، التسميع "بيوقف من نفسه" وده أكتر سبب شائع للمشكلة
+    setTimeout(() => {
+      if (!_freeReciteManualStop && document.getElementById('freeReciteScreen').style.display !== 'none') {
+        _freeReciteUserStartedSpeaking = false;
+        try { _freeReciteRecognition.start(); } catch (e) {}
+      }
+    }, 250);
+  };
+
+  try { _freeReciteRecognition.start(); } catch (err) { _stopFreeRecitation(); }
+}
+
+function _stopFreeRecitation() {
+  _freeReciteManualStop = true;
+  _freeReciteCarry = [];
+  _qPendingBuf.length = 0; _qGhostRun = 0; _qGhostWords.length = 0;
+  _qDeferred = []; _qDeferAge = 0; clearTimeout(_qDeferFlush);
+  clearTimeout(_freeReciteHeardWatchdog);
+  clearTimeout(_freeRecitePendingFlush);
+  _freeRecitePendingToken++;
+  if (_freeReciteRecognition) {
+    try { _freeReciteRecognition.stop(); } catch (err) {}
+    _freeReciteRecognition = null;
+  }
+  const micBtn = document.getElementById('freeReciteMicBtn');
+  const micTxt = document.getElementById('freeReciteMicTxt');
+  if (micBtn) micBtn.classList.remove('recording');
+  if (micTxt) micTxt.textContent = 'ابدأ التسميع';
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   ★ شهادة الإتقان — بتظهر لما المسمّع يخلّص سورة كاملة أو جزء كامل
+     من غير ولا خطأ واحد. غير كده بيظهر تقرير الأخطاء العادي.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* رسائل تشجيعية خاصة بكل سورة — كل سورة ليها أكتر من رسالة عشان تختلف كل مرة */
+/* رسائل تشجيعية خاصة بكل سورة من الـ114 — لكل سورة رسالتان فبتتغيّر كل مرة */
+const NOUR_CERT_MSGS = {
+  1: ['أمُّ الكتاب استقرّت في صدرك، ولا صلاةَ إلا بها. جعلها الله لك نوراً في قبرك ونجاةً يوم لقائه.',
+        'سبعٌ من المثاني حفظتَها، وهي أعظمُ سورةٍ في القرآن. اللهم اجعلها لصاحبها هدىً وشفاءً.'],
+  2: ['أطولُ سور القرآن أتممتَها بحمد الله. والبيتُ الذي تُقرأ فيه البقرة ينفر منه الشيطان.',
+        'سورةٌ فيها آيةُ الكرسي أعظمُ آيةٍ في كتاب الله. اللهم اجعلها حِرزاً لك في ليلك ونهارك.'],
+  3: ['آلُ عمران والبقرة يأتيان يوم القيامة كأنهما غمامتان تُحاجّان عن صاحبهما. هنيئاً لك.',
+        '«ربَّنا لا تُزِغ قلوبنا بعد إذ هديتنا» — دعوةٌ حفظتَها، فلا تنسَ أن تدعو بها.'],
+  4: ['سورةُ النساء أتممتَها — سورةُ العدل والرحمة وصلة الأرحام. زادك الله فقهاً وعملاً.',
+        'حفظُ النساء ليس بالهيّن، وقد أتممتَه. اللهم فقّهنا في ديننا كما رزقتنا حفظ كتابك.'],
+  5: ['«اليومَ أكملتُ لكم دينكم» — أتممتَ المائدة، سورةَ العهود والوفاء. أوفى الله لك بعهده.',
+        'سورةُ المائدة كاملةً بإتقان. «وتعاونوا على البرّ والتقوى» — فأعِن غيرك على حفظ كتاب الله.'],
+  6: ['«قل إنّ صلاتي ونُسكي ومحيايَ ومماتي لله ربّ العالمين» — أتممتَ الأنعام بحمد الله.',
+        'سورةٌ كلُّها توحيدٌ وحُجج. ثبّت الله قلبك على التوحيد كما ثبّت لسانك على حفظها.'],
+  7: ['سورةُ الأعراف أتممتَها — قصصُ الأنبياء وميزانُ الأعمال. ثقّل الله بها موازينك.',
+        '«خُذ العفوَ وأمُرْ بالعُرف وأعرِضْ عن الجاهلين» — خُلقٌ حفظتَه، فاجعله سيرتك.'],
+  8: ['سورةُ الأنفال — سورةُ بدر والنصر. نصرك الله على نفسك وهواك كما نصر عباده.',
+        '«وما النصرُ إلا من عند الله» — أتممتَها بتوفيقه لا بحولك، فاحمده.'],
+  9: ['سورةُ التوبة أتممتَها. «إنّ الله يحبّ التوّابين» — فتاب الله عليك وقبل منك.',
+        '«لقد جاءكم رسولٌ من أنفسكم عزيزٌ عليه ما عنتّم» — حشرك الله مع نبيّك ﷺ.'],
+  10: ['«ألا إنّ أولياء الله لا خوفٌ عليهم ولا هم يحزنون» — جعلك الله منهم.',
+        'سورةُ يونس تمّت بحمد الله. اللهم ارزقنا التوبة قبل فوات الأوان كما رزقتَ قومَ يونس.'],
+  11: ['سورةُ هودٍ من السور التي شيّبت النبي ﷺ لهولها. اللهم ثبّتنا على الاستقامة.',
+        '«فاستقِمْ كما أُمِرت» — أمرٌ حفظتَه، فاسأل الله الثبات عليه.'],
+  12: ['أحسنُ القصص حفظتَه كاملاً. اللهم ارزقنا صبرَ يوسف وعفافه ويقينه.',
+        '«نحن نقصُّ عليك أحسن القصص» — أتممتَها كاملة. اللهم اجعل لنا من كل ضيقٍ مخرجاً.'],
+  13: ['«ألا بذكرِ الله تطمئنُّ القلوب» — طمأن الله قلبك بما حفظتَ من كتابه.',
+        'سورةُ الرعد تمّت بحمد الله. «إنّ الله لا يُغيّر ما بقومٍ حتى يُغيّروا ما بأنفسهم».'],
+  14: ['«لئن شكرتُم لأزيدنّكم» — فاشكر الله على نعمة الحفظ يَزِدْك.',
+        'سورةُ إبراهيم كاملةً بإتقان. «ربِّ اجعلني مُقيمَ الصلاة ومن ذُرّيتي».'],
+  15: ['«إنّا نحن نزّلنا الذكر وإنّا له لحافظون» — وقد شرّفك الله بأن جعلك من حَفَظته.',
+        'سورةُ الحِجر تمّت. «وما خلقنا السماوات والأرض وما بينهما إلا بالحقّ».'],
+  16: ['سورةُ النِّعَم أتممتَها. «وإن تعُدّوا نعمةَ الله لا تُحصوها» — والحفظُ من أجلّها.',
+        '«ادعُ إلى سبيل ربك بالحكمة والموعظة الحسنة» — منهجٌ حفظتَه فاعمل به.'],
+  17: ['سورةُ الإسراء — رحلةُ نبيّك ﷺ. أسرى الله بقلبك في معاني كتابه.',
+        '«وقُل ربِّ ارحمهما كما ربّياني صغيراً» — فادعُ لوالديك بثواب ما حفظت.'],
+  18: ['نورٌ ما بين الجمعتين. من حفظ عشراً من أولها عُصم من فتنة الدجّال — فكيف بمن حفظها كاملة!',
+        'سورةُ الكهف تمّت بحمد الله. اللهم اجعلها لنا نوراً يوم تُظلم الأبصار.'],
+  19: ['سورةُ مريم — سورةُ الرحمة والبشرى. «إذا تُتلى عليهم آياتُ الرحمن خَرّوا سُجّداً وبُكيّاً».',
+        'حفظتَ سورةً بكى النجاشيُّ حين سمعها. اللهم ارزقنا خشوعَ القلب عند سماع كتابك.'],
+  20: ['«ما أنزلنا عليك القرآنَ لِتَشقى» — فطوبى لك بهذا التيسير من الله.',
+        'سورةُ طه كاملةً بإتقان — بها أسلم عمر رضي الله عنه. اللهم اشرح بها صدورنا.'],
+  21: ['«وما أرسلناك إلا رحمةً للعالمين» — رحم الله قلبك بما حملتَه من كتابه.',
+        'سورةُ الأنبياء تمّت. «لا إله إلا أنت سبحانك إني كنتُ من الظالمين» — دعوةُ ذي النون.'],
+  22: ['سورةُ الحج أتممتَها. «وأذِّنْ في الناس بالحجّ» — رزقك الله حجّ بيته الحرام.',
+        '«ذلك ومن يُعظّم شعائرَ الله فإنها من تقوى القلوب» — عظّم الله قدرك.'],
+  23: ['«قد أفلح المؤمنون» — أتممتَها كاملة، فجعلك الله من المفلحين.',
+        'سورةُ المؤمنون تمّت بحمد الله. «الذين هم في صلاتهم خاشعون» — اللهم ارزقنا الخشوع.'],
+  24: ['«اللهُ نورُ السماوات والأرض» — ونوّر الله قلبك بما حفظتَ من كتابه.',
+        'سورةُ النور كاملةً بإتقان. اللهم طهّر قلوبنا وأبصارنا كما طهّرتَ ألسنتنا بالقرآن.'],
+  25: ['«وعبادُ الرحمنِ الذين يمشون على الأرض هَوناً» — جعلك الله منهم.',
+        'سورةُ الفرقان تمّت. «واجعلنا للمتقين إماماً» — دعوةٌ حفظتَها فرددها.'],
+  26: ['«يومَ لا ينفعُ مالٌ ولا بنون إلا من أتى اللهَ بقلبٍ سليم» — اللهم سلّم قلوبنا.',
+        'سورةُ الشعراء أتممتَها. «والذي أطمعُ أن يغفر لي خطيئتي يوم الدين».'],
+  27: ['سورةُ النمل تمّت — سليمانُ والهدهدُ والنملة. «ربِّ أوزِعني أن أشكر نعمتك».',
+        '«أمّن يُجيبُ المضطرَّ إذا دعاه ويكشفُ السوء» — فادعُه فهو المجيب.'],
+  28: ['سورةُ القصص — قصةُ موسى من المهد إلى النصر. «إنّ ربّي معي سيهدين».',
+        '«ربِّ إني لما أنزلتَ إليّ من خيرٍ فقير» — دعوةٌ حفظتَها، فألِحّ بها.'],
+  29: ['«والذين جاهدوا فينا لنهدينّهم سُبلَنا» — جاهدتَ في حفظه فهداك الله.',
+        'سورةُ العنكبوت تمّت. «إنّ الصلاةَ تنهى عن الفحشاء والمنكر».'],
+  30: ['سورةُ الروم أتممتَها. «ومن آياته أن خلق لكم من أنفسكم أزواجاً لتسكنوا إليها».',
+        '«فسبحان الله حين تُمسون وحين تُصبحون» — تسبيحٌ حفظتَه فداوِم عليه.'],
+  31: ['وصايا لقمانَ لابنه حفظتَها. «يا بُنيّ لا تُشرك بالله إنّ الشركَ لظلمٌ عظيم».',
+        'سورةُ لقمان تمّت بحمد الله. «واقصِدْ في مشيك واغضُضْ من صوتك».'],
+  32: ['كان النبي ﷺ لا ينام حتى يقرأ السجدة وتبارك. اللهم اجعلنا من المتهجّدين بها.',
+        '«تتجافى جنوبُهم عن المضاجع» — اللهم اجعلنا ممن يدعونك خوفاً وطمعاً.'],
+  33: ['«لقد كان لكم في رسولِ الله أسوةٌ حسنة» — اللهم اجعلنا من المقتدين به ﷺ.',
+        'سورةُ الأحزاب تمّت. «إنّ الله وملائكته يُصلّون على النبي» — فأكثِر من الصلاة عليه.'],
+  34: ['«اعملوا آلَ داودَ شُكراً» — والحفظُ نعمةٌ تستحقّ الشكر.',
+        'سورةُ سبأ أتممتَها بحمد الله. «وما أموالكم ولا أولادكم بالتي تُقرّبكم عندنا زُلفى».'],
+  35: ['«إنما يخشى اللهَ من عباده العلماء» — وحاملُ القرآن من أهل العلم، فاخشَه.',
+        'سورةُ فاطر تمّت. «يا أيها الناس أنتم الفقراء إلى الله والله هو الغنيّ الحميد».'],
+  36: ['سورةُ يس كاملةً بإتقان. «سلامٌ قولاً من ربٍّ رحيم» — اللهم بلّغنا هذا السلام.',
+        '«إنما أمرُه إذا أراد شيئاً أن يقول له كُن فيكون» — فاسأل الله ما شئت.'],
+  37: ['«وسلامٌ على المرسلين والحمدُ لله ربّ العالمين» — ختامٌ حفظتَه، فاحمد الله.',
+        'سورةُ الصافات تمّت — قصةُ الذبيح وصبرُه. اللهم ارزقنا الصبر على طاعتك.'],
+  38: ['سورةُ ص أتممتَها. «نِعمَ العبدُ إنه أوّاب» — اللهم اجعلنا من الأوّابين.',
+        '«كتابٌ أنزلناه إليك مباركٌ ليدّبّروا آياته» — فلا يكن حظّك منه الحفظ وحده.'],
+  39: ['«قل يا عباديَ الذين أسرفوا على أنفسهم لا تقنطوا من رحمة الله» — أرجى آيةٍ في القرآن.',
+        'سورةُ الزمر تمّت. «إنما يُوفّى الصابرون أجرَهم بغير حساب».'],
+  40: ['«غافرِ الذنبِ وقابلِ التوبِ شديدِ العقاب» — اللهم اغفر لحافظ كتابك.',
+        'سورةُ غافر أتممتَها. «ادعوني أستجب لكم» — وعدٌ حفظتَه، فألِحّ في الدعاء.'],
+  41: ['«ادفَعْ بالتي هي أحسنُ فإذا الذي بينك وبينه عداوةٌ كأنه وليٌّ حميم» — خُلقٌ عظيم.',
+        'سورةُ فُصّلت تمّت. «إنّ الذين قالوا ربُّنا اللهُ ثم استقاموا تتنزّل عليهم الملائكة».'],
+  42: ['«وأمرُهم شورى بينهم» — سورةٌ حفظتَها، فاجعل الشورى منهجك.',
+        'سورةُ الشورى أتممتَها. «ليس كمثله شيءٌ وهو السميع البصير».'],
+  43: ['«الأخِلّاءُ يومئذٍ بعضُهم لبعضٍ عدوٌّ إلا المتقين» — فاختر صحبتك على تقوى.',
+        'سورةُ الزخرف تمّت. «وهذا القرآنُ أُوحيَ إليّ لأنذركم به ومَن بلغ».'],
+  44: ['سورةُ الدخان تمّت بحمد الله. «إنّا كنا مُرسلين رحمةً من ربّك» — رحمك الله ورفع قدرك.',
+        '«إنّ يومَ الفصلِ ميقاتُهم أجمعين» — اللهم ثبّتنا يومئذٍ بالقول الثابت.'],
+  45: ['«وترى كلَّ أمةٍ جاثية» — مشهدٌ حفظتَه، فليكن حاضراً في قلبك.',
+        'سورةُ الجاثية أتممتَها. «هذا هُدىً والذين كفروا بآيات ربهم لهم عذابٌ من رِجزٍ أليم».'],
+  46: ['«ووصّينا الإنسانَ بوالديه إحساناً» — فبِرَّ والديك وأهدِ لهما ثواب حفظك.',
+        'سورةُ الأحقاف تمّت. «ربِّ أوزِعني أن أشكرَ نعمتك التي أنعمتَ عليّ».'],
+  47: ['«إن تنصروا الله ينصركم ويُثبّت أقدامكم» — نصرتَ كتابه بحفظه فنصرك.',
+        'سورةُ محمد ﷺ أتممتَها. «أفلا يتدبّرون القرآن أم على قلوبٍ أقفالها».'],
+  48: ['«إنّا فتحنا لك فتحاً مبيناً» — فتح الله عليك في حفظك وفي دنياك وآخرتك.',
+        '«ليغفر لك اللهُ ما تقدّم من ذنبك وما تأخّر» — اللهم أتمّ على حافظ كتابك نعمتك.'],
+  49: ['سورةُ الحُجُرات — سورةُ الأخلاق والآداب. «إنما المؤمنون إخوة فأصلحوا بين أخويكم».',
+        '«يا أيها الذين آمنوا اجتنبوا كثيراً من الظنّ» — أدبٌ حفظتَه، فاحفَظْه في تعاملك.'],
+  50: ['سورةُ ق حفظتَها — وكان النبي ﷺ يقرؤها على المنبر كل جمعة. تقبّل الله منك.',
+        '«ولقد خلقنا الإنسانَ ونعلمُ ما تُوسوِس به نفسُه» — اللهم طهّر قلوبنا.'],
+  51: ['«وما خلقتُ الجنَّ والإنسَ إلا ليعبدون» — غايةٌ حفظتَها، فاجعلها غايتك.',
+        'سورةُ الذاريات تمّت. «وفي السماء رزقُكم وما توعدون» — فثِقْ برزق الله.'],
+  52: ['«فذكِّرْ فما أنت بنعمةِ ربك بكاهنٍ ولا مجنون» — واصبر كما صبر نبيّك ﷺ.',
+        'سورةُ الطور أتممتَها. «إنه هو البَرُّ الرحيم» — اللهم عاملنا ببرّك ورحمتك.'],
+  53: ['«وأن ليس للإنسان إلا ما سعى» — وقد سعيتَ في حفظ كتابه، فأبشِر بأجرك.',
+        'سورةُ النجم تمّت. «وأنّ إلى ربك المنتهى» — فإليه المرجع والمآب.'],
+  54: ['«ولقد يسّرنا القرآنَ للذكر فهل من مُدَّكِر» — وقد يسّره الله لك، فالحمد لله.',
+        'سورةُ القمر أتممتَها. «إنّ المتقين في جناتٍ ونهر في مقعد صدقٍ عند مليكٍ مقتدر».'],
+  55: ['عروسُ القرآن أتممتَها. «فبأيّ آلاءِ ربكما تُكذّبان» — والحمدُ لله على نعمة الحفظ.',
+        'سورةُ الرحمن كاملةً بإتقان. «ولمن خاف مقامَ ربه جنتان» — اللهم اجعلنا منهم.'],
+  56: ['سورةُ الواقعة تمّت بحمد الله. اللهم اجعلنا من السابقين المقرّبين.',
+        '«إنه لقرآنٌ كريمٌ في كتابٍ مكنون» — أتممتَ الواقعة بحمد الله وفضله.'],
+  57: ['«ألم يأنِ للذين آمنوا أن تخشعَ قلوبُهم لذكر الله» — اللهم ارزقنا خشوع القلوب.',
+        'سورةُ الحديد أتممتَها. «سابقوا إلى مغفرةٍ من ربكم» — وقد سابقتَ بحفظه.'],
+  58: ['«قد سمِع اللهُ قولَ التي تُجادلك في زوجها» — فاعلم أن الله يسمع شكواك.',
+        'سورةُ المجادلة تمّت. «يرفعِ اللهُ الذين آمنوا منكم والذين أوتوا العلمَ درجات».'],
+  59: ['خواتيمُ الحشر فيها أسماءُ الله الحسنى. «هو اللهُ الذي لا إله إلا هو» — اللهم علّمنا.',
+        'سورةُ الحشر أتممتَها. «لو أنزلنا هذا القرآن على جبلٍ لرأيته خاشعاً» — فأينَ قلوبنا؟'],
+  60: ['سورةُ الممتحنة تمّت. «ربّنا عليك توكّلنا وإليك أنبنا وإليك المصير».',
+        '«قد كانت لكم أُسوةٌ حسنةٌ في إبراهيمَ والذين معه» — فاقتدِ بهم.'],
+  61: ['«يا أيها الذين آمنوا كونوا أنصارَ الله» — وقد نصرتَ دينه بحفظ كتابه.',
+        'سورةُ الصف أتممتَها. «إنّ الله يحبّ الذين يقاتلون في سبيله صفّاً كأنهم بنيانٌ مرصوص».'],
+  62: ['«فاسعَوا إلى ذكرِ الله» — سورةُ الجمعة تمّت، فلا تُفرّط في جمعتك.',
+        '«هو الذي بعث في الأمّيّين رسولاً منهم يتلو عليهم آياته ويُزكّيهم» — زكّى الله نفسك.'],
+  63: ['سورةُ المنافقون أتممتَها. اللهم طهّر قلوبنا من النفاق وأعمالنا من الرياء.',
+        '«ولا تُلهِكم أموالُكم ولا أولادُكم عن ذكر الله» — تحذيرٌ حفظتَه، فاحذر.'],
+  64: ['«يومَ يجمعُكم ليوم الجمع ذلك يومُ التغابن» — اللهم لا تجعلنا من المغبونين.',
+        'سورةُ التغابن تمّت. «ومن يؤمن بالله يَهدِ قلبَه» — هدى الله قلبك.'],
+  65: ['«ومن يتّقِ اللهَ يجعل له مخرجاً ويرزقه من حيث لا يحتسب» — فاتّقِ الله يكفِك.',
+        'سورةُ الطلاق أتممتَها. «ومن يتوكّل على الله فهو حسبُه».'],
+  66: ['«توبوا إلى الله توبةً نصوحاً» — دعوةٌ حفظتَها، فبادر بها.',
+        'سورةُ التحريم تمّت. «ربِّ ابنِ لي عندك بيتاً في الجنة» — دعوةُ امرأةِ فرعون.'],
+  67: ['المانعةُ المنجية حفظتَها كاملة. شفعت لصاحبها حتى غُفر له — اللهم اجعلها لك شفيعاً.',
+        '«تبارك الذي بيده الملك» — حفظتَها بحمد الله. اللهم اجعلها لصاحبها مُنجية.'],
+  68: ['«وإنك لعلى خُلقٍ عظيم» — اللهم ارزقنا حُسن الخلق كما رزقتنا حفظ كتابك.',
+        'سورةُ القلم أتممتَها. «فاصبر لحُكم ربك ولا تكن كصاحب الحوت».'],
+  69: ['«إنه لَقولُ رسولٍ كريم» — سورةُ الحاقّة تمّت بحمد الله.',
+        '«فأما من أُوتي كتابَه بيمينه فيقول هاؤمُ اقرؤوا كتابيه» — اللهم اجعلنا منهم.'],
+  70: ['«إنّ الإنسانَ خُلق هَلوعاً... إلا المصلّين» — اللهم اجعلنا من أهل الصلاة.',
+        'سورةُ المعارج أتممتَها. «فاصبر صبراً جميلاً».'],
+  71: ['«استغفِروا ربكم إنه كان غفّاراً يُرسل السماء عليكم مِدراراً» — فأكثِر الاستغفار.',
+        'سورةُ نوح تمّت — دعوةُ ألفِ سنةٍ إلا خمسين. اللهم ارزقنا صبر الأنبياء.'],
+  72: ['«إنّا سمعنا قرآناً عجَباً يهدي إلى الرُّشد فآمنّا به» — قالها الجنُّ، فكيف بنا!',
+        'سورةُ الجن أتممتَها. «وأنّ المساجدَ لله فلا تدعوا مع الله أحداً».'],
+  73: ['«ورتّلِ القرآنَ ترتيلا» — أمرٌ حفظتَه وعملتَ به. تقبّل الله منك.',
+        'سورةُ المزمل تمّت. «إنّ ناشئةَ الليل هي أشدُّ وطئاً وأقومُ قيلا».'],
+  74: ['«قُم فأنذِر وربَّك فكبِّر» — أولُ ما أُمر به نبيُّك ﷺ بعد الوحي.',
+        'سورةُ المدثر أتممتَها. «كلُّ نفسٍ بما كسبت رهينة».'],
+  75: ['«وجوهٌ يومئذٍ ناضرة إلى ربها ناظرة» — أعظمُ نعيمٍ في الجنة. اللهم ارزقنا لذّة النظر إليك.',
+        'سورةُ القيامة تمّت. «إنّ علينا جمعَه وقرآنه» — تكفّل الله بحفظه، وشرّفك بأن جعلك من حفظته.'],
+  76: ['«إنما نُطعِمكم لوجه الله لا نريد منكم جزاءً ولا شكوراً» — اللهم ارزقنا الإخلاص.',
+        'سورةُ الإنسان أتممتَها. «وجزاهم بما صبروا جنّةً وحريراً».'],
+  77: ['سورةُ المرسلات تمّت. «فبأيّ حديثٍ بعده يؤمنون» — فلا هُدى بعد القرآن.',
+        '«إنّ المتقين في ظلالٍ وعيون» — اللهم اجعلنا من المتقين.'],
+  78: ['«إنّ للمتقين مفازاً» — حفظتَها بإتقان. اللهم اجعلنا من الفائزين يوم الفصل.',
+        '«عمَّ يتساءلون» — أتممتَها بحمد الله. اللهم ثبّتنا يوم النبأ العظيم.'],
+  79: ['«وأما من خاف مقامَ ربه ونهى النفسَ عن الهوى فإنّ الجنةَ هي المأوى» — جعلك الله منهم.',
+        'سورةُ النازعات أتممتَها. «فإنما هي زجرةٌ واحدة فإذا هم بالساهرة».'],
+  80: ['«فلينظرِ الإنسانُ إلى طعامه» — تدبُّرٌ في النعم حفظتَه، فتأمّل فيه.',
+        'سورةُ عبس تمّت. «كلا إنها تذكرة فمن شاء ذكره».'],
+  81: ['«إذا الشمسُ كُوّرت» — مشهدٌ مهيب حفظتَه. «علِمَت نفسٌ ما أحضرت».',
+        'سورةُ التكوير أتممتَها. «إنه لقولُ رسولٍ كريم ذي قوّةٍ عند ذي العرش مكين».'],
+  82: ['«يا أيها الإنسانُ ما غرّك بربك الكريم» — سؤالٌ حفظتَه، فلا تغترّ.',
+        'سورةُ الانفطار تمّت. «وإنّ عليكم لحافظين كراماً كاتبين».'],
+  83: ['«ويلٌ للمطفّفين» — تحذيرٌ حفظتَه، فأوفِ الكيلَ والميزان في كل شأنك.',
+        'سورةُ المطففين أتممتَها. «كلا إنّ كتابَ الأبرار لفي عِلّيّين».'],
+  84: ['«يا أيها الإنسانُ إنك كادحٌ إلى ربك كدحاً فمُلاقيه» — فاجعل كدحك في طاعته.',
+        'سورةُ الانشقاق تمّت. «فأما من أُوتي كتابه بيمينه فسوف يُحاسَب حساباً يسيراً».'],
+  85: ['سورةُ البروج — قصةُ أصحاب الأخدود وثباتُهم. اللهم ثبّتنا على دينك.',
+        '«إنّ بطشَ ربك لشديد... وهو الغفور الودود» — بين الخوف والرجاء.'],
+  86: ['«إن كلُّ نفسٍ لَمّا عليها حافظ» — فراقِب الله في سرّك وعلانيتك.',
+        'سورةُ الطارق أتممتَها. «إنه لقولٌ فصل وما هو بالهزل».'],
+  87: ['«قد أفلح من تزكّى» — أتممتَ الأعلى. زكّى الله نفسك وطهّر قلبك.',
+        '«وسنُيسّرك لليُسرى» — وقد يسّر الله لك حفظ كتابه، فالحمد لله.'],
+  88: ['«أفلا ينظرون إلى الإبل كيف خُلقت» — دعوةٌ للتأمّل حفظتَها، فتأمّل.',
+        'سورةُ الغاشية تمّت. «وجوهٌ يومئذٍ ناعمة لسعيها راضية» — اللهم اجعلنا منهم.'],
+  89: ['«يا أيتها النفسُ المطمئنة ارجعي إلى ربك راضيةً مرضية» — اللهم توفّنا على ذلك.',
+        'سورةُ الفجر أتممتَها. «وجاء ربُّك والملَكُ صفّاً صفّاً».'],
+  90: ['«فلا اقتحمَ العقبة» — أعمالٌ حفظتَها، فاقتحمها بفكّ رقبةٍ أو إطعامٍ في يوم ذي مسغبة.',
+        'سورةُ البلد تمّت. «ألم نجعل له عينين ولساناً وشفتين» — نعمٌ تستحق الشكر.'],
+  91: ['«قد أفلح من زكّاها وقد خاب من دسّاها» — اللهم زكِّ نفوسنا أنت خير من زكاها.',
+        'سورةُ الشمس أتممتَها بحمد الله. «ونفسٍ وما سوّاها فألهمها فجورَها وتقواها».'],
+  92: ['«فأما من أعطى واتّقى وصدّق بالحسنى فسنُيسّره لليُسرى» — يسّر الله أمرك.',
+        'سورةُ الليل تمّت. «وسيُجنَّبها الأتقى الذي يؤتي مالَه يتزكّى».'],
+  93: ['«ولسوف يُعطيك ربُّك فترضى» — أسأل الله أن يُعطيك حتى ترضى.',
+        '«ما ودّعك ربك وما قلى» — كلما ضاق صدرك فتذكّر أن الله معك كما كان مع نبيّه ﷺ.'],
+  94: ['«فإنّ مع العسر يسراً» — شرح الله صدرك ويسّر أمرك كما يسّر لك حفظها.',
+        '«فإذا فرغتَ فانصَبْ وإلى ربك فارغب» — أتممتَ سورةً، فابدأ بالتي بعدها بعون الله.'],
+  95: ['«لقد خلقنا الإنسانَ في أحسن تقويم» — فاشكر الله على خِلقتك وعلى حفظك.',
+        'سورةُ التين أتممتَها. «أليس اللهُ بأحكمِ الحاكمين».'],
+  96: ['«اقرأ باسم ربك الذي خلق» — أولُ ما نزل من القرآن، وقد قرأتَ وحفظتَ.',
+        'سورةُ العلق تمّت. «واسجُدْ واقترِب» — فأقربُ ما يكون العبدُ من ربه وهو ساجد.'],
+  97: ['«ليلةُ القدرِ خيرٌ من ألف شهر» — اللهم بلّغنا ليلة القدر وارزقنا قيامها.',
+        'سورةُ القدر أتممتَها. «سلامٌ هي حتى مطلع الفجر».'],
+  98: ['«وما أُمِروا إلا ليعبدوا اللهَ مخلصين له الدين» — اللهم ارزقنا الإخلاص.',
+        'سورةُ البيّنة تمّت. «أولئك هم خيرُ البريّة» — اللهم اجعلنا منهم.'],
+  99: ['«فمن يعمل مثقالَ ذرةٍ خيراً يره» — وحفظُك لكتابه في ميزانك، فأبشِر.',
+        'سورةُ الزلزلة أتممتَها. «يومئذٍ تُحدّث أخبارها» — فأحسِن العمل على هذه الأرض.'],
+  100: ['«إنّ الإنسانَ لربه لكَنود» — اللهم لا تجعلنا من الكانِدين واجعلنا من الشاكرين.',
+        'سورةُ العاديات تمّت. «إنّ ربهم بهم يومئذٍ لخبير».'],
+  101: ['«فأما من ثقُلت موازينُه فهو في عيشةٍ راضية» — ثقّل الله موازينك بما حفظت.',
+        'سورةُ القارعة أتممتَها. «وما أدراك ما هيَهْ نارٌ حامية».'],
+  102: ['«ألهاكمُ التكاثر حتى زُرتمُ المقابر» — تحذيرٌ حفظتَه، فلا تُلهِك الدنيا.',
+        'سورةُ التكاثر تمّت. «ثم لَتُسألُنّ يومئذٍ عن النعيم».'],
+  103: ['«إنّ الإنسانَ لفي خُسر إلا الذين آمنوا وعملوا الصالحات» — سورةٌ لو تدبّرها الناس لكفتهم.',
+        'سورةُ العصر أتممتَها. «وتواصَوا بالحقّ وتواصَوا بالصبر» — فأوصِ غيرك بالخير.'],
+  104: ['«ويلٌ لكل هُمَزةٍ لُمَزة» — فاحفظ لسانك عن أعراض الناس كما حفظتَه بالقرآن.',
+        'سورةُ الهمزة تمّت. «يحسَبُ أنّ مالَه أخلَده» — والباقياتُ الصالحاتُ خير.'],
+  105: ['سورةُ الفيل — كيف حمى الله بيته. فمن حمى الله كتابه في صدرك يحميك.',
+        '«ألم ترَ كيف فعل ربُّك بأصحاب الفيل» — عبرةٌ حفظتَها، فثِقْ بنصر الله.'],
+  106: ['«فليعبدوا ربَّ هذا البيت الذي أطعمهم من جوعٍ وآمنهم من خوف» — اللهم لك الحمد.',
+        'سورةُ قريش تمّت بحمد الله. اللهم أطعِمنا من جوعٍ وآمِنّا من خوف.'],
+  107: ['«فويلٌ للمصلّين الذين هم عن صلاتهم ساهون» — اللهم أعِنّا على صلاتنا.',
+        'سورةُ الماعون أتممتَها. «فذلك الذي يدُعُّ اليتيم» — فأكرِم اليتيم.'],
+  108: ['الكوثر — أقصرُ سور القرآن وأعظمُ بشارة. سقاك الله من حوض نبيّه ﷺ.',
+        '«إنّا أعطيناك الكوثر» — أعطاك الله من الخير ما لا عينٌ رأت. تقبّل الله حفظك.'],
+  109: ['«لكم دينُكم وليَ دين» — براءةٌ من الشرك حفظتَها. اللهم ثبّتنا على التوحيد.',
+        'سورةُ الكافرون تمّت — وهي براءةٌ من الشرك. كان النبي ﷺ يقرؤها في ركعتي الفجر.'],
+  110: ['«إذا جاء نصرُ الله والفتح» — نصرك الله وفتح عليك أبواب حفظه.',
+        '«فسبّح بحمد ربك واستغفره إنه كان توّاباً» — ختامُ العمل استغفار، فاختم حفظك به.'],
+  111: ['سورةُ المسد أتممتَها — وعيدٌ لمن عادى الحقّ. اللهم اجعلنا من أنصار دينك.',
+        '«ما أغنى عنه مالُه وما كسب» — فلا ينفع يوم القيامة إلا العمل الصالح.'],
+  112: ['الإخلاص تعدلُ ثلثَ القرآن. حفظتَها بإتقان — اللهم ارزقنا الإخلاص في السرّ والعلن.',
+        'من قرأ «قل هو الله أحد» عشراً بُني له بيتٌ في الجنة — فكيف بمن حفظها وأتقنها!'],
+  113: ['الفلق — حصنٌ من كل شرّ. أعاذك الله بها من كل ما خلق.',
+        'المعوّذتان ما تعوّذ بمثلهما متعوّذ. حصّنك الله بهما من كل شرّ.'],
+  114: ['الناس — خاتمةُ المصحف. أعاذك الله بربّ الناس من شرّ الوسواس الخنّاس.',
+        '«من شرّ الوسواس الخنّاس» — أتممتَ خاتمة المصحف. اللهم اجعل القرآن حِرزاً لنا.']
+};
+
+
+/* رسائل عامة للسور اللي مالهاش رسالة خاصة، وللأجزاء */
+const NOUR_CERT_GENERIC = [
+  'حفظتَها كاملةً بإتقان، لا خطأ ولا زلل. جعلها الله حجّةً لك يوم القيامة ورفع بها درجاتك.',
+  'ما أجملَ أن يُتَوَّج المرء بالقرآن! يُقال لصاحبه يوم القيامة: اقرأ وارتقِ ورتّل كما كنت ترتّل في الدنيا.',
+  'إتقانٌ تامٌّ بحمد الله. "والذي نفسي بيده لهو أشدُّ تفلّتاً من الإبل في عُقُلها" — فداوِم عليه.',
+  'الماهرُ بالقرآن مع السفرة الكرام البررة. نسأل الله أن تكون منهم.',
+  'خيرُكم من تعلّم القرآن وعلّمه. بارك الله في وقتك وجهدك ونفع بك.',
+  'تمّت بإتقان بحمد الله ومنّته. اللهم اجعل القرآن ربيعَ قلبه وجلاءَ حزنه.',
+  'حفظٌ متقن دون خطأ واحد — وهذا فضلٌ من الله. اللهم لا تجعله حجّةً علينا واجعله لنا نوراً.'
+];
+
+function _certPickMessage(surahNum, isJuz, seed) {
+  // ★ الرسالة الخاصة بالسورة لها الأولوية المطلقة — منخلطهاش بالعامة عشان
+  // المسمّع يحسّ إن الشهادة متكتبة للسورة اللي حفظها بالذات.
+  const own = (!isJuz && surahNum) ? NOUR_CERT_MSGS[surahNum] : null;
+  const pool = (own && own.length) ? own : NOUR_CERT_GENERIC;
+  const k = Math.abs(((seed | 0) * 31 + Math.floor(Date.now() / 30000)) | 0) % pool.length;
+  return pool[k];
+}
+
+/* التاريخ الهجري — بنستخدم Intl لو مدعوم، وإلا نرجع للميلادي بس */
+function _certHijri(d) {
+  try {
+    const t = new Intl.DateTimeFormat('ar-SA-u-ca-islamic-umalqura',
+      { day: 'numeric', month: 'long', year: 'numeric' }).format(d).trim();
+    // بعض المتصفحات بتضيف "هـ" لوحدها — منكررهاش
+    return /هـ\s*$/.test(t) ? t : (t + ' هـ');
+  } catch (e) { return ''; }
+}
+function _certGregorian(d) {
+  try {
+    return new Intl.DateTimeFormat('ar-EG', { day: 'numeric', month: 'long', year: 'numeric' }).format(d) + ' م';
+  } catch (e) { return d.toLocaleDateString(); }
+}
+
+/* بيانات الشهادة الحالية — بتتخزن عشان زر المشاركة يستخدمها */
+let _certData = null;
+
+/* هل التسميعة تستاهل شهادة؟ سورة كاملة أو جزء كامل + صفر أخطاء */
+function _certEligible(session, completed) {
+  if (!session || !completed) return false;
+  if (session.wrong > 0 || (session.mistakes && session.mistakes.length)) return false;
+  if (!session.ayahsDone || session.ayahsDone < 3) return false;   // حاجة قصيرة جداً
+  // لازم يكون اختار السورة كلها أو الجزء كله (مش نطاق جزئي)
+  if (_rDsFrom !== _rDsMin || _rDsTo !== _rDsMax) return false;
+  return _reciteRangeMode === 'surah' || _reciteRangeMode === 'juz';
+}
+
+function _certUserName() {
+  try {
+    const cu = (typeof currentUser !== 'undefined' && currentUser) ? currentUser : window.currentUser;
+    if (cu && cu.username && !cu.isGuest) {
+      const n = String(cu.username).trim();
+      if (n && n !== 'ضيف') return n;
+    }
+  } catch (e) {}
+  return 'أحد طلاب القرآن';
+}
+
+/* ★ صيغة الجمع العربية الصحيحة: آية واحدة / آيتان / ٣-١٠ آيات / ١١+ آية */
+function _arCount(n, one, two, few, many) {
+  n = Math.abs(Math.round(n));
+  if (n === 1) return one;
+  if (n === 2) return two;
+  const r = n % 100;
+  if (r >= 3 && r <= 10) return toArabicNum(n) + ' ' + few;
+  return toArabicNum(n) + ' ' + many;
+}
+function _certAyahCount(n) { return _arCount(n, 'آية واحدة', 'آيتان', 'آيات', 'آية'); }
+
+
+/* ─── رسم الشهادة على canvas كصورة PNG جاهزة للمشاركة ───
+   1080×1350 — المقاس المثالي لواتساب وفيسبوك وإنستجرام.
+   كله مرسوم بالكود، مفيش أي صورة خارجية ولا مكتبة. */
+function _certWrapText(ctx, text, maxW) {
+  const words = String(text).split(' ');
+  const lines = []; let cur = '';
+  for (let i = 0; i < words.length; i++) {
+    const t = cur ? cur + ' ' + words[i] : words[i];
+    if (ctx.measureText(t).width > maxW && cur) { lines.push(cur); cur = words[i]; }
+    else cur = t;
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
+
+/* زخرفة ركن — رسمة عربية بسيطة بالمسارات */
+function _certCorner(ctx, x, y, sx, sy, gold) {
+  ctx.save();
+  ctx.translate(x, y); ctx.scale(sx, sy);
+  ctx.strokeStyle = gold; ctx.lineWidth = 3; ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(0, 58); ctx.quadraticCurveTo(0, 0, 58, 0);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(14, 62); ctx.quadraticCurveTo(14, 14, 62, 14);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(30, 30, 7, 0, Math.PI * 2);
+  ctx.fillStyle = gold; ctx.fill();
+  ctx.beginPath(); ctx.moveTo(30, 46); ctx.lineTo(30, 78); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(46, 30); ctx.lineTo(78, 30); ctx.stroke();
+  ctx.restore();
+}
+
+async function _certRenderCanvas() {
+  const d = _certData;
+  if (!d) return null;
+  // نتأكد إن الخطوط اتحمّلت قبل الرسم، وإلا هيرسم بخط افتراضي وحش
+  try {
+    if (document.fonts && document.fonts.load) {
+      await Promise.all([
+        document.fonts.load('700 90px "Aref Ruqaa"'),
+        document.fonts.load('400 38px "Aref Ruqaa"'),
+        document.fonts.load('700 46px Amiri'),
+        document.fonts.load('400 34px Amiri'),
+        document.fonts.load('700 30px Cairo')
+      ]);
+    }
+  } catch (e) {}
+
+  const W = 1080, H = 1350;
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const ctx = c.getContext('2d');
+  const GOLD = '#d4a949', GOLD_L = '#f5d98b', CREAM = '#FFFEF9';
+  const ruqaa = w => `${w} 1px "Aref Ruqaa", Amiri, serif`;
+
+  // خلفية متدرجة
+  const bg = ctx.createLinearGradient(0, 0, W, H);
+  bg.addColorStop(0, '#1c1409'); bg.addColorStop(0.5, '#120f0a'); bg.addColorStop(1, '#1a1207');
+  ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+  // وهج ذهبي خفيف من فوق
+  const glow = ctx.createRadialGradient(W / 2, 170, 20, W / 2, 170, 700);
+  glow.addColorStop(0, 'rgba(201,151,58,0.20)'); glow.addColorStop(1, 'rgba(201,151,58,0)');
+  ctx.fillStyle = glow; ctx.fillRect(0, 0, W, H);   // كل الارتفاع — عشان مايبانش خط قطع
+
+  // إطار مزدوج
+  ctx.strokeStyle = GOLD; ctx.lineWidth = 5;
+  ctx.strokeRect(46, 46, W - 92, H - 92);
+  ctx.strokeStyle = 'rgba(201,151,58,0.45)'; ctx.lineWidth = 2;
+  ctx.strokeRect(66, 66, W - 132, H - 132);
+
+  // زخارف الأركان
+  _certCorner(ctx, 60, 60, 1, 1, GOLD);
+  _certCorner(ctx, W - 60, 60, -1, 1, GOLD);
+  _certCorner(ctx, 60, H - 60, 1, -1, GOLD);
+  _certCorner(ctx, W - 60, H - 60, -1, -1, GOLD);
+
+  ctx.textAlign = 'center';
+  try { ctx.direction = 'rtl'; } catch (e) {}
+
+  // ★ الهلال زي أيقونة التطبيق بالظبط.
+  // بنرسمه على لوحة منفصلة ونلزقه — عشان القطع يبقى نظيف تماماً.
+  // (لو رسمناه على اللوحة الأصلية، الظل كان بيترسم حوالين الدايرة المقطوعة
+  //  كمان فيظهر قوس زيادة على اليمين مش موجود في الأيقونة الأصلية.)
+  (function () {
+    const R = 58, PAD = 26, S = (R + PAD) * 2;
+    const m = document.createElement('canvas');
+    m.width = S; m.height = S;
+    const mc = m.getContext('2d');
+    const cx = S / 2, cy = S / 2;
+    const g = mc.createLinearGradient(cx - R, cy - R, cx + R, cy + R);
+    g.addColorStop(0, '#F7CE00'); g.addColorStop(1, '#E8B923');
+    // القرص الكامل
+    mc.fillStyle = g;
+    mc.beginPath(); mc.arc(cx, cy, R, 0, Math.PI * 2); mc.fill();
+    // القطع من ناحية اليمين — بنِسَب الأيقونة المقيسة بالبكسل:
+    // مركز القطع مزاح ٠٫٤٠ من نصف القطر، ونصف قطره ٠٫٨٠
+    mc.globalCompositeOperation = 'destination-out';
+    mc.beginPath(); mc.arc(cx + R * 0.40, cy, R * 0.80, 0, Math.PI * 2); mc.fill();
+    mc.globalCompositeOperation = 'source-over';
+    // الوهج حوالين الهلال بس
+    ctx.save();
+    ctx.shadowColor = 'rgba(247,206,0,0.5)'; ctx.shadowBlur = 26;
+    ctx.drawImage(m, W / 2 - S / 2, 176 - S / 2);
+    ctx.restore();
+    ctx.drawImage(m, W / 2 - S / 2, 176 - S / 2);
+  })();
+
+  ctx.font = ruqaa(700).replace('1px', '92px');
+  ctx.fillStyle = GOLD_L;
+  ctx.fillText('نـور', W / 2, 330);
+  ctx.font = ruqaa(400).replace('1px', '30px');
+  ctx.fillStyle = 'rgba(245,217,139,0.65)';
+  ctx.fillText('تحدي حفظ القرآن الكريم', W / 2, 384);
+
+  // فاصل مزخرف
+  const divider = y => {
+    ctx.strokeStyle = 'rgba(201,151,58,0.5)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(200, y); ctx.lineTo(490, y); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(W - 200, y); ctx.lineTo(W - 490, y); ctx.stroke();
+    ctx.fillStyle = GOLD; ctx.font = '30px serif';
+    ctx.fillText('✦', W / 2, y + 11);
+  };
+  divider(432);
+
+  // العنوان
+  ctx.font = ruqaa(700).replace('1px', '74px');
+  ctx.fillStyle = GOLD;
+  ctx.fillText('شهادة إتقان', W / 2, 528);
+
+  // نص الشهادة
+  ctx.font = ruqaa(400).replace('1px', '38px');
+  ctx.fillStyle = 'rgba(255,254,249,0.8)';
+  ctx.fillText('نشهدُ بحمد الله أنّ', W / 2, 596);
+
+  ctx.font = ruqaa(700).replace('1px', '64px');
+  ctx.fillStyle = CREAM;
+  const nameLines = _certWrapText(ctx, d.name, W - 260);
+  let y = 672;
+  nameLines.slice(0, 2).forEach(L => { ctx.fillText(L, W / 2, y); y += 74; });
+
+  ctx.font = ruqaa(400).replace('1px', '38px');
+  ctx.fillStyle = 'rgba(255,254,249,0.8)';
+  ctx.fillText('قد سمّع عن ظهر قلب', W / 2, y + 14);
+
+  ctx.font = ruqaa(700).replace('1px', '56px');
+  ctx.fillStyle = GOLD_L;
+  ctx.fillText(d.scopeTitle, W / 2, y + 92);
+
+  ctx.font = ruqaa(400).replace('1px', '34px');
+  ctx.fillStyle = 'rgba(255,254,249,0.72)';
+  ctx.fillText(d.scopeSub + ' — بإتقانٍ تام دون خطأ واحد', W / 2, y + 148);
+
+  divider(y + 200);
+
+  // الرسالة التشجيعية
+  ctx.font = '400 33px Amiri, serif';
+  ctx.fillStyle = 'rgba(245,217,139,0.92)';
+  const msgLines = _certWrapText(ctx, d.message, W - 220);
+  let my = y + 265;
+  msgLines.slice(0, 5).forEach(L => { ctx.fillText(L, W / 2, my); my += 50; });
+
+  // التذييل: التاريخ + الرقم
+  ctx.font = '400 26px Cairo, sans-serif';
+  ctx.fillStyle = 'rgba(245,217,139,0.6)';
+  if (d.hijri) ctx.fillText(d.hijri, W / 2, H - 232);
+  ctx.fillText(d.greg, W / 2, H - 194);
+
+  ctx.font = '400 22px Cairo, sans-serif';
+  ctx.fillStyle = 'rgba(201,151,58,0.55)';
+  ctx.fillText('رقم الشهادة: ' + d.serial, W / 2, H - 150);
+  ctx.fillText('nourquranofficial.github.io/nourquran', W / 2, H - 114);
+
+  return c;
+}
+
+function _certBlob() {
+  return _certRenderCanvas().then(c => {
+    if (!c) return null;
+    return new Promise(res => {
+      if (c.toBlob) c.toBlob(b => res(b), 'image/png', 0.95);
+      else res(null);
+    });
+  });
+}
+
+
+/* ─── المشاركة ───
+   الحقيقة التقنية: مفيش أي رابط ويب يقدر يبعت صورة لواتساب أو فيسبوك مباشرة.
+   الطريقة الوحيدة لإرسال الصورة نفسها هي Web Share API بالملف — وهي مدعومة
+   في كروم أندرويد وفي تطبيق TWA، وبتفتح قائمة فيها واتساب وفيسبوك وغيرهم.
+   لو الجهاز مش داعم، بنحفظ الصورة وندي المستخدم زر يفتح التطبيق يرفقها بنفسه. */
+function _certShareText() {
+  const d = _certData || {};
+  return '🌙 بحمد الله أتممتُ تسميع ' + (d.scopeTitle || 'القرآن') + ' كاملةً بإتقان تام على تطبيق نور!\n\n' +
+    '📜 دي شهادة الإتقان بتاعتي\n\n' +
+    '👈 جرّب التطبيق: https://nourquranofficial.github.io/nourquran/';
+}
+
+let _certBusy = false;
+async function certShare() {
+  if (_certBusy) return;
+  _certBusy = true;
+  const btn = document.getElementById('certShareBtn');
+  const old = btn ? btn.textContent : '';
+  if (btn) { btn.textContent = '⏳ جاري تجهيز الصورة...'; btn.disabled = true; }
+  try {
+    const blob = await _certBlob();
+    if (!blob) throw new Error('no-blob');
+    const file = new File([blob], 'شهادة-نور.png', { type: 'image/png' });
+
+    if (navigator.canShare && navigator.canShare({ files: [file] }) && navigator.share) {
+      await navigator.share({ files: [file], text: _certShareText() });
+    } else {
+      // الجهاز مش بيدعم مشاركة الملفات — نحفظ الصورة ونوجّه المستخدم
+      _certDownload(blob);
+      showToast('💾 الشهادة اتحفظت في الصور — افتح واتساب أو فيسبوك وأرفقها من المعرض', 6000);
+      const box = document.getElementById('certFallbackBox');
+      if (box) box.style.display = 'block';
+    }
+  } catch (err) {
+    if (err && (err.name === 'AbortError' || err.name === 'NotAllowedError')) { /* المستخدم قفل القائمة */ }
+    else {
+      try {
+        const blob2 = await _certBlob();
+        if (blob2) { _certDownload(blob2); showToast('💾 الشهادة اتحفظت في الصور 📸', 4000); }
+        else showToast('⚠️ تعذّر تجهيز الصورة — جرّب تاني');
+      } catch (e2) { showToast('⚠️ تعذّر تجهيز الصورة — جرّب تاني'); }
+      const box = document.getElementById('certFallbackBox');
+      if (box) box.style.display = 'block';
+    }
+  }
+  if (btn) { btn.textContent = old; btn.disabled = false; }
+  _certBusy = false;
+}
+
+function _certDownload(blob) {
+  try {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'شهادة-نور-' + ((_certData && _certData.serial) || '') + '.png';
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1500);
+  } catch (e) { showToast('⚠️ تعذّر حفظ الصورة'); }
+}
+
+async function certSave() {
+  if (_certBusy) return;
+  _certBusy = true;
+  try {
+    const blob = await _certBlob();
+    if (blob) { _certDownload(blob); showToast('💾 الشهادة اتحفظت 📸', 3000); }
+    else showToast('⚠️ تعذّر تجهيز الصورة');
+  } catch (e) { showToast('⚠️ تعذّر تجهيز الصورة'); }
+  _certBusy = false;
+}
+
+/* واتساب — بيبعت نص. الصورة لازم تتحفظ وتترفق يدوياً (قيد من واتساب نفسه) */
+function certShareWhatsApp() {
+  certShare().then(() => {});
+  setTimeout(() => {
+    if (!(navigator.canShare && navigator.share)) {
+      window.open('https://wa.me/?text=' + encodeURIComponent(_certShareText()), '_blank');
+    }
+  }, 400);
+}
+function certShareFacebook() {
+  const u = 'https://nourquranofficial.github.io/nourquran/';
+  window.open('https://www.facebook.com/sharer/sharer.php?u=' + encodeURIComponent(u) +
+    '&quote=' + encodeURIComponent(_certShareText()), '_blank');
+}
+
+/* ─── عرض الشهادة على الشاشة ─── */
+function _showCertificate(session) {
+  const isJuz = (_reciteRangeMode === 'juz');
+  const surahNum = isJuz ? 0 : _reciteRangeNum;
+  const scopeTitle = isJuz
+    ? ('الجزء ' + toArabicNum(_reciteRangeNum))
+    : ('سورة ' + ((_freeReciteQueue[0] && _freeReciteQueue[0].surahName) || ''));
+  const scopeSub = _certAyahCount(session.ayahsDone);
+  const now = new Date();
+  // ★ أرقام عربية بالكامل + فاصل نقطي: الأرقام اللاتينية مع النص العربي كانت
+  // بتتقلب في العرض (bidi) فيظهر «٠٧٠٩-٠٠٤-١١٢-نور» بالمقلوب.
+  const _p = (v, n) => toArabicNum(String(v).padStart(n, '0').split('').map(Number).join(''))
+                        .padStart(n, '٠');
+  const serial = 'نور ' + _p(_reciteRangeNum, 3) + ' · ' + _p(session.ayahsDone, 3) +
+                 ' · ' + _p(now.getDate(), 2) + _p(now.getMonth() + 1, 2);
+
+  _certData = {
+    name: _certUserName(),
+    scopeTitle, scopeSub, serial,
+    message: _certPickMessage(surahNum, isJuz, (_reciteRangeNum || 1) * 7 + session.ayahsDone),
+    hijri: _certHijri(now),
+    greg: _certGregorian(now)
+  };
+
+  const minutes = Math.max(1, Math.round((Date.now() - session.startTime) / 60000));
+  const RQ = "'Aref Ruqaa','Amiri',serif";
+  const corner = (pos) => `<span style="position:absolute;${pos};width:28px;height:28px;border:2px solid var(--gold,#c9973a);"></span>`;
+
+  const html = `
+  <div style="max-width:440px;margin:auto;">
+    <div id="certCard" style="position:relative;background:linear-gradient(160deg,#1c1409,#120f0a 55%,#1a1207);
+         border:3px solid var(--gold,#c9973a);border-radius:8px;padding:26px 20px 22px;box-sizing:border-box;
+         box-shadow:0 0 40px rgba(201,151,58,0.18);overflow:hidden;">
+      <span style="position:absolute;inset:9px;border:1px solid rgba(201,151,58,0.4);border-radius:4px;pointer-events:none;"></span>
+      ${corner('top:16px;right:16px;border-left:none;border-bottom:none;border-radius:0 4px 0 0')}
+      ${corner('top:16px;left:16px;border-right:none;border-bottom:none;border-radius:4px 0 0 0')}
+      ${corner('bottom:16px;right:16px;border-left:none;border-top:none;border-radius:0 0 4px 0')}
+      ${corner('bottom:16px;left:16px;border-right:none;border-top:none;border-radius:0 0 0 4px')}
+
+      <div style="position:relative;text-align:center;">
+        <svg viewBox="0 0 120 120" width="58" height="58" style="display:block;margin:0 auto;filter:drop-shadow(0 0 12px rgba(247,206,0,0.45));">
+          <defs><linearGradient id="certMoonG" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#F7CE00"/><stop offset="1" stop-color="#E8B923"/></linearGradient>
+            <mask id="certMoonM"><rect width="120" height="120" fill="#fff"/><circle cx="83" cy="60" r="46" fill="#000"/></mask>
+          </defs>
+          <circle cx="60" cy="60" r="58" fill="url(#certMoonG)" mask="url(#certMoonM)"/>
+        </svg>
+        <div style="font-family:${RQ};font-size:40px;color:var(--gold-light,#f5d98b);line-height:1.25;margin-top:2px;">نـور</div>
+        <div style="font-family:${RQ};font-size:13px;color:rgba(245,217,139,0.6);margin-bottom:12px;">تحدي حفظ القرآن الكريم</div>
+
+        <div style="display:flex;align-items:center;gap:8px;margin:12px 0;">
+          <span style="flex:1;height:1px;background:linear-gradient(90deg,transparent,rgba(201,151,58,0.55));"></span>
+          <span style="color:var(--gold,#c9973a);font-size:13px;">✦</span>
+          <span style="flex:1;height:1px;background:linear-gradient(270deg,transparent,rgba(201,151,58,0.55));"></span>
+        </div>
+
+        <div style="font-family:${RQ};font-size:32px;color:var(--gold,#c9973a);margin-bottom:14px;">شهادة إتقان</div>
+
+        <div style="font-family:${RQ};font-size:17px;color:rgba(255,254,249,0.75);">نشهدُ بحمد الله أنّ</div>
+        <div style="font-family:${RQ};font-size:27px;color:#FFFEF9;margin:8px 0 6px;line-height:1.5;word-break:break-word;">${_certData.name}</div>
+        <div style="font-family:${RQ};font-size:17px;color:rgba(255,254,249,0.75);">قد سمّع عن ظهر قلب</div>
+        <div style="font-family:${RQ};font-weight:700;font-size:26px;color:var(--gold-light,#f5d98b);margin:7px 0 4px;">${scopeTitle}</div>
+        <div style="font-family:${RQ};font-size:15px;color:rgba(255,254,249,0.7);">${scopeSub} — بإتقانٍ تام دون خطأ واحد</div>
+
+        <div style="display:flex;align-items:center;gap:8px;margin:14px 0;">
+          <span style="flex:1;height:1px;background:linear-gradient(90deg,transparent,rgba(201,151,58,0.55));"></span>
+          <span style="color:var(--gold,#c9973a);font-size:13px;">✦</span>
+          <span style="flex:1;height:1px;background:linear-gradient(270deg,transparent,rgba(201,151,58,0.55));"></span>
+        </div>
+
+        <div style="font-family:'Amiri',serif;font-size:16px;line-height:1.95;color:rgba(245,217,139,0.92);padding:0 4px;">${_certData.message}</div>
+
+        <div style="margin-top:16px;font-family:'Cairo',sans-serif;font-size:10.5px;color:rgba(245,217,139,0.55);line-height:1.9;">
+          ${_certData.hijri ? _certData.hijri + '<br>' : ''}${_certData.greg}<br>
+          <span style="color:rgba(201,151,58,0.5);">رقم الشهادة: ${_certData.serial} · ${toArabicNum(minutes)} دقيقة</span>
+        </div>
+      </div>
+    </div>
+
+    <button id="certShareBtn" onclick="certShare()" class="typing-submit"
+      style="width:100%;margin-top:14px;background:linear-gradient(135deg,#25D366,#128C7E);">📤 شارك الشهادة كصورة</button>
+    <div style="font-size:11px;color:rgba(245,217,139,0.5);text-align:center;margin-top:7px;line-height:1.7;">
+      هتظهرلك قائمة المشاركة — اختار منها واتساب أو فيسبوك وهتتبعت الصورة
+    </div>
+
+    <div id="certFallbackBox" style="display:none;margin-top:12px;">
+      <div style="font-size:11.5px;color:rgba(245,217,139,0.6);text-align:center;margin-bottom:8px;line-height:1.7;">
+        جهازك مش بيدعم مشاركة الصور مباشرة — الصورة اتحفظت في المعرض، ارفقها بنفسك:
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button onclick="certShareWhatsApp()" class="typing-submit" style="flex:1;background:linear-gradient(135deg,#25D366,#128C7E);font-size:13px;">واتساب</button>
+        <button onclick="certShareFacebook()" class="typing-submit" style="flex:1;background:linear-gradient(135deg,#4267B2,#2d4a80);font-size:13px;">فيسبوك</button>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:8px;margin-top:10px;">
+      <button onclick="certSave()" class="typing-submit" style="flex:1;background:rgba(201,151,58,0.16);border:1px solid var(--gold,#c9973a);color:var(--gold-light,#f5d98b);">💾 حفظ الصورة</button>
+      <button onclick="_closeReciteReport()" class="typing-submit" style="flex:1;">تمام</button>
+    </div>
+  </div>`;
+
+  document.getElementById('reciteReportBody').innerHTML = html;
+  document.getElementById('reciteReportOverlay').style.display = 'block';
+  history.pushState({ sheet: 'reciteReportOverlay' }, '');
+}
+
+/* ═══════ تقرير جلسة التسميع — نصايح تلقائية حسب الأداء ═══════ */
+function _showReciteReport(session, completed) {
+  if (!session) return;
+  // ★ سورة كاملة أو جزء كامل من غير ولا خطأ → شهادة إتقان بدل التقرير
+  if (_certEligible(session, completed)) { _showCertificate(session); return; }
+  const total = session.correct + session.wrong;
+  const accuracy = total > 0 ? Math.round((session.correct / total) * 100) : 100;
+  const minutes = Math.max(1, Math.round((Date.now() - session.startTime) / 60000));
+
+  const tips = [];
+  if (accuracy >= 95) {
+    tips.push('ماشاء الله، حفظك متقن جداً! حافظ على المراجعة الدورية كل أسبوع عشان النقاط ما تخفش.');
+  } else if (accuracy >= 80) {
+    tips.push('أداء جيد! ركّز على مراجعة الآيات اللي أخطأت فيها قبل ما تنتقل لحفظ جديد.');
+  } else {
+    tips.push('محتاج شوية مراجعة إضافية — جرّب تسمع الآية من الشيخ العفاسي (زر 🔊) قبل ما تسمّعها بنفسك، وكرر كل آية 3 مرات على الأقل.');
+  }
+  if (total >= 8) {
+    const wpm = total / minutes;
+    if (wpm > 55) tips.push('كنت بتسمّع بسرعة كبيرة — التمهّل شوية بيحسّن دقة الاستماع وبيدي فرصة أكبر لتثبيت الحفظ.');
+  }
+  if (session.mistakes.length) {
+    const counts = {};
+    session.mistakes.forEach(m => {
+      const key = m.surahName + ' — آية ' + toArabicNum(m.ayahNum);
+      counts[key] = (counts[key] || 0) + 1;
+    });
+    const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+    if (sorted.length) tips.push('أكتر مكان تعثّرت فيه: ' + sorted[0][0] + ' — يستاهل مراجعة زيادة.');
+  }
+
+  let mistakesHtml = '';
+  if (session.mistakes.length) {
+    const shown = session.mistakes.slice(0, 6);
+    mistakesHtml = '<div style="margin-top:10px;">' +
+      shown.map(m => `<div style="font-size:12.5px;color:rgba(255,158,158,0.9);padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.05);">• ${m.surahName} — آية ${toArabicNum(m.ayahNum)}: الكلمة المتوقعة «${m.expected}»</div>`).join('') +
+      (session.mistakes.length > 6 ? `<div style="font-size:11px;color:rgba(245,217,139,0.5);margin-top:4px;">و ${toArabicNum(session.mistakes.length - 6)} ملاحظة تانية...</div>` : '') +
+      '</div>';
+  }
+
+  const html = `
+    <div style="max-width:420px;margin:auto;background:linear-gradient(160deg,#1e1508,#12100a);border:1px solid rgba(201,151,58,0.3);border-radius:18px;padding:20px;box-sizing:border-box;">
+      <div style="text-align:center;font-family:'Cairo',sans-serif;font-weight:900;font-size:17px;color:var(--gold-light,#f5d98b);margin-bottom:4px;">${completed ? '🌟 تم تسميع الكل بحمد الله!' : '📋 تقرير جلسة التسميع'}</div>
+      <div style="text-align:center;font-size:12px;color:rgba(245,217,139,0.55);margin-bottom:16px;">${session.titleText || ''}</div>
+      <div style="display:flex;justify-content:space-around;margin-bottom:16px;">
+        <div style="text-align:center;"><div style="font-size:22px;font-weight:900;color:${accuracy >= 80 ? '#2ecc71' : '#e67e22'};">${toArabicNum(accuracy)}%</div><div style="font-size:11px;color:rgba(245,217,139,0.5);">نسبة الإتقان</div></div>
+        <div style="text-align:center;"><div style="font-size:22px;font-weight:900;color:var(--gold-light,#f5d98b);">${toArabicNum(session.ayahsDone)}</div><div style="font-size:11px;color:rgba(245,217,139,0.5);">آية اتسمّعت</div></div>
+        <div style="text-align:center;"><div style="font-size:22px;font-weight:900;color:var(--gold-light,#f5d98b);">${toArabicNum(minutes)}</div><div style="font-size:11px;color:rgba(245,217,139,0.5);">دقيقة</div></div>
+      </div>
+      <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(201,151,58,0.15);border-radius:12px;padding:12px;">
+        <div style="font-family:'Cairo',sans-serif;font-weight:700;font-size:13px;color:var(--gold-light,#f5d98b);margin-bottom:6px;">💡 نصايح للتحسين</div>
+        ${tips.map(t => `<div style="font-size:12.5px;color:rgba(230,230,230,0.85);line-height:1.7;padding:3px 0;">• ${t}</div>`).join('')}
+        ${mistakesHtml}
+      </div>
+      <button onclick="_closeReciteReport()" class="typing-submit" style="width:100%;margin-top:16px;">تمام</button>
+    </div>
+  `;
+  document.getElementById('reciteReportBody').innerHTML = html;
+  document.getElementById('reciteReportOverlay').style.display = 'block';
+  history.pushState({ sheet: 'reciteReportOverlay' }, '');
+}
+function _closeReciteReport() {
+  document.getElementById('reciteReportOverlay').style.display = 'none';
+  if (history.state && history.state.sheet === 'reciteReportOverlay') {
+    history.replaceState({ screen: 'homeScreen' }, '');
+  }
 }
 
 function checkTyping() {
@@ -9371,6 +11918,28 @@ function showScreen(id) {
 
 // لما Android يضغط Back → يطلق popstate بدل ما يغلق التطبيق
 window.addEventListener('popstate', function(e) {
+  // ★ أولوية: شاشات التسميع الصوتي (تقرير الجلسة → التسميع الحر → نطاق الآيات → اختيار سورة/جزء)
+  const reciteReport = document.getElementById('reciteReportOverlay');
+  if (reciteReport && reciteReport.style.display !== 'none') {
+    _closeReciteReport();
+    return;
+  }
+  const freeRecite = document.getElementById('freeReciteScreen');
+  if (freeRecite && freeRecite.style.display !== 'none') {
+    exitFreeRecitation();
+    return;
+  }
+  const reciteRange = document.getElementById('reciteRangeOverlay');
+  if (reciteRange && reciteRange.style.display !== 'none') {
+    closeReciteRangeScreen();
+    return;
+  }
+  const recitePicker = document.getElementById('recitePickerOverlay');
+  if (recitePicker && recitePicker.style.display !== 'none') {
+    closeRecitationPicker();
+    return;
+  }
+
   // ★ أولوية: لو gameSheet مفتوح → نقفله فقط، مش نعمل حاجة تانية
   const sheet = document.getElementById('gameSheet');
   if (sheet && sheet.classList.contains('open')) {
@@ -12348,5 +14917,83 @@ window.addEventListener('pageshow', function(e) {
   }
 });
 </script>
+
+<!-- ═══════ شاشة اختيار السورة/الجزء للتسميع الحر ═══════ -->
+<div id="recitePickerOverlay" style="display:none;position:fixed;inset:0;background:rgba(10,8,5,0.92);z-index:9000;backdrop-filter:blur(4px);">
+  <div style="max-width:480px;margin:0 auto;height:100%;display:flex;flex-direction:column;padding:16px;box-sizing:border-box;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+      <div style="font-family:'Cairo',sans-serif;font-weight:800;color:var(--gold-light,#f5d98b);font-size:17px;">🎤 اختر ما تريد تسميعه</div>
+      <button onclick="closeRecitationPicker()" style="background:none;border:none;color:rgba(245,217,139,0.7);font-size:22px;cursor:pointer;">×</button>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:10px;">
+      <button id="reciteTabSurah" onclick="switchReciteTab('surah')" class="typing-submit" style="flex:1;">سورة</button>
+      <button id="reciteTabJuz" onclick="switchReciteTab('juz')" class="typing-submit" style="flex:1;background:rgba(255,255,255,0.06);">جزء</button>
+    </div>
+    <input id="reciteSearchInput" oninput="renderReciteList()" placeholder="ابحث بالاسم أو الرقم..." dir="rtl" class="typing-input" style="margin-bottom:10px;">
+    <div id="reciteListWrap" style="flex:1;overflow-y:auto;"></div>
+  </div>
+</div>
+
+<!-- ═══════ شاشة اختيار نطاق الآيات (من آية كام لآية كام) للتسميع الحر ═══════ -->
+<div id="reciteRangeOverlay" style="display:none;position:fixed;inset:0;background:rgba(10,8,5,0.92);z-index:9050;backdrop-filter:blur(4px);">
+  <div style="max-width:480px;margin:0 auto;height:100%;display:flex;flex-direction:column;padding:16px;box-sizing:border-box;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+      <button onclick="closeReciteRangeScreen()" style="background:none;border:none;color:rgba(245,217,139,0.7);font-size:14px;cursor:pointer;">→ رجوع</button>
+      <div id="reciteRangeTitle" style="font-family:'Cairo',sans-serif;font-weight:800;color:var(--gold-light,#f5d98b);font-size:16px;"></div>
+      <span style="width:40px;"></span>
+    </div>
+
+    <div class="sheet-section">💡 اختار نطاق الآيات</div>
+    <div class="qcount-wrap" style="margin-bottom:0;">
+      <div class="qcount-label">
+        <span>عدد الآيات المختارة</span>
+        <span class="qcount-val" id="reciteQcountDisplay">١</span>
+      </div>
+      <div id="reciteDualSliderWrap">
+        <div class="dual-slider-track-wrap" id="reciteDualTrackWrap">
+          <div class="dual-slider-rail"></div>
+          <div class="dual-slider-fill" id="reciteDualRangeFill"></div>
+          <div class="dual-slider-thumb" id="reciteDualThumbFrom" tabindex="0"></div>
+          <div class="dual-slider-thumb" id="reciteDualThumbTo"   tabindex="0"></div>
+        </div>
+        <div class="dual-ticks-row">
+          <div class="qcount-ticks" style="flex:1;" id="reciteDualTicks"></div>
+          <button id="resetReciteRangeBtn" onclick="resetReciteRange()" style="background:rgba(201,151,58,0.1);border:1px solid rgba(201,151,58,0.3);border-radius:8px;padding:5px 10px;color:rgba(245,217,139,0.6);font-family:'Cairo',sans-serif;font-size:11px;cursor:pointer;white-space:nowrap;">📖 كل السورة</button>
+        </div>
+        <div class="dual-range-summary" id="reciteRangeSummary"></div>
+      </div>
+    </div>
+
+    <div style="flex:1;"></div>
+    <button class="typing-submit" onclick="confirmReciteRange()" style="width:100%;padding:14px;font-size:15px;margin-top:16px;">🎤 ابدأ التسميع</button>
+  </div>
+</div>
+
+<!-- ═══════ شاشة التسميع الحر (سورة/جزء كامل) ═══════ -->
+<div id="freeReciteScreen" style="display:none;position:fixed;inset:0;background:linear-gradient(160deg,#1e1508 0%,#12100a 60%,#0e1810 100%);z-index:9100;overflow-y:auto;">
+  <div style="max-width:480px;margin:0 auto;padding:16px;box-sizing:border-box;min-height:100%;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+      <button onclick="exitFreeRecitation()" style="background:none;border:none;color:rgba(245,217,139,0.7);font-size:14px;cursor:pointer;">→ رجوع</button>
+      <div id="freeReciteTitle" style="font-family:'Cairo',sans-serif;font-weight:800;color:var(--gold-light,#f5d98b);font-size:15px;"></div>
+      <div id="freeReciteProgress" style="font-size:12px;color:rgba(245,217,139,0.6);"></div>
+    </div>
+    <div class="voice-ayah-display" id="freeReciteAyahDisplay" style="min-height:80px;"></div>
+    <div class="voice-status-txt" id="freeReciteStatus" style="text-align:center;margin-bottom:2px;">اضغط الميكروفون وابدأ 🎙️</div>
+    <div id="freeReciteInterimTxt" style="font-size:11px;color:rgba(245,217,139,0.4);min-height:14px;text-align:center;margin-bottom:12px;"></div>
+    <div style="text-align:center;">
+      <button class="mic-recite-btn" id="freeReciteMicBtn" onclick="toggleFreeRecitation()" style="font-size:16px;padding:14px 26px;">
+        🎤 <span id="freeReciteMicTxt">ابدأ التسميع</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════ تقرير جلسة التسميع — إتقان الأداء ونصايح تلقائية ═══════ -->
+<div id="reciteReportOverlay" style="display:none;position:fixed;inset:0;background:rgba(10,8,5,0.92);z-index:9200;backdrop-filter:blur(4px);overflow-y:auto;">
+  <div style="min-height:100%;display:flex;align-items:center;padding:16px;box-sizing:border-box;">
+    <div id="reciteReportBody" style="width:100%;"></div>
+  </div>
+</div>
+
 </body>
 </html>
