@@ -10797,9 +10797,10 @@ function _certEligible(session, completed) {
 function _certUserName() {
   try {
     const cu = (typeof currentUser !== 'undefined' && currentUser) ? currentUser : window.currentUser;
-    if (cu && cu.username && !cu.isGuest) {
-      const n = String(cu.username).trim();
-      if (n && n !== 'ضيف') return n;
+    if (cu && !cu.isGuest) {
+      if (cu.name && cu.name.trim() && !cu.name.includes('@')) return cu.name.trim();
+      const n = String(cu.username || '').trim();
+      if (n && n !== 'ضيف' && !n.includes('@')) return n;
     }
   } catch (e) {}
   return 'أحد طلاب القرآن';
