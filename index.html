@@ -1144,7 +1144,9 @@ html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
 .pw-eye:hover { color:var(--gold); }
 /* 1. منع السحب للإسفل والـ Pull-to-Refresh */
 html, body {
+  overscroll-behavior: none !important;      /* كل الاتجاهات مش الرأسي بس */
   overscroll-behavior-y: none !important;
+  -webkit-overflow-scrolling: touch;
   touch-action: pan-x pan-y;
 }
 
@@ -1268,7 +1270,7 @@ input, textarea, [contenteditable="true"] {
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   // ═══ نسخة التطبيق — بتتحدّث مع كل تسليم ═══
-  window.NOUR_VERSION = 'v104 — دقة التصحيح';
+  window.NOUR_VERSION = 'v105 — تجربة الاستخدام';
   console.log('%c🌙 نور ' + window.NOUR_VERSION, 'color:#F5D98B;font-weight:bold;font-size:14px');
   try {
     const _verEl = document.getElementById('appVerTag');
@@ -10186,6 +10188,29 @@ function exitFreeRecitation() {
   if (s && (s.correct + s.wrong) >= 5) _showReciteReport(s, false);
 }
 
+/* ★ مسار المايك بيفضل مفتوح طول جلسة التسميع.
+   السبب: كروم على أندرويد بينهي جلسة التعرف بعد كل وقفة (يعني بعد كل آية
+   تقريباً)، وإحنا بنعيد تشغيلها — وأندرويد بيشغّل صوت التنبيه مع كل مرة
+   المايك بيتفتح فيها من جديد. لما المسار يفضل ممسوك، المايك مبيتقفلش
+   وبيتفتح تاني بين الآيات، فالصوت المتكرر بيختفي. */
+var _freeReciteMicStream = null;
+async function _holdMicOpen() {
+  if (_freeReciteMicStream) return;
+  try {
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      _freeReciteMicStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    }
+  } catch (e) { _freeReciteMicStream = null; }   // مش مشكلة — التسميع هيشتغل عادي
+}
+function _releaseMic() {
+  try {
+    if (_freeReciteMicStream) {
+      _freeReciteMicStream.getTracks().forEach(function (t) { try { t.stop(); } catch (e) {} });
+    }
+  } catch (e) {}
+  _freeReciteMicStream = null;
+}
+
 async function toggleFreeRecitation() {
   const micBtn = document.getElementById('freeReciteMicBtn');
   if (micBtn.classList.contains('recording')) {
@@ -10218,6 +10243,7 @@ async function toggleFreeRecitation() {
   _qPendingBuf.length = 0; _qGhostRun = 0; _qGhostWords.length = 0;
   _qDeferred = []; _qDeferAge = 0; clearTimeout(_qDeferFlush);
   _freeReciteCarry = [];
+  await _holdMicOpen();          // ★ نمسك المايك قبل ما نبدأ — يمنع صوت الفتح المتكرر
   _startFreeRecitationListening();
 }
 
@@ -10490,6 +10516,7 @@ function _startFreeRecitationListening() {
 
 function _stopFreeRecitation() {
   _freeReciteManualStop = true;
+  _releaseMic();                 // ★ نسيب المايك لما المسمّع يوقف
   _freeReciteCarry = [];
   _qPendingBuf.length = 0; _qGhostRun = 0; _qGhostWords.length = 0;
   _qDeferred = []; _qDeferAge = 0; clearTimeout(_qDeferFlush);
@@ -14994,6 +15021,41 @@ window.addEventListener('pageshow', function(e) {
     <div id="reciteReportBody" style="width:100%;"></div>
   </div>
 </div>
+
+<script>
+/* ═══ منع شريط التحديث (Pull-to-Refresh) بتاع المتصفح ═══
+   خاصية overscroll-behavior لوحدها مش كفاية على كل أجهزة أندرويد — خصوصاً
+   جوّه التطبيق (TWA). الحارس ده بيمنع إيماءة السحب لتحت بس لما تكون بتبدأ
+   من أول الصفحة فعلاً، فالتمرير العادي وكل السكرول الداخلي بيشتغلوا زي ما هم. */
+(function () {
+  var startY = 0, lock = false;
+  function scroller(el) {
+    while (el && el !== document.body && el !== document.documentElement) {
+      if (el.scrollHeight > el.clientHeight) {
+        var oy = getComputedStyle(el).overflowY;
+        if (oy === 'auto' || oy === 'scroll') return el;
+      }
+      el = el.parentElement;
+    }
+    return null;
+  }
+  document.addEventListener('touchstart', function (e) {
+    if (e.touches.length !== 1) { lock = false; return; }
+    startY = e.touches[0].clientY;
+    var sc = scroller(e.target);
+    // بنقفل بس لو مفيش حاوية داخلية بتتمرر، والصفحة نفسها في أولها
+    lock = !sc && (window.pageYOffset || document.documentElement.scrollTop || 0) <= 0;
+    if (sc) lock = (sc.scrollTop <= 0);
+  }, { passive: true });
+
+  document.addEventListener('touchmove', function (e) {
+    if (!lock || e.touches.length !== 1) return;
+    if (e.touches[0].clientY - startY > 0 && e.cancelable) e.preventDefault();
+  }, { passive: false });
+
+  document.addEventListener('touchend', function () { lock = false; }, { passive: true });
+})();
+</script>
 
 <script>
 // ─── تسجيل الـ Service Worker: مطلوب عشان Chrome يعتبر الموقع تطبيق قابل للتثبيت (PWA) حقيقي ───
