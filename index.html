@@ -365,7 +365,7 @@ body:has(#loginScreen:not(.hide)) { overflow:hidden; }
 .user-bar {
   display:flex; align-items:center; justify-content:space-between;
   background:rgba(201,151,58,0.08); border:1px solid rgba(201,151,58,0.2);
-  border-radius:14px; padding:10px 16px; margin-bottom:16px;
+  border-radius:14px; padding:10px 16px; margin-bottom:16px; flex-wrap:wrap; row-gap:8px;
 }
 .user-name { font-size:14px; color:var(--gold); font-weight:600; }
 .user-logout { font-size:12px; color:rgba(245,217,139,0.45); cursor:pointer; padding:4px 8px; touch-action:manipulation; -webkit-tap-highlight-color:transparent; }
@@ -1268,7 +1268,7 @@ input, textarea, [contenteditable="true"] {
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   // ═══ نسخة التطبيق — بتتحدّث مع كل تسليم ═══
-  window.NOUR_VERSION = 'v104 — دقة التصحيح';
+  window.NOUR_VERSION = 'v108 — جولة بالتأشير';
   console.log('%c🌙 نور ' + window.NOUR_VERSION, 'color:#F5D98B;font-weight:bold;font-size:14px');
   try {
     const _verEl = document.getElementById('appVerTag');
@@ -4472,7 +4472,8 @@ function _callWhenReady(fn, args) {
       <div style="display:flex;gap:9px;align-items:center;">
         <span id="globalRankChip" class="rank-chip-circle" onclick="openFullRank()" title="ترتيبك العام" style="display:none;width:30px;height:30px;font-size:12px;cursor:pointer;">#٠</span>
         <span style="font-size:13px;color:var(--gold);" id="userLevelDisplay">المستوى ١</span>
-        <span onclick="openRecitationPicker()" title="التسميع الصوتي — سمّع سورة أو جزء كامل" style="display:inline-flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">
+        <button type="button" class="guide-nav-btn" id="guideBtn" aria-label="دليل التطبيق — شوف الجولة التعريفية" title="دليل التطبيق — شوف الجولة التعريفية" onclick="window.NourTour && NourTour.open(true)"><span class="guide-ico">🧭</span><span class="guide-lbl">دليل التطبيق</span></button>
+        <span id="tourRecite" onclick="openRecitationPicker()" title="التسميع الصوتي — سمّع سورة أو جزء كامل" style="display:inline-flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">
           <span style="font-size:13px;color:var(--gold-light);line-height:1;">🎤</span>
           <span style="font-size:10px;color:var(--gold-light);white-space:nowrap;line-height:1;opacity:0.85;">تسميع صوتي</span>
         </span>
@@ -4506,7 +4507,6 @@ function _callWhenReady(fn, args) {
         <button class="review-nav-btn" style="margin-bottom:0;" onclick="showReviewScreen()">📖 مراجعة السور</button>
         <button class="mistakes-nav-btn" style="margin-bottom:0;" onclick="showMistakesScreen()">❌ الغلطات</button>
       </div>
-
     </div>
 
     <!-- IN-PROGRESS SURAHS (مخفي من الصفحة الرئيسية) -->
@@ -6238,6 +6238,7 @@ function _finishLogin(username, isGuest) {
   populateJuzFilter();
   loadMemorizedSurahs();
   showToast('مرحباً ' + (_disp||'') + '! 🌙');
+  try { if (window.NourTour) window.NourTour.arm(); } catch(e) {}   // ★ الجولة التعريفية: أول دخول بعد النسخة دي
 
   // ★ safety net: لو الاسم مش ظهر صح، بعد ثانية نحاول تاني من كل المصادر
   setTimeout(() => {
@@ -14616,7 +14617,7 @@ function _stopPolling() {
     <div class="sheet-title">⚙️ إعدادات التحدي</div>
 
     <!-- السورة أو الجزء -->
-    <div class="sheet-section">📖 اختر السورة أو الجزء</div>
+    <div class="sheet-section" id="sheetSecSurah">📖 اختر السورة أو الجزء</div>
     <div class="sheet-tabs">
       <button class="login-tab active" id="sheetTabSurah" onclick="switchFilterTab('surah')" style="border-radius:8px;font-size:13px;">📜 سورة</button>
       <button class="login-tab" id="sheetTabJuz" onclick="switchFilterTab('juz')" style="border-radius:8px;font-size:13px;">📚 جزء</button>
@@ -14665,7 +14666,7 @@ function _stopPolling() {
     </div>
 
     <!-- عدد الأسئلة -->
-    <div class="sheet-section">🔢 عدد الأسئلة</div>
+    <div class="sheet-section" id="sheetSecCount">🔢 عدد الأسئلة</div>
     <div class="qcount-wrap" style="margin-bottom:0;">
       <div class="qcount-label">
         <span id="qcountLabelText">اختر عدد الأسئلة في كل جلسة</span>
@@ -14691,7 +14692,7 @@ function _stopPolling() {
     </div>
 
     <!-- نوع التحدي -->
-    <div class="sheet-section">🎮 نوع التحدي</div>
+    <div class="sheet-section" id="sheetSecMode">🎮 نوع التحدي</div>
     <div class="modes-row">
       <div class="mode-btn active" onclick="selectMode('mcq')" id="mode-mcq">
         <div class="mode-icon">🎯</div><div class="mode-name">اختيار</div><div class="mode-sub">4 خيارات</div>
@@ -14711,7 +14712,7 @@ function _stopPolling() {
     <button class="sheet-start" onclick="closeGameSheet();startGame();">ابدأ التحدي ✨</button>
 
     <!-- تحدي الأصدقاء -->
-    <div style="margin-top:10px;position:relative;">
+    <div id="tourSheetFriends" style="margin-top:10px;position:relative;">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
         <div style="flex:1;height:1px;background:rgba(46,175,120,0.2);"></div>
         <span style="font-size:11px;color:rgba(46,175,120,0.5);white-space:nowrap;">أو العب مع أصدقائك</span>
@@ -15005,6 +15006,555 @@ if ('serviceWorker' in navigator) {
       .catch(err => console.warn('SW registration failed:', err));
   });
 }
+</script>
+
+<!-- ═══════ NOUR TOUR v2 — جولة تعريفية بالتأشير: بتنوّر على كل جزء بتشرحه (زر «دليل التطبيق» فوق في الرئيسية) ═══════ -->
+<style>
+.guide-nav-btn {
+  display:inline-flex; flex-direction:column; align-items:center; gap:3px; padding:0; margin:0; cursor:pointer;
+  background:none; border:none; font-family:'Cairo',sans-serif; color:var(--gold-light);
+  touch-action:manipulation; -webkit-tap-highlight-color:transparent;
+}
+.guide-nav-btn .guide-ico { font-size:13px; line-height:1; animation:guideGlow 2.8s ease-in-out infinite; }
+.guide-nav-btn .guide-lbl { font-size:10px; line-height:1; white-space:nowrap; opacity:0.85; }
+.guide-nav-btn:active { transform:scale(0.94); }
+@keyframes guideGlow { 0%,100% { filter:drop-shadow(0 0 0 rgba(232,184,75,0)); } 50% { filter:drop-shadow(0 0 6px rgba(232,184,75,0.9)); } }
+@media (prefers-reduced-motion: reduce) { .guide-nav-btn .guide-ico { animation:none; } }
+
+#nourTour {
+  position:fixed; inset:0; z-index:100000; display:none; direction:rtl; font-family:'Cairo',sans-serif;
+  opacity:0; transition:opacity .25s ease; touch-action:none; -webkit-tap-highlight-color:transparent;
+}
+#nourTour.show { display:block; }
+#nourTour.in { opacity:1; }
+
+/* الدايرة المنوّرة حوالين الجزء المشروح — الظل الكبير هو اللي بيعتّم باقي الشاشة */
+#nourTour .nt-spot {
+  position:fixed; left:50%; top:50%; width:0; height:0; border-radius:16px; pointer-events:none;
+  box-shadow:0 0 0 9999px rgba(10,8,5,0.86), 0 0 0 2px rgba(232,184,75,0.95), 0 0 22px 4px rgba(201,151,58,0.5);
+  transition:left .3s ease, top .3s ease, width .3s ease, height .3s ease;
+}
+#nourTour .nt-spot::after {
+  content:''; position:absolute; inset:-2px; border-radius:inherit; border:2px solid rgba(245,217,139,0.9);
+  animation:ntPulse 1.7s ease-out infinite;
+}
+#nourTour .nt-spot.nt-collapsed::after { display:none; }
+@keyframes ntPulse { 0% { transform:scale(1); opacity:.9; } 100% { transform:scale(1.08,1.25); opacity:0; } }
+
+#nourTour .nt-pointer {
+  position:fixed; left:0; top:0; transform:translateX(-50%); pointer-events:none; font-size:30px; line-height:1;
+  filter:drop-shadow(0 2px 6px rgba(0,0,0,0.65)); transition:left .3s ease, top .3s ease, opacity .2s;
+}
+#nourTour .nt-pointer.hide { opacity:0; }
+#nourTour .nt-pointer span { display:block; animation:ntBobUp .8s ease-in-out infinite alternate; }
+#nourTour .nt-pointer.down span { animation-name:ntBobDown; }
+@keyframes ntBobUp   { from { transform:translateY(0); }  to { transform:translateY(-9px); } }
+@keyframes ntBobDown { from { transform:translateY(0); }  to { transform:translateY(9px); } }
+
+#nourTour .nt-card {
+  position:fixed; left:50%; bottom:max(12px, env(safe-area-inset-bottom, 12px)); transform:translateX(-50%);
+  width:calc(100% - 24px); max-width:430px; max-height:46vh; max-height:46dvh;
+  display:flex; flex-direction:column; overflow:hidden; touch-action:pan-y;
+  background:linear-gradient(160deg,#241a0c 0%,#17120a 60%,#0f1a13 100%);
+  border:1px solid rgba(201,151,58,0.4); border-radius:20px;
+  box-shadow:0 14px 44px rgba(0,0,0,0.65), 0 0 32px rgba(201,151,58,0.1);
+}
+#nourTour .nt-card.center {
+  bottom:auto; top:50%; transform:translate(-50%,-50%); max-height:calc(100vh - 28px); max-height:calc(100dvh - 28px);
+}
+#nourTour .nt-top { display:flex; align-items:center; gap:10px; padding:11px 14px 0; flex-shrink:0; }
+#nourTour .nt-count { font-size:11.5px; color:rgba(245,217,139,0.65); white-space:nowrap; }
+#nourTour .nt-bar { flex:1; height:4px; border-radius:4px; background:rgba(201,151,58,0.18); overflow:hidden; }
+#nourTour .nt-bar i { display:block; height:100%; width:0; border-radius:4px; background:linear-gradient(90deg,var(--gold),#e8b84b); transition:width .3s ease; }
+#nourTour .nt-skip {
+  background:rgba(255,254,249,0.06); border:1px solid rgba(201,151,58,0.35); color:var(--gold-light);
+  font-family:inherit; font-size:11.5px; font-weight:700; padding:5px 12px; border-radius:20px; cursor:pointer; touch-action:manipulation;
+}
+#nourTour .nt-skip:hover { background:rgba(201,151,58,0.15); }
+#nourTour .nt-body { padding:10px 16px 4px; overflow-y:auto; flex:1; min-height:0; -webkit-overflow-scrolling:touch; }
+#nourTour .nt-body.nt-anim { animation:ntIn .28s ease both; }
+@keyframes ntIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
+#nourTour .nt-head { display:flex; align-items:center; gap:10px; margin-bottom:6px; }
+#nourTour .nt-icon {
+  width:40px; height:40px; flex-shrink:0; border-radius:50%; display:flex; align-items:center; justify-content:center;
+  font-size:21px; line-height:1; background:radial-gradient(circle,rgba(201,151,58,0.24),rgba(201,151,58,0.04));
+  border:1px solid rgba(201,151,58,0.4);
+}
+#nourTour .nt-title { font-family:'Amiri',serif; font-size:21px; color:var(--gold); line-height:1.3; }
+#nourTour .nt-text { font-size:13.5px; line-height:1.85; color:rgba(253,248,238,0.88); }
+#nourTour .nt-chips { display:flex; flex-wrap:wrap; gap:6px; justify-content:flex-start; margin:9px 0 2px; }
+#nourTour .nt-chip {
+  font-size:11.5px; padding:5px 10px; border-radius:20px; color:var(--gold-light);
+  background:rgba(201,151,58,0.1); border:1px solid rgba(201,151,58,0.3); white-space:nowrap;
+}
+#nourTour .nt-list { list-style:none; text-align:right; margin:9px 0 2px; padding:0; }
+#nourTour .nt-list li {
+  font-size:12.5px; line-height:1.8; color:rgba(253,248,238,0.86); padding:6px 11px; margin-bottom:5px;
+  background:rgba(255,254,249,0.04); border:1px solid rgba(201,151,58,0.14); border-radius:11px;
+}
+#nourTour .nt-note {
+  margin-top:9px; font-size:12px; line-height:1.75; color:rgba(245,217,139,0.75);
+  background:rgba(46,175,120,0.08); border:1px solid rgba(46,175,120,0.25); border-radius:11px; padding:8px 11px;
+}
+#nourTour .nt-foot { padding:8px 14px 13px; flex-shrink:0; }
+#nourTour .nt-nav { display:flex; gap:10px; }
+#nourTour .nt-btn {
+  flex:1; padding:11px 10px; border-radius:13px; font-family:inherit; font-size:14px; font-weight:700;
+  cursor:pointer; touch-action:manipulation; transition:all .2s;
+}
+#nourTour .nt-prev { background:rgba(255,254,249,0.05); border:1px solid rgba(201,151,58,0.3); color:var(--gold-light); }
+#nourTour .nt-next { background:linear-gradient(135deg,var(--gold),#e0b04f); border:none; color:#1A1208; box-shadow:0 4px 16px rgba(201,151,58,0.3); }
+#nourTour .nt-btn:active { transform:scale(0.97); }
+@media (prefers-reduced-motion: reduce) {
+  #nourTour, #nourTour .nt-body.nt-anim, #nourTour .nt-spot::after, #nourTour .nt-pointer span { animation:none; transition:none; }
+  #nourTour .nt-spot, #nourTour .nt-pointer { transition:none; }
+}
+</style>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+//  NourTour v2 — جولة تعريفية بالتأشير
+//  • كل خطوة بتنوّر على الجزء الحقيقي اللي بتشرحه في الشاشة وبتأشّر عليه (👆)
+//  • خطوات «ابدأ التحدي» بتفتح شاشة الإعدادات لوحدها وتقفلها بعد كده
+//  • بتظهر تلقائياً أول دخول (مرة واحدة على الجهاز) + زر «🧭 دليل التطبيق» فوق في الرئيسية
+//  • الخروج: زر «تخطّي» / Esc / زر الرجوع في أندرويد
+//  • عشان تظهر تاني للكل في تحديث جاي: غيّر TOUR_VERSION
+//  • كل خطوة: target = سيليكتور (أو مصفوفة سيليكتورات بيتحسب المستطيل اللي بيجمعهم)، sheet:true = جوّه شاشة الإعدادات
+// ═══════════════════════════════════════════════════════════════
+(function () {
+  'use strict';
+
+  var TOUR_VERSION = 'v1';
+  var STORE_KEY = 'nour_tour_seen';
+
+  var STEPS = [
+    { icon: '🌙', title: 'أهلاً بيك في نور',
+      text: 'تطبيق مجاني لحفظ القرآن الكريم ومراجعته بطريقة تفاعلية وممتعة. الجولة دي هتنوّر لك على كل جزء في التطبيق وتشرحه في دقيقة واحدة.',
+      chips: ['🎯 تحدي الحفظ', '📖 مراجعة السور', '❌ الغلطات', '🎤 تسميع صوتي', '🎮 تحدي الأصدقاء', '🏆 لوحة الشرف'],
+      note: 'تقدر تخرج في أي وقت بزر «تخطّي»، وترجعلها من زر 🧭 «دليل التطبيق» اللي فوق في شريط المستخدم.' },
+
+    { icon: '👤', title: 'حسابك ومستواك', target: '#homeScreen .user-bar',
+      text: 'هنا اسمك ومستواك، ومن أيقونة المفتاح 🔑 بتغيّر كلمة المرور.',
+      list: ['✏️ تقدر تغيّر اسم العرض اللي بيظهر للناس (للحسابات المسجّلة).',
+             '🕊️ لو داخل كضيف، نقاطك بتتحفظ على الجهاز ده بس. سجّل بحسابك (إيميل / جوجل / فيسبوك) عشان تتوحّد على كل أجهزتك.'] },
+
+    { icon: '⭐', title: 'نقاطك وجلساتك', target: '#homeScreen .stats-row',
+      text: 'هنا بتشوف عدد نقاطك ⭐ وعدد جلساتك المكتملة.' },
+
+    { icon: '🌱', title: 'المستويات الثمانية', target: ['#homeScreen .section-title', '#levelsContainer', '#homeScreen .scroll-hint'],
+      text: 'من المبتدئ لسيد الحفاظ. كل مستوى أصعب من اللي قبله ونقاطه أعلى. اسحب المستويات يمين وشمال عشان تشوفها كلها وتختار اللي يناسبك.',
+      chips: ['🌱 المبتدئ ×١', '📖 المتوسط ×١٫٥', '⭐ المتقدم ×٢', '👑 الحافظ ×٢٫٥', '🏅 العالم ×٣', '💎 الحكيم ×٣٫٥', '🌟 الإمام ×٤', '🕋 سيد الحفاظ ×٥'] },
+
+    { icon: '✨', title: 'ابدأ التحدي', target: '#homeScreen .start-btn',
+      text: 'دوس على «ابدأ التحدي ✨» وظبّط جلستك على مزاجك. هنفتحلك شاشة الإعدادات دلوقتي ونعدّي عليها حاجة حاجة.' },
+
+    { icon: '📖', title: 'السورة أو الجزء', sheet: true,
+      target: ['#sheetSecSurah', '#gameSheet .sheet-tabs', '#filterSurahPanel', '#filterJuzPanel'],
+      text: 'اختار سورة معيّنة أو جزء، أو سيبها عشوائي من القرآن كله.' },
+
+    { icon: '🔢', title: 'عدد الأسئلة', sheet: true,
+      target: ['#sheetSecCount', '#gameSheet .qcount-wrap'],
+      text: 'حدد عدد الأسئلة، وتقدر تحدد نطاق الآيات بالسلايدر.' },
+
+    { icon: '🎮', title: 'نوع التحدي', sheet: true,
+      target: ['#sheetSecMode', '#gameSheet .modes-row'],
+      text: 'اختار واحد من الأربعة:',
+      chips: ['🎯 اختيار (٤ خيارات)', '✍️ كتابة', '👁️ تذكر (اقرأ وتذكر)', '⚡ فوري (ضد الوقت)'],
+      note: 'بعض المستويات العالية بتفرض نوع معيّن (كتابة أو ضد الوقت) وبيظهر عليه «🔒 مفروض».' },
+
+    { icon: '🚀', title: 'يلا نبدأ', sheet: true, target: '#gameSheet .sheet-start',
+      text: 'بعد ما تظبط كل حاجة دوس هنا وتبدأ الجلسة.' },
+
+    { icon: '🎮', title: 'تحدي الأصدقاء', sheet: true, target: '#tourSheetFriends',
+      text: 'العب أونلاين مع أصحابك لحد ٨ لاعبين في نفس الوقت. الزرار الأخضر ده موجود تحت في نفس الشاشة.',
+      list: ['🚀 <b>أنشئ غرفة</b>: اختار السورة وعدد الأسئلة والحد الأقصى للاعبين ووقت كل سؤال، وشارك الكود مع أصحابك (📋 نسخ الكود).',
+             '🔑 <b>أو انضم لغرفة</b> صاحبك بإدخال كودها.'] },
+
+    { icon: '🎧', title: 'جوّه السؤال',
+      text: 'لما تبدأ الجلسة بتظهرلك آية ناقصة كلمة (أو أكتر) وانت تكمّلها. دي أهم حاجات هتلاقيها:',
+      list: ['🔊 استمع للآية بصوت الشيخ مشاري راشد العفاسي.',
+             '💡 أول حرف · ✂️ حذف خيار · 📖 إظهار الآية: مساعدات عددها محدود حسب المستوى.',
+             '🔥 لو جاوبت صح ورا بعض بيظهرلك كومبو.',
+             '⭐ كل إجابة صح بتزوّد نقاطك، وفي الآخر بتشوف نتيجتك ودقتك.'],
+      note: 'ده اللي هتشوفه جوّه الجلسة نفسها، عشان كده مفيش حاجة نأشّر عليها هنا.' },
+
+    { icon: '📖', title: 'مراجعة السور', target: '#homeScreen .review-nav-btn',
+      text: 'الزرار ده بيفتحلك السور الـ١١٤. ابحث عن أي سورة، أو فلتر: القرآن كاملاً، جزء عم، النصف الأول أو التاني، ربع القرآن، أو 🔥 اللي بدأتها. بعدين اختار نوع التحدي:',
+      chips: ['🎯 كلاسيك', '🔍 دقة الحفظ', '🔤 من الأول', '🔃 من الآخر'] },
+
+    { icon: '❌', title: 'الغلطات', target: '#homeScreen .mistakes-nav-btn',
+      text: 'أي إجابة غلط بتتسجّل تلقائي. من الزرار ده بتراجعها مقسّمة بالأيام، وتقدر تمسحها كلها لما تتأكد إنك حفظتها.',
+      note: 'الغلطات هي أسرع طريق تعرف بيه إيه اللي محتاج يتراجع.' },
+
+    { icon: '🎤', title: 'التسميع الصوتي', target: '#tourRecite',
+      text: 'من أيقونة 🎤 «تسميع صوتي» فوق:',
+      list: ['اختار سورة أو جزء كامل.',
+             'حدد نطاق الآيات: من آية كام لآية كام.',
+             'دوس الميكروفون وسمّع بترتيل واضح.',
+             'في الآخر بتاخد تقرير بأدائك ونصايح تلقائية.'],
+      note: 'محتاج تسمح للمتصفح بالميكروفون، وبيشتغل على المتصفحات اللي بتدعم التعرف على الصوت.' },
+
+    { icon: '🏆', title: 'لوحة الشرف', target: '#homeScreen .lb-section',
+      text: 'منصة أول ٣ متصدرين وتحتها باقي المتسابقين.' },
+
+    { icon: '📋', title: 'ترتيبك العام', target: '#globalRankCard', skipIfMissing: true,
+      text: 'دوس على كارت «ترتيبك العام» عشان تشوف الترتيب الكامل وتعرف انت فين.' },
+
+    { icon: '🧭', title: 'خلصنا، يلا نبدأ!', target: '#guideBtn',
+      text: 'ابدأ بمستوى «المبتدئ» وخد وقتك، وكل آية تحفظها صدقة جارية 🤍',
+      note: 'الزرار ده فوق في شريط المستخدم جنب 🎤، ترجع للجولة منه في أي وقت.' }
+  ];
+
+  var POINTER_ROOM = 46;   // مسافة للإصبع اللي بيأشّر بين الجزء والكارت
+  var SPOT_PAD = 6;
+
+  var root = null, spotEl, pointerEl, pointerIcon, cardEl, bodyEl, countEl, barEl, prevBtn, nextBtn, skipBtn;
+  var plan = [], idx = -1, isOpen = false, pushed = false, swallowPop = false;
+  var prevOverflow = '', savedScroll = 0, armTimer = null, memSeen = false;
+  var sheetOn = false, spacerEl = null, rafId = 0, stepToken = 0, waiting = false, resizeTimer = null;
+  var last = {};
+
+  function toAr(n) { return String(n).replace(/\d/g, function (d) { return '٠١٢٣٤٥٦٧٨٩'.charAt(+d); }); }
+
+  function seen() {
+    if (memSeen) return true;
+    try { return localStorage.getItem(STORE_KEY) === TOUR_VERSION; } catch (e) { return false; }
+  }
+  function markSeen() {
+    memSeen = true;
+    try { localStorage.setItem(STORE_KEY, TOUR_VERSION); } catch (e) {}
+  }
+
+  // ─── إيجاد العناصر والمستطيل اللي بيجمعها ───
+  function els(step) {
+    var out = [];
+    if (!step || !step.target) return out;
+    [].concat(step.target).forEach(function (sel) {
+      var e = document.querySelector(sel);
+      if (e) out.push(e);
+    });
+    return out;
+  }
+  function unionRect(list) {
+    var l = 1e9, t = 1e9, r = -1e9, b = -1e9, any = false;
+    list.forEach(function (e) {
+      var q = e.getBoundingClientRect();
+      if (q.width < 1 || q.height < 1) return;   // مخفي
+      any = true;
+      if (q.left < l) l = q.left; if (q.top < t) t = q.top;
+      if (q.right > r) r = q.right; if (q.bottom > b) b = q.bottom;
+    });
+    return any ? { left: l, top: t, right: r, bottom: b, width: r - l, height: b - t } : null;
+  }
+
+  // ─── البناء ───
+  function build() {
+    if (root) return;
+    root = document.createElement('div');
+    root.id = 'nourTour';
+    root.setAttribute('role', 'dialog');
+    root.setAttribute('aria-modal', 'true');
+    root.setAttribute('aria-label', 'جولة تعريفية بالتطبيق');
+    root.innerHTML =
+      '<div class="nt-spot nt-collapsed" id="ntSpot"></div>' +
+      '<div class="nt-pointer hide" id="ntPointer"><span>👆</span></div>' +
+      '<div class="nt-card" id="ntCard">' +
+        '<div class="nt-top">' +
+          '<span class="nt-count" id="ntCount"></span>' +
+          '<div class="nt-bar"><i id="ntBar"></i></div>' +
+          '<button type="button" class="nt-skip" id="ntSkip">تخطّي ✕</button>' +
+        '</div>' +
+        '<div class="nt-body" id="ntBody" aria-live="polite"></div>' +
+        '<div class="nt-foot"><div class="nt-nav">' +
+          '<button type="button" class="nt-btn nt-prev" id="ntPrev">→ السابق</button>' +
+          '<button type="button" class="nt-btn nt-next" id="ntNext">التالي ←</button>' +
+        '</div></div>' +
+      '</div>';
+    document.body.appendChild(root);
+
+    spotEl = root.querySelector('#ntSpot');
+    pointerEl = root.querySelector('#ntPointer');
+    pointerIcon = pointerEl.querySelector('span');
+    cardEl = root.querySelector('#ntCard');
+    bodyEl = root.querySelector('#ntBody');
+    countEl = root.querySelector('#ntCount');
+    barEl = root.querySelector('#ntBar');
+    prevBtn = root.querySelector('#ntPrev');
+    nextBtn = root.querySelector('#ntNext');
+    skipBtn = root.querySelector('#ntSkip');
+
+    skipBtn.addEventListener('click', close);
+    prevBtn.addEventListener('click', function () { go(idx - 1); });
+    nextBtn.addEventListener('click', function () { if (idx >= plan.length - 1) close(); else go(idx + 1); });
+    // الضغط على الخلفية مايقفلش عشان ما يتقفلش بالغلط — الخروج بزر «تخطّي»
+  }
+
+  // ─── شاشة إعدادات التحدي (بتتفتح وتتقفل من الجولة من غير ما تلمس الـ history بتاع التطبيق) ───
+  function sheetBox() { var s = document.getElementById('gameSheet'); return s ? s.querySelector('.sheet-box') : null; }
+  function openSheet() {
+    var sh = document.getElementById('gameSheet');
+    if (!sh || sheetOn) return;
+    var proto = History.prototype.pushState;
+    history.pushState = function () {};            // الجولة عندها entry خاص بيها في الـ history
+    try { if (typeof window.openGameSheet === 'function') window.openGameSheet(); else sh.classList.add('open'); }
+    catch (e) { sh.classList.add('open'); }
+    finally {
+      try { delete history.pushState; } catch (e) {}
+      if (history.pushState !== proto) history.pushState = proto;
+    }
+    var box = sheetBox();
+    if (box) { box.style.paddingBottom = Math.round(window.innerHeight * 0.5) + 'px'; box.scrollTop = 0; }   // مساحة تسمح بتحريك العناصر اللي تحت لفوق الكارت
+    sheetOn = true;
+  }
+  function closeSheet() {
+    var sh = document.getElementById('gameSheet');
+    if (sh) sh.classList.remove('open');
+    var box = sheetBox();
+    if (box) { box.style.paddingBottom = ''; box.scrollTop = 0; }
+    sheetOn = false;
+  }
+
+  // ─── سكرول بدون أنيميشن ───
+  function instantScroll(fn) {
+    var de = document.documentElement, old = de.style.scrollBehavior;
+    de.style.scrollBehavior = 'auto';
+    try { fn(); } finally { de.style.scrollBehavior = old; }
+  }
+
+  // بيحرّك الصفحة (أو شاشة الإعدادات) عشان الجزء المشروح يبان فوق الكارت
+  function ensureVisible(step) {
+    var rect = unionRect(els(step));
+    if (!rect) return;
+    var H = window.innerHeight;
+    var cardH = cardEl.offsetHeight;
+    var scroller = step.sheet ? sheetBox() : null;
+    var topLimit = scroller ? Math.max(10, scroller.getBoundingClientRect().top + 8) : 10;
+    var bottomLimit = H - cardH - 24 - POINTER_ROOM;
+    var avail = Math.max(60, bottomLimit - topLimit);
+    var desired = rect.height <= avail ? topLimit + (avail - rect.height) / 2 : topLimit;
+    var delta = rect.top - desired;
+    if (Math.abs(delta) < 2) return;
+    if (scroller) scroller.scrollTop += delta;
+    else instantScroll(function () { window.scrollBy(0, delta); });
+  }
+
+  // ─── عرض الخطوة ───
+  function render(s) {
+    var h = '<div class="nt-head"><div class="nt-icon">' + s.icon + '</div><div class="nt-title">' + s.title + '</div></div>';
+    if (s.text) h += '<div class="nt-text">' + s.text + '</div>';
+    if (s.list) h += '<ul class="nt-list">' + s.list.map(function (t) { return '<li>' + t + '</li>'; }).join('') + '</ul>';
+    if (s.chips) h += '<div class="nt-chips">' + s.chips.map(function (t) { return '<span class="nt-chip">' + t + '</span>'; }).join('') + '</div>';
+    if (s.note) h += '<div class="nt-note">' + s.note + '</div>';
+    bodyEl.innerHTML = h;
+    bodyEl.scrollTop = 0;
+    bodyEl.classList.remove('nt-anim'); void bodyEl.offsetWidth; bodyEl.classList.add('nt-anim');
+
+    var lastStep = idx === plan.length - 1;
+    countEl.textContent = toAr(idx + 1) + ' / ' + toAr(plan.length);
+    barEl.style.width = ((idx + 1) / plan.length * 100) + '%';
+    prevBtn.style.visibility = idx === 0 ? 'hidden' : 'visible';
+    nextBtn.textContent = lastStep ? 'يلا نبدأ ✨' : 'التالي ←';
+    skipBtn.textContent = lastStep ? 'إغلاق ✕' : 'تخطّي ✕';
+  }
+
+  function showStep() {
+    var s = plan[idx], token = ++stepToken;
+    render(s);
+    var delay = 0;
+    if (s.sheet && !sheetOn) { openSheet(); delay = 480; }        // استنى أنيميشن فتح الشاشة
+    else if (!s.sheet && sheetOn) { closeSheet(); }
+    card_center(!s.target);
+    function settle() {
+      if (token !== stepToken || !isOpen) return;
+      if (!s.target) instantScroll(function () { window.scrollTo(0, 0); });
+      else ensureVisible(s);
+      waiting = false;
+    }
+    if (delay > 0) { waiting = true; setTimeout(settle, delay); }
+    else { waiting = false; settle(); }
+  }
+
+  function card_center(on) {
+    if (cardEl.classList.contains('center') !== on) cardEl.classList.toggle('center', on);
+  }
+
+  function go(i) {
+    if (i < 0 || i > plan.length - 1 || i === idx) return;
+    idx = i;
+    showStep();
+  }
+
+  // ─── لوب بيزامن الدايرة والإصبع مع مكان العنصر الحقيقي (بيمسك الأنيميشن والتحميل المتأخر والـ resize) ───
+  function setSpot(l, t, w, h, collapsed) {
+    var key = [l, t, w, h, collapsed].join('|');
+    if (last.spot === key) return;
+    last.spot = key;
+    spotEl.style.left = l + 'px'; spotEl.style.top = t + 'px';
+    spotEl.style.width = w + 'px'; spotEl.style.height = h + 'px';
+    spotEl.classList.toggle('nt-collapsed', !!collapsed);
+  }
+  function setPointer(show, x, y, down) {
+    var key = [show, x, y, down].join('|');
+    if (last.ptr === key) return;
+    last.ptr = key;
+    pointerEl.classList.toggle('hide', !show);
+    if (!show) return;
+    pointerEl.classList.toggle('down', !!down);
+    pointerIcon.textContent = down ? '👇' : '👆';
+    pointerEl.style.left = x + 'px'; pointerEl.style.top = y + 'px';
+  }
+
+  function tick() {
+    if (!isOpen) return;
+    rafId = requestAnimationFrame(tick);
+    var s = plan[idx], W = window.innerWidth, H = window.innerHeight;
+    var rect = (!waiting && s && s.target) ? unionRect(els(s)) : null;
+
+    if (!rect) {
+      setSpot(Math.round(W / 2), Math.round(H / 2), 0, 0, true);
+      setPointer(false);
+      if (!waiting && s && s.target) card_center(true);   // العنصر مش ظاهر لأي سبب: كارت في النص بدل ما نأشّر على فراغ
+      return;
+    }
+    card_center(false);
+    var cardTop = cardEl.getBoundingClientRect().top;
+    var l = Math.max(4, rect.left - SPOT_PAD);
+    var r = Math.min(W - 4, rect.right + SPOT_PAD);
+    var t = Math.max(4, rect.top - SPOT_PAD);
+    var b = Math.min(cardTop - 10, rect.bottom + SPOT_PAD);      // مايدخلش تحت الكارت
+    if (b - t < 36) b = t + 36;
+    setSpot(Math.round(l), Math.round(t), Math.round(r - l), Math.round(b - t), false);
+
+    var cx = Math.max(24, Math.min(W - 24, (rect.left + rect.right) / 2));
+    if (cardTop - 6 - b >= 38) setPointer(true, Math.round(cx), Math.round(b + 4), false);
+    else if (t >= 46) setPointer(true, Math.round(cx), Math.round(t - 40), true);
+    else setPointer(false);
+  }
+
+  function onKey(e) {
+    if (!isOpen) return;
+    if (e.key === 'Escape') { e.preventDefault(); close(); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); if (idx < plan.length - 1) go(idx + 1); }   // RTL: يسار = التالي
+    else if (e.key === 'ArrowRight') { e.preventDefault(); go(idx - 1); }
+  }
+  function onResize() {
+    if (!isOpen) return;
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function () {
+      if (!isOpen || !plan[idx] || !plan[idx].target) return;
+      var box = sheetBox();
+      if (sheetOn && box) box.style.paddingBottom = Math.round(window.innerHeight * 0.5) + 'px';
+      ensureVisible(plan[idx]);
+    }, 200);
+  }
+
+  function open(manual) {
+    if (isOpen) return;
+    build();
+    // الخطوات اللي عنصرها مش موجود (زي كارت الترتيب قبل ما يتحمّل) بتتشال من الجولة
+    plan = STEPS.filter(function (s) { return !s.skipIfMissing || unionRect(els(s)); });
+    idx = -1; last = {}; waiting = true;
+    savedScroll = window.pageYOffset || 0;
+    // مساحة فاضية تحت الصفحة عشان الأجزاء اللي في آخرها تقدر تطلع فوق الكارت
+    var hs = document.getElementById('homeScreen');
+    if (hs && !spacerEl) {
+      spacerEl = document.createElement('div');
+      spacerEl.setAttribute('aria-hidden', 'true');
+      spacerEl.style.cssText = 'height:55vh;pointer-events:none;';
+      hs.appendChild(spacerEl);
+    }
+    root.classList.add('show');
+    isOpen = true;
+    go(0);
+    requestAnimationFrame(function () { requestAnimationFrame(function () { root.classList.add('in'); }); });
+    prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.addEventListener('keydown', onKey);
+    window.addEventListener('resize', onResize);
+    window.addEventListener('orientationchange', onResize);
+    rafId = requestAnimationFrame(tick);
+    // ★ زر الرجوع في أندرويد يقفل الجولة بدل ما يطلّع من التطبيق
+    try {
+      var cur = (history.state && history.state.screen) || 'homeScreen';
+      history.pushState({ screen: cur, tour: true }, '');
+      pushed = true;
+    } catch (e) { pushed = false; }
+    markSeen();
+    try { nextBtn.focus({ preventScroll: true }); } catch (e) {}
+  }
+
+  function close() {
+    if (!isOpen) return;
+    isOpen = false;
+    stepToken++;
+    cancelAnimationFrame(rafId);
+    clearTimeout(resizeTimer);
+    document.removeEventListener('keydown', onKey);
+    window.removeEventListener('resize', onResize);
+    window.removeEventListener('orientationchange', onResize);
+    root.classList.remove('in');
+    setTimeout(function () { if (!isOpen) root.classList.remove('show'); }, 260);
+    if (sheetOn) closeSheet();
+    if (spacerEl && spacerEl.parentNode) spacerEl.parentNode.removeChild(spacerEl);
+    spacerEl = null;
+    document.body.style.overflow = prevOverflow;
+    instantScroll(function () { window.scrollTo(0, savedScroll); });
+    if (pushed && history.state && history.state.tour) {
+      swallowPop = true;
+      try { history.back(); } catch (e) { swallowPop = false; }
+    }
+    pushed = false;
+  }
+
+  // capture: يشتغل قبل هاندلر popstate بتاع التطبيق ويمنعه يتصرف وإحنا داخل الجولة
+  window.addEventListener('popstate', function (e) {
+    if (swallowPop) { swallowPop = false; e.stopImmediatePropagation(); return; }
+    if (isOpen) { pushed = false; e.stopImmediatePropagation(); close(); }
+  }, true);
+
+  // ─── التشغيل التلقائي أول دخول ───
+  function visible(el) {
+    if (!el) return false;
+    var cs = window.getComputedStyle(el);
+    return cs.display !== 'none' && cs.visibility !== 'hidden';
+  }
+  function ready() {
+    if (window._loggedOut || !window.currentUser) return false;
+    var sp = document.getElementById('appSplash');
+    if (sp && visible(sp) && !sp.classList.contains('hide')) return false;
+    if (visible(document.getElementById('loginScreen'))) return false;
+    var hs = document.getElementById('homeScreen');
+    if (!hs || !hs.classList.contains('show')) return false;
+    var sheet = document.getElementById('gameSheet');
+    if (sheet && sheet.classList.contains('open')) return false;
+    return true;
+  }
+  function stopArm() { if (armTimer) { clearInterval(armTimer); armTimer = null; } }
+  function arm() {
+    if (seen() || isOpen) return;
+    stopArm();
+    var tries = 0;
+    armTimer = setInterval(function () {
+      tries++;
+      if (seen() || isOpen) { stopArm(); return; }
+      if (ready()) {
+        stopArm();
+        setTimeout(function () { if (ready() && !seen() && !isOpen) open(false); else arm(); }, 700);
+      } else if (tries > 75) { stopArm(); }   // ~٣٠ ثانية، بعدها نستنى الدخول الجاي
+    }, 400);
+  }
+
+  window.NourTour = {
+    open: function (manual) { open(manual !== false); },
+    close: close,
+    arm: arm,
+    isOpen: function () { return isOpen; },
+    reset: function () { memSeen = false; try { localStorage.removeItem(STORE_KEY); } catch (e) {} }
+  };
+
+  // لو المستخدم اتسجّل دخوله تلقائي قبل ما السكريبت ده يتحمّل
+  arm();
+})();
 </script>
 
 </body>

@@ -1,5 +1,5 @@
 // ★ غيّر الرقم عند كل تحديث جديد (v2, v3, ...)
-const CACHE = 'nour-v1';
+const CACHE = 'nour-v2';
  
 // ─── Install ───────────────────────────────────────────────
 self.addEventListener('install', e => {
