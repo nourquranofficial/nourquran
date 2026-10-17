@@ -1,5 +1,5 @@
 // ★ غيّر الرقم عند كل تحديث جديد
-const CACHE = 'nour-v20';
+const CACHE = 'nour-v21';
 // ★ المسار الأساسي بيتحدد من مكان تسجيل الـ SW نفسه (يشتغل على /nourquran/ أو أي مسار تاني من غير تعديل)
 const BASE = (function () { try { return new URL(self.registration.scope).pathname; } catch (e) { return '/nourquran/'; } })();
 const PRECACHE = [BASE, BASE + 'index.html', BASE + 'notif-logic.js', BASE + 'push.js', BASE + 'wird.js', BASE + 'nour-stt.js?v=113', BASE + 'quran-local.js?v=113', BASE + 'widget.html', BASE + 'manifest-widget.json', BASE + 'leitner.js', BASE + 'report.js', BASE + 'a11y.js', BASE + 'ux.js', BASE + 'meaning.js', BASE + 'changelog.js', BASE + 'manifest.json', BASE + 'icon-192.png', BASE + 'icon-512.png'];
@@ -35,7 +35,8 @@ function networkFirst(req) {
     // مهلة: لو الشبكة بطيئة وعندنا نسخة محفوظة نستخدمها (الشبكة تكمّل وتحدّث الكاش للمرة الجاية)
     const timer = setTimeout(() => { fromCache().then(r => { if (r) finish(r); }); }, NET_TIMEOUT_MS);
 
-    fetch(req).then(res => {
+    // ★ v123: no-cache = يسأل السيرفر لو في نسخة أحدث (بيتخطى كاش المتصفح ~١٠ دقايق بتاع GitHub Pages) — التحديث يوصل التطبيق فورًا
+    fetch(req, { cache: 'no-cache' }).then(res => {
       clearTimeout(timer);
       if (res && res.ok) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(req, copy)).catch(() => {}); }
       finish(res);
