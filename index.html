@@ -1283,7 +1283,7 @@ input, textarea, [contenteditable="true"] {
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, sendPasswordResetEmail, verifyPasswordResetCode, confirmPasswordReset, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   // ═══ نسخة التطبيق — بتتحدّث مع كل تسليم ═══
-  window.NOUR_VERSION = 'v120 — إصلاحات وثبات أكتر';
+  window.NOUR_VERSION = 'v122 — إشعارات توصل حتى والتطبيق مقفول';
   console.log('%c🌙 نور ' + window.NOUR_VERSION, 'color:#F5D98B;font-weight:bold;font-size:14px');
   try {
     const _verEl = document.getElementById('appVerTag');
@@ -1307,6 +1307,7 @@ input, textarea, [contenteditable="true"] {
   const db   = getDatabase(app);
   const auth = getAuth(app);
   window._firebaseAuth = auth;
+  window._fbApp = app; // ★ v122: push.js بيستخدمه لتسجيل توكن FCM
   window._dbUrl = firebaseConfig.databaseURL; // ★ مصدر واحد للحقيقة لعنوان الداتا بيز (يُستخدم في sendBeacon بالـ pagehide)
 
   // ★★ ترميز الاسم لمفتاح ASCII صالح (للإيميل وللـ DB) وثابت لنفس الاسم على كل الأجهزة ★★
@@ -2359,6 +2360,13 @@ input, textarea, [contenteditable="true"] {
     get(ref(db, 'users/' + key + '/leitner')).then(snap => {
       callback(snap.exists() ? snap.val() : null, true);
     }).catch(e => { console.warn('fbLoadLeitner error:', e); callback(null, false); });
+  };
+
+  // ── ★ v122: إشعارات السيرفر (FCM) — بنسجّل توكن الجهاز + سياق المستخدم في pushDevices/<deviceId>
+  //   (Worker الـ Cron بيقراه بصلاحية الـ Service Account). الجزء srv بتاع السيرفر ما بنلمسهوش (update مش set).
+  window.fbSavePush = function(deviceId, rec) {
+    if (!deviceId || !rec || !auth.currentUser) return Promise.resolve(false);
+    return update(ref(db, 'pushDevices/' + deviceId), rec).then(() => true).catch(e => { console.warn('fbSavePush', e && e.code); return false; });
   };
 
   // ── ★ v111: الورد اليومي (السلسلة + سجل الأيام) مربوط بحساب الإيميل ──
@@ -15027,6 +15035,11 @@ window.addEventListener('pageshow', function(e) {
 </div>
 
 <script src="notif-logic.js"></script>
+<script>
+  // ★ v122: مفتاح Web Push (VAPID) العام — Firebase Console ← Project settings ← Cloud Messaging ← Web Push certificates ← Generate key pair
+  window.NOUR_VAPID_KEY = 'BC5POTCeB6umeAlOd-Q3Gf4bjqCCMN-YKP7P3nMvWlZOgFkUPsuan0gMpijawvyQpWy4xNQkAjAx-fcMhMZtjF4';
+</script>
+<script src="push.js"></script>
 <script src="report.js"></script>
 <script src="a11y.js"></script>
 <script src="ux.js"></script>

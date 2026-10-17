@@ -1,8 +1,8 @@
 // ★ غيّر الرقم عند كل تحديث جديد
-const CACHE = 'nour-v18';
+const CACHE = 'nour-v20';
 // ★ المسار الأساسي بيتحدد من مكان تسجيل الـ SW نفسه (يشتغل على /nourquran/ أو أي مسار تاني من غير تعديل)
 const BASE = (function () { try { return new URL(self.registration.scope).pathname; } catch (e) { return '/nourquran/'; } })();
-const PRECACHE = [BASE, BASE + 'index.html', BASE + 'notif-logic.js', BASE + 'wird.js', BASE + 'nour-stt.js?v=113', BASE + 'quran-local.js?v=113', BASE + 'widget.html', BASE + 'manifest-widget.json', BASE + 'leitner.js', BASE + 'report.js', BASE + 'a11y.js', BASE + 'ux.js', BASE + 'meaning.js', BASE + 'changelog.js', BASE + 'manifest.json', BASE + 'icon-192.png', BASE + 'icon-512.png'];
+const PRECACHE = [BASE, BASE + 'index.html', BASE + 'notif-logic.js', BASE + 'push.js', BASE + 'wird.js', BASE + 'nour-stt.js?v=113', BASE + 'quran-local.js?v=113', BASE + 'widget.html', BASE + 'manifest-widget.json', BASE + 'leitner.js', BASE + 'report.js', BASE + 'a11y.js', BASE + 'ux.js', BASE + 'meaning.js', BASE + 'changelog.js', BASE + 'manifest.json', BASE + 'icon-192.png', BASE + 'icon-512.png'];
 
 // ★ الشبكة الضعيفة: لو الرد اتأخر أكتر من كده والنسخة المحفوظة موجودة نفتح منها فوراً بدل ما الصفحة تفضل بيضا
 const NET_TIMEOUT_MS = 4000;
@@ -68,6 +68,27 @@ self.addEventListener('message', e => {
 // ─── تذكير ذكي في الخلفية (Chrome/Android للتطبيق المثبّت) ───
 self.addEventListener('periodicsync', e => {
   if (e.tag === 'nour-daily') e.waitUntil(NourNotif.runCheck());
+});
+
+// ─── ★ v122: إشعار جاي من السيرفر (FCM، رسالة data فقط) — بنعرضه بنفس شكل الإشعار المحلي ───
+self.addEventListener('push', e => {
+  let p = {};
+  try { p = e.data ? e.data.json() : {}; } catch (err) { try { p = { body: e.data.text() }; } catch (e2) {} }
+  const d = (p && p.data && typeof p.data === 'object') ? p.data : (p || {});
+  const n = p && p.notification ? p.notification : {};
+  const title = d.title || n.title || 'نور';
+  const body = d.body || n.body || '';
+  e.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
+      // التطبيق مفتوح قدّام المستخدم دلوقتي → مفيش داعي لإشعار
+      if (list.some(c => c.visibilityState === 'visible' && c.focused)) return;
+      return self.registration.showNotification(title, {
+        body, tag: d.tag || 'nour', dir: 'rtl', lang: 'ar', renotify: false,
+        icon: BASE + 'icon-192.png', badge: BASE + 'icon-192.png',
+        data: { deeplink: d.deeplink || 'home', surah: d.surah || '' }
+      });
+    })
+  );
 });
 
 // ─── الضغط على الإشعار: افتح التطبيق على المكان المناسب ───

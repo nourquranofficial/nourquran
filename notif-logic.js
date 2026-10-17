@@ -82,6 +82,15 @@
     if (usual != null && usual >= 7 && usual <= 22) return usual;
     return 20;
   }
+  // ★ v121: وقت التذكير بالدقايق من أول اليوم (بيدعم وقت مخصّص زي ٨:٣٠، مش ساعات كاملة بس)
+  function effMin(prefs, usual) {
+    var t = prefs && prefs.notifTime;
+    if (t && t !== 'auto') {
+      var p = String(t).split(':'), h = parseInt(p[0], 10), m = parseInt(p[1], 10);
+      if (!isNaN(h)) return h * 60 + (isNaN(m) ? 0 : m);
+    }
+    return effHour(prefs, usual) * 60;
+  }
   function minW(m) { return m <= 1 ? 'دقيقة' : (m === 2 ? 'دقيقتين' : (m <= 10 ? m + ' دقايق' : m + ' دقيقة')); }
   function effort(left) { return minW(Math.max(1, Math.ceil(left * 20 / 60))); }   // ~٢٠ ثانية للآية الواحدة
 
@@ -118,8 +127,9 @@
     if (isQuietHour(ctx.hour)) return null;
 
     var prefs = ctx.prefs, hour = ctx.hour;
-    var start = effHour(prefs, ctx.usualHour);
-    var inMain = hour >= start && hour <= start + WINDOW_H;
+    var startMin = effMin(prefs, ctx.usualHour), start = Math.floor(startMin / 60);
+    var nowMin = hour * 60 + (ctx.minute || 0);
+    var inMain = nowMin >= startMin && nowMin <= startMin + WINDOW_H * 60;
     // ★ "خلّص" = حقق هدف الورد (مش بس لعب سؤال). ctx قديم من غير الحقل ده → نرجع للسلوك القديم.
     var finished = (ctx.wirdDone != null) ? ctx.wirdDone : ctx.playedToday;
     var left = ctx.remaining > 0 ? ctx.remaining : 0;
@@ -135,7 +145,7 @@
     }
 
     // 2) خطر انقطاع السلسلة — بس لو السلسلة يومين فأكتر (سلسلة يوم واحد مش تستاهل إزعاج) ومساءً
-    if (prefs.streakReminder && ctx.streak >= 2 && !finished && hour >= Math.max(18, start) && hour <= 22) {
+    if (prefs.streakReminder && ctx.streak >= 2 && !finished && nowMin >= Math.max(18 * 60, startMin) && hour <= 22) {
       var streakSurah = (ctx.surahs && ctx.surahs.length) ? ctx.surahs[0].surah : null;
       return {
         tag: 'streak_risk',
@@ -161,7 +171,6 @@
   }
 
   // ★ v117: الكبح الذكي — بيمنع الإزعاج:
-  //  • مفيش إشعار لو المستخدم فاتح التطبيق من أقل من ساعتين
   //  • لو آخر إشعارات اتجاهلت (من غير ما يفتح التطبيق) نفرّق المسافة: ٢ ← ٣ ← ٥ ← ٧ ← ١٤ يوم
   //  • حد أقصى ٤ إشعارات في الأسبوع
   // st: { last, lastOpen, ignored, log:[timestamps] } — بيرجّع { ok, ignored }
@@ -169,7 +178,6 @@
     st = st || {};
     var last = st.last || 0, lastOpen = st.lastOpen || 0;
     var ig = (last && lastOpen <= last) ? (st.ignored || 0) + 1 : 0;
-    if (lastOpen && now - lastOpen < 2 * 3600000) return { ok: false, ignored: ig };
     var gapDays = ig === 0 ? COOLDOWN_MS / 86400000 : (ig === 1 ? 2 : (ig === 2 ? 3 : (ig === 3 ? 5 : (ig < 8 ? 7 : 14))));
     if (last && now - last < gapDays * 86400000) return { ok: false, ignored: ig };
     var recent = (st.log || []).filter(function (t) { return now - t < 7 * 86400000; });
@@ -217,30 +225,47 @@
     return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
   }
 
+  // ★ v122: القرار النهائي كدالة نقية (من غير IndexedDB ولا عرض إشعار) — مشتركة بين الصفحة/الـ SW وبين Worker السيرفر (Cron)
+  //   c = سياق المستخدم (نفس اللي wird.js بيكتبه) · st = { last, lastOpen, ignored, log, lastRankAt }
+  //   now = Date بتوقيت المستخدم المحلي (getHours/getMinutes) · nowMs = الوقت الفعلي بالمللي ثانية
+  //   بيرجّع { n: {tag,title,body,data}, ignored } أو null
+  function evaluate(c, st, now, nowMs) {
+    if (!c || !c.prefs || !c.prefs.enabled) return null;
+    st = st || {};
+    var th = throttle({ last: st.last || 0, lastOpen: st.lastOpen || 0, ignored: st.ignored || 0, log: Array.isArray(st.log) ? st.log : [] }, nowMs);
+    if (!th.ok) return null;
+    var today = dayKey(now), yest = dayKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 12));
+    var streak = (c.streakLastDay === today || c.streakLastDay === yest) ? (c.streak || 0) : 0;
+    // ★ الورد: اتحقق النهارده؟ وباقي كام آية (الأرقام بتتحسب بس لو آخر لعب كان النهارده، غير كده الهدف كامل)
+    var hasWird = ('doneDay' in c);
+    var doneNow = (c.playedDay === today) ? (c.doneToday || 0) : 0;
+    var n = decideNotification({
+      rank: c.rank, prevRank: c.prevRank, streak: streak,
+      playedToday: c.playedDay === today, surahs: c.surahs || [],
+      wirdDone: hasWird ? (c.doneDay === today) : null,
+      remaining: hasWird ? Math.max(0, (c.goal || 0) - doneNow) : 0,
+      goal: c.goal || 0, doneToday: doneNow, usualHour: (c.usualHour != null ? c.usualHour : null),
+      rankOk: (nowMs - (st.lastRankAt || 0)) > 3 * 86400000,
+      prefs: c.prefs, hour: now.getHours(), minute: now.getMinutes()
+    });
+    return n ? { n: n, ignored: th.ignored } : null;
+  }
+
+  // ★ v122: لو الإشعارات واصلة من السيرفر (FCM) نوقف الفحص المحلي عشان الإشعار ما يتكررش.
+  //   push.js بيكتب pushOkAt كل ما يسجّل التوكن بنجاح؛ لو عدّى أكتر من ٣ أيام من غير تجديد نرجع للفحص المحلي كاحتياطي.
+  var PUSH_FRESH_MS = 3 * 86400000;
+
   // ctx بتكتبه الصفحة في IndexedDB تحت المفتاح 'ctx' (wird.js → syncCtx)
   function runCheck() {
-    return Promise.all([idbGet('ctx'), idbGet('lastNotifAt'), idbGet('lastOpenAt'), idbGet('ignored'), idbGet('sentLog'), idbGet('lastRankAt')]).then(function (r) {
-      var c = r[0], last = r[1] || 0, lastOpen = r[2] || 0, ignoredStored = r[3] || 0, log = Array.isArray(r[4]) ? r[4] : [], lastRankAt = r[5] || 0;
+    return Promise.all([idbGet('ctx'), idbGet('lastNotifAt'), idbGet('lastOpenAt'), idbGet('ignored'), idbGet('sentLog'), idbGet('lastRankAt'), idbGet('pushOkAt')]).then(function (r) {
+      var c = r[0], last = r[1] || 0, lastOpen = r[2] || 0, ignoredStored = r[3] || 0, log = Array.isArray(r[4]) ? r[4] : [], lastRankAt = r[5] || 0, pushOkAt = r[6] || 0;
       if (!c || !c.prefs || !c.prefs.enabled) return null;
       var nowMs = Date.now();
-      var th = throttle({ last: last, lastOpen: lastOpen, ignored: ignoredStored, log: log }, nowMs);
-      if (!th.ok) return null;
+      if (pushOkAt && nowMs - pushOkAt < PUSH_FRESH_MS) return null;   // السيرفر هو اللي بيبعت
       var now = new Date();
-      var today = dayKey(now), yest = dayKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 12));
-      var streak = (c.streakLastDay === today || c.streakLastDay === yest) ? (c.streak || 0) : 0;
-      // ★ الورد: اتحقق النهارده؟ وباقي كام آية (الأرقام بتتحسب بس لو آخر لعب كان النهارده، غير كده الهدف كامل)
-      var hasWird = ('doneDay' in c);
-      var doneNow = (c.playedDay === today) ? (c.doneToday || 0) : 0;
-      var n = decideNotification({
-        rank: c.rank, prevRank: c.prevRank, streak: streak,
-        playedToday: c.playedDay === today, surahs: c.surahs || [],
-        wirdDone: hasWird ? (c.doneDay === today) : null,
-        remaining: hasWird ? Math.max(0, (c.goal || 0) - doneNow) : 0,
-        goal: c.goal || 0, doneToday: doneNow, usualHour: (c.usualHour != null ? c.usualHour : null),
-        rankOk: (nowMs - lastRankAt) > 3 * 86400000,
-        prefs: c.prefs, hour: now.getHours()
-      });
-      if (!n) return null;
+      var ev = evaluate(c, { last: last, lastOpen: lastOpen, ignored: ignoredStored, log: log, lastRankAt: lastRankAt }, now, nowMs);
+      if (!ev) return null;
+      var n = ev.n, th = { ignored: ev.ignored };
       var regP = root.registration ? Promise.resolve(root.registration)
                : (root.navigator && navigator.serviceWorker ? navigator.serviceWorker.ready : Promise.resolve(null));
       return regP.then(function (reg) {
@@ -268,11 +293,13 @@
     isPreferredHour: isPreferredHour,
     decideNotification: decideNotification,
     throttle: throttle,
+    evaluate: evaluate,
     effHour: effHour,
+    effMin: effMin,
     markOpen: markOpen,
     runCheck: runCheck,
     dayKey: dayKey,
     idbGet: idbGet,
     idbSet: idbSet
   };
-})(typeof self !== 'undefined' ? self : this);
+})(typeof self !== 'undefined' ? self : (typeof globalThis !== 'undefined' ? globalThis : this));

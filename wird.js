@@ -143,6 +143,11 @@
     '.w-set{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 4px;border-bottom:1px dashed rgba(245,217,139,.18);font-size:13px;text-align:right}',
     '.w-set select{background:#2a1c0c;color:#F5D98B;border:1px solid rgba(245,217,139,.3);border-radius:8px;padding:5px 8px;font-family:inherit}',
     '.w-set input[type=checkbox]{width:20px;height:20px;accent-color:#2EAF78}',
+    '.w-chips{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 2px;justify-content:center}',
+    '.w-chip{min-height:40px;padding:6px 12px;border-radius:999px;border:1px solid rgba(245,217,139,.3);background:transparent;color:#F5D98B;font-family:inherit;font-size:13px;cursor:pointer}',
+    '.w-chip.on{background:rgba(201,151,58,.35);border-color:#C9973A;font-weight:800}',
+    '.w-set input[type=time]{background:#2a1c0c;color:#F5D98B;border:1px solid rgba(245,217,139,.3);border-radius:8px;padding:6px 8px;font-family:inherit;color-scheme:dark}',
+    '.w-hint{font-size:12px;color:rgba(245,217,139,.7);margin:6px 0 4px;min-height:18px}',
     '@media (prefers-reduced-motion:reduce){#wirdCard,#wirdCard .w-ring .fg{transition:none}}'
   ].join('');
 
@@ -362,8 +367,12 @@
   // ---------- التذكير ----------
   function openSettings() {
     var w = load(), p = w.prefs;
-    var hours = '<option value="auto"' + (!p.notifTime || p.notifTime === 'auto' ? ' selected' : '') + '>تلقائي — حسب وقتك المعتاد</option>';
-    for (var h = 7; h <= 22; h++) { var v = ('0' + h).slice(-2) + ':00'; hours += '<option value="' + v + '"' + (p.notifTime === v ? ' selected' : '') + '>' + ar(h > 12 ? h - 12 : h) + (h >= 12 ? ' م' : ' ص') + '</option>'; }
+    // ★ v121: اختيار الوقت بأزرار جاهزة + وقت مخصّص (من ٧ ص لـ ١٠:٥٩ م) بدل قايمة طويلة
+    var PRESETS = [['auto', '🤖 تلقائي'], ['08:00', '🌅 ٨ ص'], ['13:00', '☀️ ١ ظهرًا'], ['17:00', '🌇 ٥ عصرًا'], ['20:00', '🌙 ٨ م'], ['22:00', '😴 ١٠ م']];
+    var curT = (!p.notifTime || p.notifTime === 'auto') ? 'auto' : p.notifTime;
+    var isPreset = PRESETS.some(function (x) { return x[0] === curT; });
+    var chips = PRESETS.map(function (x) { return '<button type="button" class="w-chip' + (x[0] === curT ? ' on' : '') + '" data-v="' + x[0] + '">' + x[1] + '</button>'; }).join('');
+    var customVal = (curT !== 'auto') ? curT : '';
     var denied = ('Notification' in window) && Notification.permission === 'denied';
     var unsupported = !('Notification' in window);
     var m = modal(
@@ -372,15 +381,35 @@
       (unsupported ? '<p style="color:#ffb784">المتصفح ده مش بيدعم الإشعارات.</p>' : '') +
       (denied ? '<p style="color:#ffb784">الإشعارات متقفلة من إعدادات المتصفح/التطبيق — فعّلها من هناك الأول.</p>' : '') +
       '<div class="w-set"><span>تفعيل التذكير</span><input type="checkbox" id="wsOn"' + (p.enabled ? ' checked' : '') + '></div>' +
-      '<div class="w-set"><span>وقت التذكير</span><select id="wsTime">' + hours + '</select></div>' +
+      '<div class="w-lbl">⏰ وقت التذكير</div>' +
+      '<div class="w-chips" id="wsChips">' + chips + '</div>' +
+      '<div class="w-set"><span>أو اختار وقت تاني</span><input type="time" id="wsTimeCustom" min="07:00" max="22:59" value="' + customVal + '"></div>' +
+      '<div class="w-hint" id="wsHint"></div>' +
       '<div class="w-set"><span>تنبيه لما سلسلتي تكون في خطر</span><input type="checkbox" id="wsStreak"' + (p.streakReminder ? ' checked' : '') + '></div>' +
       '<div class="w-set"><span>تحدي اليوم (كمّل سورتك)</span><input type="checkbox" id="wsDaily"' + (p.dailyChallenge ? ' checked' : '') + '></div>' +
       '<div class="w-set"><span>تنبيهات الترتيب</span><input type="checkbox" id="wsRank"' + (p.rankAlerts ? ' checked' : '') + '></div>' +
       '<button class="w-btn" id="wsSave">حفظ</button><button class="w-btn alt" id="wsX">إغلاق</button>');
+    var selT = curT, hintEl = m.querySelector('#wsHint'), customEl = m.querySelector('#wsTimeCustom');
+    function fmt(v) { var a = String(v).split(':'), h = parseInt(a[0], 10), mm = a[1] || '00'; return ar(h > 12 ? h - 12 : (h === 0 ? 12 : h)) + ':' + ar(mm) + (h >= 12 ? ' م' : ' ص'); }
+    function showHint() {
+      if (selT === 'auto') { var uh = usualHour(load()); hintEl.textContent = uh != null ? 'هيجيلك تقريبًا حوالي ' + fmt(('0' + uh).slice(-2) + ':00') + ' (وقتك المعتاد)' : 'هيجيلك حوالي ٨ م لحد ما التطبيق يتعلّم وقتك المعتاد'; }
+      else hintEl.textContent = 'هيجيلك حوالي ' + fmt(selT);
+    }
+    function mark(v) { [].forEach.call(m.querySelectorAll('.w-chip'), function (b) { b.classList.toggle('on', b.getAttribute('data-v') === v); }); }
+    [].forEach.call(m.querySelectorAll('.w-chip'), function (b) {
+      b.onclick = function () { selT = b.getAttribute('data-v'); mark(selT); customEl.value = (selT === 'auto') ? '' : selT; showHint(); };
+    });
+    customEl.onchange = function () {
+      var v = customEl.value; if (!v) return;
+      var h = parseInt(v.split(':')[0], 10);
+      if (h < 7 || h > 22) { toast('اختار وقت بين ٧ ص و١١ م'); customEl.value = (selT === 'auto') ? '' : selT; return; }
+      selT = v; mark(v); showHint();
+    };
+    showHint();
     m.querySelector('#wsX').onclick = function () { m.remove(); };
     m.querySelector('#wsSave').onclick = function () {
       var ww = load();
-      ww.prefs.notifTime = m.querySelector('#wsTime').value;
+      ww.prefs.notifTime = selT;
       ww.prefs.streakReminder = m.querySelector('#wsStreak').checked;
       ww.prefs.dailyChallenge = m.querySelector('#wsDaily').checked;
       ww.prefs.rankAlerts = m.querySelector('#wsRank').checked;
@@ -396,6 +425,7 @@
       var w = load();
       if (perm === 'granted') {
         w.prefs.enabled = true; save(w); registerPeriodic(); renderCard(); syncCtx(); toast('اتفعّل التذكير 🔔');
+        try { if (window.NourPush) NourNotif.idbGet('ctx').then(function (c) { if (c) NourPush.sync(c, true); }); } catch (e) {}
       } else {
         w.prefs.enabled = false; save(w); renderCard();
         toast('محتاج تسمح بالإشعارات من إعدادات الجهاز');
@@ -433,11 +463,13 @@
       if (rk != null) { if (rr.day !== t) { rr.prev = rr.rank; rr.day = t; } rr.rank = rk; lsSet(rkey, rr); }
       var last = null, lastReached = null;
       Object.keys(w.hist).sort().forEach(function (k) { if (w.hist[k].d > 0) last = k; if (reached(w.hist[k])) lastReached = k; });
-      NourNotif.idbSet('ctx', {
+      var ctxObj = {
         prefs: w.prefs, streak: si.streak, streakLastDay: si.lastDay,
         playedDay: last, doneDay: lastReached, goal: rec ? (rec.g || w.goal) : w.goal, doneToday: rec ? rec.d : 0, rank: rk, prevRank: rr.prev != null ? rr.prev : null,
         surahs: inProgressSurahs().slice(0, 3), usualHour: usualHour(w), updated: Date.now()
-      });
+      };
+      NourNotif.idbSet('ctx', ctxObj);
+      if (window.NourPush) NourPush.sync(ctxObj);   // ★ v122: نسخة للسيرفر (إشعارات FCM)
     } catch (e) {}
   }
 
