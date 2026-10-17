@@ -367,7 +367,7 @@
   // ---------- التذكير ----------
   function openSettings() {
     var w = load(), p = w.prefs;
-    // ★ v121: اختيار الوقت بأزرار جاهزة + وقت مخصّص (من ٧ ص لـ ١٠:٥٩ م) بدل قايمة طويلة
+    // ★ v121: اختيار الوقت بأزرار جاهزة + وقت مخصّص (أي وقت) بدل قايمة طويلة
     var PRESETS = [['auto', '🤖 تلقائي'], ['08:00', '🌅 ٨ ص'], ['13:00', '☀️ ١ ظهرًا'], ['17:00', '🌇 ٥ عصرًا'], ['20:00', '🌙 ٨ م'], ['22:00', '😴 ١٠ م']];
     var curT = (!p.notifTime || p.notifTime === 'auto') ? 'auto' : p.notifTime;
     var isPreset = PRESETS.some(function (x) { return x[0] === curT; });
@@ -377,13 +377,13 @@
     var unsupported = !('Notification' in window);
     var m = modal(
       '<h3>🔔 تذكير الورد</h3>' +
-      '<p>تذكير مخصّص لهدفك وتقدّمك في الورد، بحد أقصى ٤ في الأسبوع، وبيهدى لوحده لو ما فتحتش التطبيق. ومفيش إشعارات بين ١١ م و٧ ص.</p>' +
+      '<p>تذكير مخصّص لهدفك وتقدّمك في الورد، بحد أقصى ٤ في الأسبوع، وبيهدى لوحده لو ما فتحتش التطبيق. في الوضع التلقائي مفيش إشعارات بين ١١ م و٧ ص، ولو اخترت وقت بنفسك بيجيلك فيه بالظبط.</p>' +
       (unsupported ? '<p style="color:#ffb784">المتصفح ده مش بيدعم الإشعارات.</p>' : '') +
       (denied ? '<p style="color:#ffb784">الإشعارات متقفلة من إعدادات المتصفح/التطبيق — فعّلها من هناك الأول.</p>' : '') +
       '<div class="w-set"><span>تفعيل التذكير</span><input type="checkbox" id="wsOn"' + (p.enabled ? ' checked' : '') + '></div>' +
       '<div class="w-lbl">⏰ وقت التذكير</div>' +
       '<div class="w-chips" id="wsChips">' + chips + '</div>' +
-      '<div class="w-set"><span>أو اختار وقت تاني</span><input type="time" id="wsTimeCustom" min="07:00" max="22:59" value="' + customVal + '"></div>' +
+      '<div class="w-set"><span>أو اختار وقت تاني</span><input type="time" id="wsTimeCustom" value="' + customVal + '"></div>' +
       '<div class="w-hint" id="wsHint"></div>' +
       '<div class="w-set"><span>تنبيه لما سلسلتي تكون في خطر</span><input type="checkbox" id="wsStreak"' + (p.streakReminder ? ' checked' : '') + '></div>' +
       '<div class="w-set"><span>تحدي اليوم (كمّل سورتك)</span><input type="checkbox" id="wsDaily"' + (p.dailyChallenge ? ' checked' : '') + '></div>' +
@@ -401,8 +401,6 @@
     });
     customEl.onchange = function () {
       var v = customEl.value; if (!v) return;
-      var h = parseInt(v.split(':')[0], 10);
-      if (h < 7 || h > 22) { toast('اختار وقت بين ٧ ص و١١ م'); customEl.value = (selT === 'auto') ? '' : selT; return; }
       selT = v; mark(v); showHint();
     };
     showHint();

@@ -124,12 +124,13 @@
   // ctx: { rank, prevRank, streak, playedToday, wirdDone, remaining, surahs, prefs, hour, goal, doneToday, usualHour, rankOk }
   function decideNotification(ctx) {
     if (!ctx || !ctx.prefs || !ctx.prefs.enabled) return null;
-    if (isQuietHour(ctx.hour)) return null;
-
     var prefs = ctx.prefs, hour = ctx.hour;
+    // ★ v124: لو المستخدم اختار وقت بنفسه (مش «تلقائي») نحترمه في أي ساعة — الليل الهادي (١١ م–٧ ص) بس للوضع التلقائي
+    var explicit = !!(prefs.notifTime && prefs.notifTime !== 'auto');
+    if (!explicit && isQuietHour(ctx.hour)) return null;
     var startMin = effMin(prefs, ctx.usualHour), start = Math.floor(startMin / 60);
     var nowMin = hour * 60 + (ctx.minute || 0);
-    var inMain = nowMin >= startMin && nowMin <= startMin + WINDOW_H * 60;
+    var inMain = ((nowMin - startMin + 1440) % 1440) <= WINDOW_H * 60;   // ★ v124: بيدعم وقت قبل منتصف الليل بنافذة بتعدّي بعده
     // ★ "خلّص" = حقق هدف الورد (مش بس لعب سؤال). ctx قديم من غير الحقل ده → نرجع للسلوك القديم.
     var finished = (ctx.wirdDone != null) ? ctx.wirdDone : ctx.playedToday;
     var left = ctx.remaining > 0 ? ctx.remaining : 0;
@@ -145,7 +146,7 @@
     }
 
     // 2) خطر انقطاع السلسلة — بس لو السلسلة يومين فأكتر (سلسلة يوم واحد مش تستاهل إزعاج) ومساءً
-    if (prefs.streakReminder && ctx.streak >= 2 && !finished && nowMin >= Math.max(18 * 60, startMin) && hour <= 22) {
+    if (prefs.streakReminder && ctx.streak >= 2 && !finished && nowMin >= Math.max(18 * 60, startMin) && (explicit || hour <= 22)) {
       var streakSurah = (ctx.surahs && ctx.surahs.length) ? ctx.surahs[0].surah : null;
       return {
         tag: 'streak_risk',

@@ -7,8 +7,8 @@
   'use strict';
 
   var FCM_VER = '10.12.0';
-  var MIN_GAP_MS = 10 * 60 * 1000;     // أقل فاصل بين كتابتين للسياق (إلا لو التفضيلات اتغيّرت)
-  var state = { token: null, lastSig: '', lastAt: 0, lastPrefs: '', busy: false };
+  var MIN_GAP_MS = 15 * 1000;          // أقل فاصل بين كتابتين للسياق — قصير عشان السيرفر (بيفحص كل دقيقة) ما يبعتش تذكير بعد ما تخلّص ورددك
+  var state = { token: null, lastSig: '', lastAt: 0, lastPrefs: '', busy: false, timer: null };
 
   function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
   function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
@@ -49,13 +49,18 @@
   // ctx: نفس الكائن اللي wird.js بيكتبه في IndexedDB. force = غصب الكتابة (فتح التطبيق / تغيير التفضيلات)
   function sync(ctx, force) {
     try {
-      if (!ctx || !ctx.prefs || state.busy) return;
+      if (!ctx || !ctx.prefs) return;
+      if (state.busy) { clearTimeout(state.timer); state.timer = setTimeout(function () { sync(ctx, true); }, 1500); return; }
       if (!supported()) return;
       var on = !!ctx.prefs.enabled && Notification.permission === 'granted';
       var sig = JSON.stringify([on, ctx.prefs, ctx.streak, ctx.streakLastDay, ctx.playedDay, ctx.doneDay, ctx.goal, ctx.doneToday, ctx.rank, ctx.prevRank, ctx.usualHour, (ctx.surahs && ctx.surahs[0]) ? ctx.surahs[0].surah + ':' + ctx.surahs[0].nextIdx : '']);
       var now = Date.now();
       if (!force && sig === state.lastSig && now - state.lastAt < 6 * 3600 * 1000) return;     // مفيش جديد
-      if (!force && sig !== state.lastSig && now - state.lastAt < MIN_GAP_MS && JSON.stringify(ctx.prefs) === state.lastPrefs) return;
+      if (!force && sig !== state.lastSig && now - state.lastAt < MIN_GAP_MS) {
+        // لسه بدري على كتابة جديدة → نأجّلها ونبعت آخر حالة بعد الفاصل (عشان آخر تغيير ما يضيعش)
+        clearTimeout(state.timer); state.timer = setTimeout(function () { sync(ctx, true); }, MIN_GAP_MS - (now - state.lastAt) + 200);
+        return;
+      }
       if (!on && !lsGet('nour_push_dev')) return;                                                // عمرنا ما سجّلنا + مقفول → مفيش داعي
       state.busy = true;
       // مفعّل → لازم توكن. مقفول → بنكتب السياق (enabled:false) من غير توكن عشان السيرفر يبطّل يبعت.
