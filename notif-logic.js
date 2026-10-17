@@ -31,6 +31,8 @@
     return hour >= prefHour;
   }
 
+  function ayaW(n) { return (n >= 3 && n <= 10) ? 'آيات' : 'آية'; }
+  function dayW(n) { return (n === 1 || n > 10) ? 'يوم' : 'أيام'; }
   function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
   var MESSAGES = {
@@ -72,62 +74,107 @@
     return { name: s.surah, pct: pct };
   }
 
-  // ctx: { rank, prevRank, streak, playedToday, surahs, prefs, hour }
+  // ★ v117: وقت التذكير الفعّال — اختيار المستخدم، أو «تلقائي» = ساعته المعتادة في اللعب (٢٠ لو لسه معرفناش)
+  var WINDOW_H = 5;   // التذكير العادي بيفضل صالح ٥ ساعات بعد وقته بس (مش لآخر اليوم) عشان ما يجيش في وقت مش مناسب
+  function effHour(prefs, usual) {
+    var t = prefs && prefs.notifTime;
+    if (t && t !== 'auto') { var h = parseInt(String(t).split(':')[0], 10); if (!isNaN(h)) return h; }
+    if (usual != null && usual >= 7 && usual <= 22) return usual;
+    return 20;
+  }
+  function minW(m) { return m <= 1 ? 'دقيقة' : (m === 2 ? 'دقيقتين' : (m <= 10 ? m + ' دقايق' : m + ' دقيقة')); }
+  function effort(left) { return minW(Math.max(1, Math.ceil(left * 20 / 60))); }   // ~٢٠ ثانية للآية الواحدة
+
+  // ★ v118: سطر تشجيعي قصير بيتحط تحت رسالة الإشعار — حسب حالة المستخدم (لسه / في النص / قرّب يخلّص / سلسلة)
+  var CHEERS = {
+    start:   ['ابدأ بسم الله، والباقي يسهل 🤍', 'خطوة النهارده بتفرق 🌙', 'ربنا يفتح عليك 🤍'],
+    mid:     ['كمّل، إنت أقرب مما تتخيّل 💪', 'شغل جميل لحد دلوقتي ✨', 'ربنا يبارك فيك 🤍'],
+    almost:  ['آخر خطوة، تقبّل الله منك 🤍', 'خلّصها وارتاح 🏁', 'قربت جدًا 🌟'],
+    big:     ['القليل الدائم خير من الكثير المنقطع 🤍', 'وزّعه على اليوم وهيعدّي بسهولة 🌙'],
+    streak:  ['سلسلتك تستاهل تكمل 🔥', 'الاستمرار هو السر 🤍', 'يوم كمان وتفرح بنفسك ✨']
+  };
+  function cheer(kind) { return '\n' + pick(CHEERS[kind] || CHEERS.start); }
+
+  // رسالة تحدي اليوم حسب هدف الورد وتقدّم المستخدم النهارده
+  function dailyMessage(c, s, left) {
+    var goal = c.goal || 0, done = c.doneToday || 0;
+    if (!goal || c.wirdDone == null) return { title: pick(MESSAGES.daily.titles), body: pick(MESSAGES.daily.bodies)(c, s) };
+    if (done > 0 && left > 0 && left <= 3) {
+      return { title: '🏁 قربت تخلّص وردك', body: 'باقي ' + (left === 1 ? 'آية واحدة' : left + ' ' + ayaW(left)) + ' وتتم وردك النهارده ✅ — كمّل في سورة ' + s.name + cheer('almost') };
+    }
+    if (done > 0 && left > 0) {
+      return { title: '🌙 كمّل وردك', body: 'عملت ' + done + ' من ' + goal + ' — باقي ' + left + ' ' + ayaW(left) + ' (حوالي ' + effort(left) + ') في سورة ' + s.name + cheer('mid') };
+    }
+    if (goal >= 20) {
+      var half = Math.ceil(goal / 2);
+      return { title: '✨ وردك النهارده كبير', body: 'هدفك ' + goal + ' ' + ayaW(goal) + ' — ابدأ بنصفه (' + half + ') دلوقتي وكمّل بعدين، في سورة ' + s.name + cheer('big') };
+    }
+    return { title: '📖 وردك النهارده', body: 'هدفك ' + goal + ' ' + ayaW(goal) + ' — حوالي ' + effort(goal) + ' بس، في سورة ' + s.name + ' 🌙' + cheer('start') };
+  }
+
+  // ctx: { rank, prevRank, streak, playedToday, wirdDone, remaining, surahs, prefs, hour, goal, doneToday, usualHour, rankOk }
   function decideNotification(ctx) {
     if (!ctx || !ctx.prefs || !ctx.prefs.enabled) return null;
     if (isQuietHour(ctx.hour)) return null;
-    if (!isPreferredHour(ctx.hour, ctx.prefs.notifTime)) return null;
 
-    var prefs = ctx.prefs;
+    var prefs = ctx.prefs, hour = ctx.hour;
+    var start = effHour(prefs, ctx.usualHour);
+    var inMain = hour >= start && hour <= start + WINDOW_H;
+    // ★ "خلّص" = حقق هدف الورد (مش بس لعب سؤال). ctx قديم من غير الحقل ده → نرجع للسلوك القديم.
+    var finished = (ctx.wirdDone != null) ? ctx.wirdDone : ctx.playedToday;
+    var left = ctx.remaining > 0 ? ctx.remaining : 0;
+    var rankOk = ctx.rankOk !== false;   // تنبيهات الترتيب بحد أقصى مرة كل ٣ أيام
 
     // 1) تراجع واضح في الترتيب
-    if (prefs.rankAlerts && ctx.rank != null && ctx.prevRank != null) {
+    if (inMain && rankOk && prefs.rankAlerts && ctx.rank != null && ctx.prevRank != null) {
       var droppedOutTop10 = ctx.prevRank <= 10 && ctx.rank > 10;
       var droppedALot = (ctx.rank - ctx.prevRank) >= 3;
       if (droppedOutTop10 || droppedALot) {
-        return {
-          tag: 'rank_drop',
-          title: pick(MESSAGES.rankDrop.titles),
-          body: pick(MESSAGES.rankDrop.bodies)(ctx),
-          data: { deeplink: 'leaderboard' }
-        };
+        return { tag: 'rank_drop', title: pick(MESSAGES.rankDrop.titles), body: pick(MESSAGES.rankDrop.bodies)(ctx), data: { deeplink: 'leaderboard' } };
       }
     }
 
-    // 2) خطر انقطاع السلسلة (مساءً ولسه ما لعبش النهارده)
-    if (prefs.streakReminder && ctx.streak > 0 && !ctx.playedToday && ctx.hour >= 18) {
-      // ★ لو معاه سورة شغال عليها دلوقتي، الديب لينك يوديه يكمّل فيها مباشرة
+    // 2) خطر انقطاع السلسلة — بس لو السلسلة يومين فأكتر (سلسلة يوم واحد مش تستاهل إزعاج) ومساءً
+    if (prefs.streakReminder && ctx.streak >= 2 && !finished && hour >= Math.max(18, start) && hour <= 22) {
       var streakSurah = (ctx.surahs && ctx.surahs.length) ? ctx.surahs[0].surah : null;
       return {
         tag: 'streak_risk',
         title: pick(MESSAGES.streakRisk.titles),
-        body: pick(MESSAGES.streakRisk.bodies)(ctx),
+        body: left > 0 ? ('باقي ' + left + ' ' + ayaW(left) + ' بس على وردك (حوالي ' + effort(left) + ') وسلسلتك (' + ctx.streak + ' ' + dayW(ctx.streak) + ') تفضل مكملة 🔥' + cheer('streak')) : pick(MESSAGES.streakRisk.bodies)(ctx) + cheer('streak'),
         data: streakSurah ? { deeplink: 'surah', surah: streakSurah } : { deeplink: 'home' }
       };
     }
 
-    // 3) تحدي اليوم المخصص بالسورة اللي بيحفظها دلوقتي
-    if (prefs.dailyChallenge && !ctx.playedToday && ctx.surahs && ctx.surahs.length) {
+    // 3) تحدي اليوم المخصص بهدفه وتقدّمه والسورة اللي بيحفظها دلوقتي
+    if (inMain && prefs.dailyChallenge && !finished && ctx.surahs && ctx.surahs.length) {
       var sInfo = buildSurahInfo(ctx.surahs[0]);
-      return {
-        tag: 'daily_challenge',
-        title: pick(MESSAGES.daily.titles),
-        body: pick(MESSAGES.daily.bodies)(ctx, sInfo),
-        data: { deeplink: 'surah', surah: sInfo.name }
-      };
+      var dm = dailyMessage(ctx, sInfo, left);
+      return { tag: 'daily_challenge', title: dm.title, body: dm.body, data: { deeplink: 'surah', surah: sInfo.name } };
     }
 
-    // 4) تشجيع على الحفاظ على ترتيب عالي (بس لو مفيش حاجة أهم تتقال)
-    if (prefs.rankAlerts && ctx.rank != null && ctx.rank <= 10 && ctx.prevRank != null && ctx.rank <= ctx.prevRank) {
-      return {
-        tag: 'rank_hold',
-        title: pick(MESSAGES.rankHold.titles),
-        body: pick(MESSAGES.rankHold.bodies)(ctx),
-        data: { deeplink: 'leaderboard' }
-      };
+    // 4) تشجيع الترتيب العالي — بس لو لسه ما خلّصش ورده (مش بعد ما يخلّص) ومفيش حاجة أهم
+    if (inMain && rankOk && !finished && prefs.rankAlerts && ctx.rank != null && ctx.rank <= 10 && ctx.prevRank != null && ctx.rank <= ctx.prevRank) {
+      return { tag: 'rank_hold', title: pick(MESSAGES.rankHold.titles), body: pick(MESSAGES.rankHold.bodies)(ctx), data: { deeplink: 'leaderboard' } };
     }
 
     return null;
+  }
+
+  // ★ v117: الكبح الذكي — بيمنع الإزعاج:
+  //  • مفيش إشعار لو المستخدم فاتح التطبيق من أقل من ساعتين
+  //  • لو آخر إشعارات اتجاهلت (من غير ما يفتح التطبيق) نفرّق المسافة: ٢ ← ٣ ← ٥ ← ٧ ← ١٤ يوم
+  //  • حد أقصى ٤ إشعارات في الأسبوع
+  // st: { last, lastOpen, ignored, log:[timestamps] } — بيرجّع { ok, ignored }
+  function throttle(st, now) {
+    st = st || {};
+    var last = st.last || 0, lastOpen = st.lastOpen || 0;
+    var ig = (last && lastOpen <= last) ? (st.ignored || 0) + 1 : 0;
+    if (lastOpen && now - lastOpen < 2 * 3600000) return { ok: false, ignored: ig };
+    var gapDays = ig === 0 ? COOLDOWN_MS / 86400000 : (ig === 1 ? 2 : (ig === 2 ? 3 : (ig === 3 ? 5 : (ig < 8 ? 7 : 14))));
+    if (last && now - last < gapDays * 86400000) return { ok: false, ignored: ig };
+    var recent = (st.log || []).filter(function (t) { return now - t < 7 * 86400000; });
+    if (recent.length >= 4) return { ok: false, ignored: ig };
+    return { ok: true, ignored: ig };
   }
 
   // ---------- IndexedDB storage (متاحة في الصفحة وفي الـ Service Worker) ----------
@@ -148,8 +195,8 @@
       return new Promise(function (resolve, reject) {
         var tx = db.transaction(STORE, 'readonly');
         var r = tx.objectStore(STORE).get(key);
-        r.onsuccess = function () { resolve(r.result); };
-        r.onerror = function () { reject(r.error); };
+        r.onsuccess = function () { resolve(r.result); try { db.close(); } catch (e) {} };   // ★ قفل الاتصال (كان بيتراكم مع كل قراءة)
+        r.onerror = function () { reject(r.error); try { db.close(); } catch (e) {} };
       });
     });
   }
@@ -159,17 +206,72 @@
       return new Promise(function (resolve, reject) {
         var tx = db.transaction(STORE, 'readwrite');
         tx.objectStore(STORE).put(value, key);
-        tx.oncomplete = function () { resolve(); };
-        tx.onerror = function () { reject(tx.error); };
+        tx.oncomplete = function () { resolve(); try { db.close(); } catch (e) {} };
+        tx.onerror = function () { reject(tx.error); try { db.close(); } catch (e) {} };
       });
     });
   }
+
+  // ---------- فحص مشترك: بيشتغل في الـ Service Worker (periodicsync) وفي الصفحة (لو مخفية) ----------
+  function dayKey(d) {
+    return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+  }
+
+  // ctx بتكتبه الصفحة في IndexedDB تحت المفتاح 'ctx' (wird.js → syncCtx)
+  function runCheck() {
+    return Promise.all([idbGet('ctx'), idbGet('lastNotifAt'), idbGet('lastOpenAt'), idbGet('ignored'), idbGet('sentLog'), idbGet('lastRankAt')]).then(function (r) {
+      var c = r[0], last = r[1] || 0, lastOpen = r[2] || 0, ignoredStored = r[3] || 0, log = Array.isArray(r[4]) ? r[4] : [], lastRankAt = r[5] || 0;
+      if (!c || !c.prefs || !c.prefs.enabled) return null;
+      var nowMs = Date.now();
+      var th = throttle({ last: last, lastOpen: lastOpen, ignored: ignoredStored, log: log }, nowMs);
+      if (!th.ok) return null;
+      var now = new Date();
+      var today = dayKey(now), yest = dayKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 12));
+      var streak = (c.streakLastDay === today || c.streakLastDay === yest) ? (c.streak || 0) : 0;
+      // ★ الورد: اتحقق النهارده؟ وباقي كام آية (الأرقام بتتحسب بس لو آخر لعب كان النهارده، غير كده الهدف كامل)
+      var hasWird = ('doneDay' in c);
+      var doneNow = (c.playedDay === today) ? (c.doneToday || 0) : 0;
+      var n = decideNotification({
+        rank: c.rank, prevRank: c.prevRank, streak: streak,
+        playedToday: c.playedDay === today, surahs: c.surahs || [],
+        wirdDone: hasWird ? (c.doneDay === today) : null,
+        remaining: hasWird ? Math.max(0, (c.goal || 0) - doneNow) : 0,
+        goal: c.goal || 0, doneToday: doneNow, usualHour: (c.usualHour != null ? c.usualHour : null),
+        rankOk: (nowMs - lastRankAt) > 3 * 86400000,
+        prefs: c.prefs, hour: now.getHours()
+      });
+      if (!n) return null;
+      var regP = root.registration ? Promise.resolve(root.registration)
+               : (root.navigator && navigator.serviceWorker ? navigator.serviceWorker.ready : Promise.resolve(null));
+      return regP.then(function (reg) {
+        if (!reg) return null;
+        var base = (reg.scope || '/nourquran/');
+        return reg.showNotification(n.title, {
+          body: n.body, tag: n.tag, dir: 'rtl', lang: 'ar',
+          icon: base + 'icon-192.png', badge: base + 'icon-192.png',
+          data: n.data, renotify: false
+        });
+      }).then(function () {
+        var keep = log.filter(function (t) { return nowMs - t < 7 * 86400000; }); keep.push(nowMs);
+        var jobs = [idbSet('lastNotifAt', nowMs), idbSet('ignored', th.ignored), idbSet('sentLog', keep)];
+        if (n.tag === 'rank_drop' || n.tag === 'rank_hold') jobs.push(idbSet('lastRankAt', nowMs));
+        return Promise.all(jobs);
+      }).then(function () { return n; });
+    }).catch(function () { return null; });
+  }
+
+  function markOpen() { return idbSet('lastOpenAt', Date.now()).catch(function () {}); }
 
   root.NourNotif = {
     COOLDOWN_MS: COOLDOWN_MS,
     isQuietHour: isQuietHour,
     isPreferredHour: isPreferredHour,
     decideNotification: decideNotification,
+    throttle: throttle,
+    effHour: effHour,
+    markOpen: markOpen,
+    runCheck: runCheck,
+    dayKey: dayKey,
     idbGet: idbGet,
     idbSet: idbSet
   };

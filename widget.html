@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ورد نور</title>
+<meta name="theme-color" content="#1A1208">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="ورد نور">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest-widget.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+  :root{--bg:#1A1208;--gold:#C9973A;--gold-l:#F5D98B;--green:#2EAF78;--mint:#7DFFC9}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%}
+  body{background:radial-gradient(120% 80% at 50% 0%,#2a1c0c 0%,var(--bg) 70%);font-family:"Cairo",system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif;color:#fff;display:flex;align-items:center;justify-content:center;padding:16px;padding-top:max(16px,env(safe-area-inset-top))}
+  a.w{display:flex;align-items:center;gap:14px;width:100%;max-width:340px;padding:14px 16px;border-radius:26px;text-decoration:none;color:inherit;background:linear-gradient(145deg,rgba(201,151,58,.18),rgba(27,107,74,.2));border:1px solid rgba(201,151,58,.35);box-shadow:0 10px 30px rgba(0,0,0,.35);transition:border-color .4s,background .4s}
+  a.w.done{border-color:rgba(125,255,201,.45);background:linear-gradient(145deg,rgba(46,175,120,.24),rgba(201,151,58,.1))}
+  a.w:active{transform:scale(.98)}
+  .ring{position:relative;width:68px;height:68px;flex:none}
+  .ring svg{width:100%;height:100%;transform:rotate(-90deg)}
+  .ring circle{fill:none;stroke-width:10;stroke-linecap:round}
+  .ring .bg{stroke:rgba(255,255,255,.1)}
+  .ring .fg{stroke:url(#g);transition:stroke-dashoffset .7s cubic-bezier(.3,.7,.2,1)}
+  .ring b{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:900}
+  .done .ring b{color:var(--mint)}
+  .txt{flex:1;min-width:0}
+  .t1{font-size:17px;font-weight:800;line-height:1.35}
+  .done .t1{color:var(--mint)}
+  .t2{margin-top:3px;font-size:13px;color:rgba(245,217,139,.8)}
+  .go{width:44px;height:44px;flex:none;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:17px;background:linear-gradient(135deg,#C9973A,#E8B84B);color:#1A1208;box-shadow:0 3px 10px rgba(201,151,58,.3)}
+  .done .go{background:rgba(255,255,255,.08);border:1px solid rgba(245,217,139,.35);color:var(--gold-l);box-shadow:none}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<a class="w" id="w" href="./?dl=wird" aria-live="polite">
+  <div class="ring" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+    <svg viewBox="0 0 100 100" aria-hidden="true"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2EAF78"/><stop offset="1" stop-color="#F5D98B"/></linearGradient></defs>
+      <circle class="bg" cx="50" cy="50" r="40"/><circle class="fg" id="fg" cx="50" cy="50" r="40" stroke-dasharray="251.33" stroke-dashoffset="251.33"/></svg>
+    <b id="num">٠</b>
+  </div>
+  <div class="txt"><div class="t1" id="t1">وردك اليوم</div><div class="t2" id="t2"></div></div>
+  <div class="go" id="go">▶</div>
+</a>
+<script>
+(function () {
+  'use strict';
+  var C = 251.33, KEY = 'nour_widget_snap';
+  function ar(n) { return String(n).replace(/\d/g, function (d) { return '٠١٢٣٤٥٦٧٨٩'[d]; }); }
+  function dk(d) { return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
+  function ayah(n) { return (n >= 3 && n <= 10) ? 'آيات' : 'آية'; }
+  function dayW(n) { return (n === 1 || n > 10) ? 'يوم' : 'أيام'; }
+  function el(id) { return document.getElementById(id); }
+
+  function render() {
+    var s = null; try { s = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) {}
+    var now = new Date(), today = dk(now), yest = dk(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 12));
+    var d = 0, g = 10, streak = 0;
+    if (s) {
+      g = s.g || 10;
+      if (s.day === today) d = s.d || 0;
+      streak = (s.lastDay === today || s.lastDay === yest) ? (s.streak || 0) : 0;
+    }
+    var done = !!s && d >= g, pct = Math.min(100, Math.round(d / g * 100));
+    el('w').className = 'w' + (done ? ' done' : '');
+    el('num').textContent = done ? '✓' : ar(d);
+    el('fg').style.strokeDashoffset = C * (1 - pct / 100);
+    el('go').textContent = done ? '＋' : '▶';
+    el('t1').textContent = !s ? 'افتح نور أولاً' : done ? 'أتممت وردك ✅' : d === 0 ? 'ابدأ وردك · ' + ar(g) + ' ' + ayah(g) : 'باقي ' + ar(g - d) + ' ' + ayah(g - d);
+    el('t2').textContent = !s ? 'سجّل دخولك مرة وهيظهر تقدمك هنا' : streak > 0 ? '🔥 سلسلة ' + ar(streak) + ' ' + dayW(streak) : 'ابدأ سلسلتك النهارده';
+    document.querySelector('.ring').setAttribute('aria-valuenow', pct);
+  }
+  render();
+  window.addEventListener('storage', function (e) { if (e.key === KEY) render(); });
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) render(); });
+  window.addEventListener('focus', render);
+  setInterval(render, 30000);
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(function () {});
+})();
+</script>
+</body>
+</html>
