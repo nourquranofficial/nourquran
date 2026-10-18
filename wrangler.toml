@@ -1,0 +1,15 @@
+# Worker إشعارات "نور" (Cron + FCM) — بيشتغل كل دقيقة (الإشعار بيوصل في دقته) على الخطة المجانية من غير كارت
+name = "nour-push"
+main = "nour-push-worker.js"
+compatibility_date = "2025-01-01"
+
+[triggers]
+crons = ["* * * * *"]
+
+[vars]
+FIREBASE_DB_URL = "https://nourquran-9cb63-default-rtdb.europe-west1.firebasedatabase.app"
+SITE_BASE = "/nourquran/"
+
+# الأسرار (مش بتتكتب هنا — بتتضاف بالأوامر):
+#   npx wrangler secret put FIREBASE_SERVICE_ACCOUNT   ← الصق محتوى ملف الـ JSON كامل
+#   npx wrangler secret put ADMIN_KEY                  ← (اختياري) كلمة سر لاختبار /test يدويًا
