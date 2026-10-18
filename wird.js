@@ -388,6 +388,8 @@
       '<div class="w-set"><span>تنبيه لما سلسلتي تكون في خطر</span><input type="checkbox" id="wsStreak"' + (p.streakReminder ? ' checked' : '') + '></div>' +
       '<div class="w-set"><span>تحدي اليوم (كمّل سورتك)</span><input type="checkbox" id="wsDaily"' + (p.dailyChallenge ? ' checked' : '') + '></div>' +
       '<div class="w-set"><span>تنبيهات الترتيب</span><input type="checkbox" id="wsRank"' + (p.rankAlerts ? ' checked' : '') + '></div>' +
+      '<button class="w-btn alt" id="wsDiagBtn" type="button">🩺 فحص الإشعارات / تجربة</button>' +
+      '<div id="wsDiag" style="display:none;white-space:pre-wrap;direction:rtl;text-align:right;font-size:12px;line-height:1.9;background:rgba(0,0,0,.25);border-radius:10px;padding:10px;margin:8px 0;max-height:220px;overflow:auto"></div>' +
       '<button class="w-btn" id="wsSave">حفظ</button><button class="w-btn alt" id="wsX">إغلاق</button>');
     var selT = curT, hintEl = m.querySelector('#wsHint'), customEl = m.querySelector('#wsTimeCustom');
     function fmt(v) { var a = String(v).split(':'), h = parseInt(a[0], 10), mm = a[1] || '00'; return ar(h > 12 ? h - 12 : (h === 0 ? 12 : h)) + ':' + ar(mm) + (h >= 12 ? ' م' : ' ص'); }
@@ -405,6 +407,11 @@
     };
     showHint();
     m.querySelector('#wsX').onclick = function () { m.remove(); };
+    m.querySelector('#wsDiagBtn').onclick = function () {
+      var box = m.querySelector('#wsDiag'); box.style.display = 'block'; box.textContent = '⏳ بنفحص…\n';
+      if (!window.NourPush) { box.textContent += '❌ push.js مش متحمّل — التطبيق على نسخة قديمة'; return; }
+      NourPush.diagnose(function (ok, txt) { box.textContent += (ok === true ? '✅ ' : (ok === false ? '❌ ' : 'ℹ️ ')) + txt + '\n'; box.scrollTop = box.scrollHeight; });
+    };
     m.querySelector('#wsSave').onclick = function () {
       var ww = load();
       ww.prefs.notifTime = selT;

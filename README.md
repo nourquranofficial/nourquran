@@ -1,46 +1,76 @@
-# إشعارات نور من السيرفر (Cloudflare Cron + FCM)
+# 🌙 نور — الموقع الرسمي لحفظ القرآن الكريم
 
-الـ Worker ده بيشتغل كل دقيقة (مجاني، من غير كارت) فالإشعار بيوصل في دقته تقريبًا وبيبعت الإشعارات للأجهزة حتى والتطبيق مقفول.
-بيستخدم **نفس منطق `notif-logic.js`** (الأوقات، الليل الهادي، الكبح الذكي) فأي تعديل في النصوص بيتطبق هنا والتطبيق مرة واحدة.
+> **الموقع الرسمي الوحيدhttps://nourquranofficial.github.io/nourquran//
+---
 
-## الإعداد (مرة واحدة)
+## ⚠️ تنبيه مهم
 
-### ١) Firebase
-1. **Project settings ← Cloud Messaging ← Web Push certificates ← Generate key pair** → انسخ المفتاح العام وحطه في `index.html`:
-   `window.NOUR_VAPID_KEY = '...';`
-2. تأكد إن **Firebase Cloud Messaging API (V1)** مفعّل (Project settings ← Cloud Messaging).
-3. **Project settings ← Service accounts ← Generate new private key** → هينزل ملف JSON. **متحطوش في الريبو ولا في الكود.**
-4. **Realtime Database ← Rules**: ضيف القاعدة دي جنب باقي القواعد (الـ Worker بيقرا ويكتب بصلاحية الـ Service Account فمش محتاج قواعد):
-```json
-"pushDevices": {
-  ".read": false,
-  "$deviceId": {
-    ".write": "auth != null",
-    "token": { ".validate": "newData.isString() && newData.val().length < 400" },
-    "srv": { ".write": false }
-  }
-}
-```
+هذا هو **المستودع الرسمي الوحيد** لتطبيق نور.  
+أي نسخ أخرى على GitHub أو أي منصة أخرى (مثل `nourquran.github.io/nour`) **ليست رسمية** وتم رفعها بدون إذن صاحب المشروع.
 
-### ٢) Cloudflare (من فولدر `push-worker`)
-```bash
-npx wrangler login
-npx wrangler secret put FIREBASE_SERVICE_ACCOUNT   # الصق محتوى ملف الـ JSON كامل
-npx wrangler secret put ADMIN_KEY                  # أي كلمة سر طويلة (لاختبار /test)
-npx wrangler deploy
-```
-الـ Cron بيتفعّل تلقائيًا من `wrangler.toml` (`* * * * *`).
+> **IMPORTANT:** This is the only official repository for the Nour Quran app.  
+> Any other copies on GitHub Pages or elsewhere (e.g. `nourquran.github.io/nour`) are **unauthorized** and were uploaded without the developer's permission.
 
-### ٣) اختبار
-فعّل التذكير في التطبيق (الورد ← 🔔) ثم:
-```bash
-curl -X POST https://nour-push.<حسابك>.workers.dev/test -H "X-Admin-Key: <ADMIN_KEY>"   # إشعار تجريبي فوري
-curl -X POST https://nour-push.<حسابك>.workers.dev/dry-run -H "X-Admin-Key: <ADMIN_KEY>" # مين هيوصله إشعار دلوقتي (من غير إرسال)
-```
-اللوج المباشر: `npx wrangler tail`.
+---
 
-## ملاحظات
-- الخطة المجانية: ٥٠ طلب خارجي للتشغيلة → الـ Worker بيبعت ٣٨ إشعار كحد أقصى كل تشغيلة والباقي بيكمل في اللي بعدها.
-- لو التطبيق مسجّل توكن شغّال، الفحص المحلي بيسكت تلقائيًا (مفيش تكرار). لو التوكن ما اتجدّدش ٣ أيام يرجع الفحص المحلي كاحتياطي.
-- توكن منتهي أو جهاز مقفول من ٦٠ يوم بيتمسح تلقائيًا.
-- كل تشغيلة بتقرا قائمة الأجهزة من Realtime Database (حوالي ١ كيلوبايت للجهاز). حصة الخطة المجانية (١٠ جيجا/شهر) تكفي لحوالي ٣٠٠ جهاز؛ لو زادوا عن كده نضيف فهرس ونقرا اللي محتاج بس.
+## 📖 عن التطبيق
+
+**نور** هو تطبيق ويب مجاني لحفظ القرآن الكريم ومراجعته بطريقة تفاعلية وممتعة.
+
+### ✨ المميزات
+
+- 🎯 **تحدي الحفظ** — اختبر نفسك في آيات القرآن الكريم بأساليب متنوعة
+- 📖 **مراجعة السور** — راجع ما حفظته سورة بسورة أو جزءاً بجزء
+- 🎮 **تحدي الأصدقاء** — العب مع أصدقائك أونلاين حتى ٨ لاعبين في نفس الوقت
+- 🏆 **لوحة الشرف** — تنافس مع المستخدمين الآخرين
+- 🔥 **تتبع التقدم** — متابعة يومية لرحلة حفظك
+- 🌙 **الورد اليومي** — هدف يومي (٥/١٠/٢٠/٤٠ آية) + سلسلة أيام + تذكير ذكي + مشاركة الأجر
+- 📖 **معنى الآية** (التفسير الميسّر — مجمع الملك فهد) بعد كل إجابة، و🎧 **٨ قرّاء** مع تكرار ×٣ وتحكم في السرعة
+- 💯 **مجاني بالكامل** — لا إعلانات، لا اشتراكات
+
+---
+
+## 🌐 الرابط الرسمية
+
+| المنصة | الرابط |
+| Github (مرآة رسمية) | [[](https://nourquranofficial.github.io/](https://nourquranofficial.github.io/nour/))) |
+
+---
+
+## 🛠️ التقنيات المستخدمة
+
+- **HTML / CSS / JavaScript** — Vanilla, بدون frameworks
+- **Firebase Realtime Database** — اللعب الجماعي والـ Leaderboard
+- **Firebase Authentication** — Anonymous auth للاعبين
+- **Google Fonts** — Cairo & Amiri
+- **Schema.org Structured Data** — SEO متقدم
+
+---
+
+## 🔊 مصادر البيانات والصوت وتراخيصها
+
+| المصدر | الاستخدام | ملاحظات |
+|---|---|---|
+| [everyayah.com](https://everyayah.com) | تلاوات الآيات (العفاسي وباقي القرّاء) | الصوت مقدَّم من الموقع ويُبثّ منه مباشرة، وحقوق التلاوات لأصحابها |
+| نص المصحف (`quran-local.js`) | نص الآيات بالرسم العثماني | مخزَّن محليًا في الجهاز ليعمل بدون إنترنت |
+| تفسير ميسَّر (مجمع الملك فهد) | زر «معنى الآية» | يُجلب عند الطلب ويُخزَّن في الجهاز؛ حقوق التفسير لأصحابها |
+| Firebase | الحسابات والترتيب واللعب الجماعي | بيانات المستخدم محفوظة في حسابه |
+| Cloudflare Workers AI (اختياري) | تحويل الصوت لنص في التسميع | يُفعَّل بـ `window.NOUR_STT_URL`، ويُرسل مقاطع صوتية قصيرة فقط |
+
+---
+
+## 📜 الترخيص والملكية
+
+جميع حقوق الملكية الفكرية لهذا المشروع محفوظة لصاحبه.  
+لا يجوز إعادة نشر الكود أو رفعه على أي منصة أخرى بدون إذن صريح.
+
+All intellectual property rights are reserved.  
+Redistribution or re-hosting of this code without explicit permission is not allowed.
+
+---
+
+## 🤍 صدقة جارية
+
+> «خَيْرُكُمْ مَنْ تَعَلَّمَ الْقُرْآنَ وَعَلَّمَهُ»
+
+هذا التطبيق صدقة جارية لكل من يستخدمه لحفظ كتاب الله 🤍

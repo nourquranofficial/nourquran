@@ -472,6 +472,27 @@ async function testPush(env, deviceId) {
   return out;
 }
 
+// ★ v126: اختبار ذاتي من التطبيق — بيبعت إشعار تجريبي لجهاز واحد بس (المعرّف العشوائي بتاعه هو الإذن) مع حد ١ كل ٢٠ ثانية
+async function selfTest(env, req) {
+  const origin = req.headers.get('Origin') || '';
+  const allowed = String(env.ALLOWED_ORIGINS || 'https://nourquranofficial.github.io').split(',').map((x) => x.trim());
+  const ok = allowed.includes(origin) || /^http:\/\/localhost(:\d+)?$/.test(origin);
+  const h = { 'Access-Control-Allow-Origin': ok ? origin : allowed[0], 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type', 'Vary': 'Origin', 'Content-Type': 'application/json', 'Cache-Control': 'no-store' };
+  const out = (o, st) => new Response(JSON.stringify(o), { status: st || 200, headers: h });
+  if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: h });
+  if (req.method !== 'POST' || !ok) return out({ error: 'forbidden' }, 403);
+  let id = ''; try { id = String((await req.json()).device || ''); } catch (e) {}
+  if (!/^[a-z0-9]{16,64}$/.test(id)) return out({ error: 'BAD_DEVICE' }, 400);
+  const sa = parseSA(env), token = await getAccessToken(sa);
+  const d = await dbGet(env, token, 'pushDevices/' + id);
+  if (!d || !d.token) return out({ error: 'الجهاز مش مسجّل في pushDevices (التسجيل لسه ما تمّش)' }, 404);
+  const now = Date.now();
+  if (d.srv && d.srv.lastTestAt && now - d.srv.lastTestAt < 20000) return out({ error: 'استنى ٢٠ ثانية بين كل تجربة' }, 429);
+  const r = await sendFcm(sa, token, d.token, { tag: 'nour_test', title: '🔔 اختبار إشعارات نور', body: 'لو شايف الرسالة دي يبقى الإشعار من السيرفر شغّال ✅', data: { deeplink: 'home' } }, env.SITE_BASE || '/nourquran/');
+  await dbMultiUpdate(env, token, r.dead ? { ['pushDevices/' + id]: null } : { ['pushDevices/' + id + '/srv/lastTestAt']: now });
+  return out(r.ok ? { ok: true } : { ok: false, error: 'FCM ' + r.status + ' ' + (r.msg || ''), dead: !!r.dead }, r.ok ? 200 : 502);
+}
+
 export default {
   async scheduled(event, env, ctx) {
     ctx.waitUntil(run(env).then((s) => console.log('nour-push', JSON.stringify(s))).catch((e) => console.error('nour-push FAILED:', e && e.message)));
@@ -479,6 +500,7 @@ export default {
   async fetch(req, env) {
     const url = new URL(req.url);
     const json = (o, s) => new Response(JSON.stringify(o), { status: s || 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
+    if (url.pathname === '/self-test') { try { return await selfTest(env, req); } catch (e) { return json({ error: String(e && e.message) }, 500); } }
     if (url.pathname === '/' || url.pathname === '/health') return json({ ok: true, service: 'nour-push' });
     const authed = env.ADMIN_KEY && req.headers.get('X-Admin-Key') === env.ADMIN_KEY;
     if (!authed) return json({ error: 'unauthorized' }, 401);

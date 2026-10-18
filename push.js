@@ -8,7 +8,7 @@
 
   var FCM_VER = '10.12.0';
   var MIN_GAP_MS = 15 * 1000;          // أقل فاصل بين كتابتين للسياق — قصير عشان السيرفر (بيفحص كل دقيقة) ما يبعتش تذكير بعد ما تخلّص ورددك
-  var state = { token: null, lastSig: '', lastAt: 0, lastPrefs: '', busy: false, timer: null };
+  var state = { lastErr: '', token: null, lastSig: '', lastAt: 0, lastPrefs: '', busy: false, timer: null };
 
   function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
   function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
@@ -43,7 +43,7 @@
         return m.getToken(m.getMessaging(window._fbApp), { vapidKey: window.NOUR_VAPID_KEY, serviceWorkerRegistration: reg });
       });
     }).then(function (t) { state.token = t || null; return state.token; })
-      .catch(function (e) { console.warn('push.getToken', e && e.message); return null; });
+      .catch(function (e) { state.lastErr = (e && (e.code || e.message)) || String(e); console.warn('push.getToken', state.lastErr); return null; });
   }
 
   // ctx: نفس الكائن اللي wird.js بيكتبه في IndexedDB. force = غصب الكتابة (فتح التطبيق / تغيير التفضيلات)
@@ -89,11 +89,64 @@
     };
   }
 
+
+  // ★ v126: فحص خطوة بخطوة لحد ما نعرف الإشعارات واقفة فين — بيشتغل من زرار في إعدادات التذكير
+  //   say(ok, نص) بيتنادى لكل خطوة (ok: true ✅ / false ❌ / null ℹ️)
+  function diagnose(say) {
+    var steps = Promise.resolve();
+    function step(fn) { steps = steps.then(fn).catch(function (e) { say(false, 'خطأ غير متوقع: ' + ((e && (e.code || e.message)) || e)); }); }
+    step(function () { say(null, 'نسخة التطبيق: ' + (window.NOUR_VERSION || '؟')); });
+    step(function () {
+      say('Notification' in window, 'المتصفح بيدعم الإشعارات');
+      say('serviceWorker' in navigator, 'Service Worker مدعوم');
+      say('PushManager' in window, 'Push مدعوم' + (('PushManager' in window) ? '' : ' (على الآيفون لازم التطبيق يكون مثبّت على الشاشة الرئيسية)'));
+      say(!!window.NOUR_VAPID_KEY, 'مفتاح VAPID موجود');
+      say(!!window._fbApp && typeof window.fbSavePush === 'function', 'Firebase جاهز');
+      var u = window._firebaseAuth && window._firebaseAuth.currentUser;
+      say(!!u, 'تسجيل الدخول في Firebase' + (u ? (u.isAnonymous ? ' (مجهول)' : '') : ' — لسه ما اتسجّلش، استنى ثواني وجرّب تاني'));
+      say(window.Notification && Notification.permission === 'granted', 'إذن الإشعارات: ' + (window.Notification ? Notification.permission : '؟') + (window.Notification && Notification.permission !== 'granted' ? ' — فعّله من إعدادات الجهاز/المتصفح' : ''));
+    });
+    step(function () {
+      return Promise.race([navigator.serviceWorker.ready, new Promise(function (r) { setTimeout(function () { r(null); }, 6000); })]).then(function (reg) {
+        say(!!reg, 'Service Worker شغّال' + (reg ? ' (' + (reg.scope || '') + ')' : ' — ما جهّزش في ٦ ثواني'));
+      });
+    });
+    step(function () {
+      if (!supported() || Notification.permission !== 'granted') { say(false, 'مش هنكمل لتوكن FCM — الشروط اللي فوق لازم تكون ✅ الأول'); return; }
+      state.token = null; state.lastErr = '';
+      return getToken().then(function (t) {
+        say(!!t, t ? 'توكن FCM اتجاب ✅ (' + t.slice(0, 12) + '…)' : 'توكن FCM فشل: ' + (state.lastErr || 'غير معروف'));
+      });
+    });
+    step(function () {
+      return NourNotif.idbGet('ctx').then(function (c) {
+        if (!c) { say(false, 'مفيش سياق ورد محلي — افتح الورد وسجّل دخول بحسابك وجرّب تاني'); return; }
+        if (!state.token) { say(false, 'مفيش توكن فمش هنكتب في Firebase'); return; }
+        window._fbPushErr = '';
+        var now = Date.now();
+        return Promise.resolve(window.fbSavePush(deviceId(), { token: state.token, ctx: slim(c), tz: tz(), openAt: now, updated: now })).then(function (ok) {
+          say(ok !== false, ok !== false ? 'الجهاز اتسجّل في Firebase (pushDevices) ✅' : 'التسجيل في Firebase فشل: ' + (window._fbPushErr || 'غير معروف') + (/PERMISSION/i.test(window._fbPushErr || '') ? ' — القواعد (Rules) مش منشورة بـ Publish' : ''));
+        });
+      });
+    });
+    step(function () {
+      var url = window.NOUR_PUSH_URL;
+      if (!url) { say(null, 'رابط الـ Worker (NOUR_PUSH_URL) مش متحدد'); return; }
+      return fetch(url.replace(/\/$/, '') + '/self-test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ device: deviceId() }) })
+        .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { st: r.status, j: j }; }); })
+        .then(function (o) {
+          if (o.j && o.j.ok) say(true, 'السيرفر بعت إشعار تجريبي — لازم يظهر دلوقتي 🔔 (لو التطبيق مفتوح قدامك ممكن ما يظهرش، اقفله وجرّب تاني)');
+          else say(false, 'السيرفر ردّ بخطأ: ' + ((o.j && (o.j.error || o.j.msg)) || o.st));
+        }, function (e) { say(false, 'مقدرتش أوصل للـ Worker: ' + (e && e.message)); });
+    });
+    return steps;
+  }
+
   // فتح التطبيق = تفاعل (السيرفر بيستخدمه في كبح الإشعارات المتجاهَلة)
   document.addEventListener('visibilitychange', function () {
     if (document.hidden) return;
     NourNotif.idbGet('ctx').then(function (c) { if (c) sync(c, true); }).catch(function () {});
   });
 
-  window.NourPush = { sync: sync, getToken: getToken, supported: supported, deviceId: deviceId };
+  window.NourPush = { diagnose: diagnose, sync: sync, getToken: getToken, supported: supported, deviceId: deviceId };
 })();

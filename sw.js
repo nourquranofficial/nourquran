@@ -1,5 +1,5 @@
 // ★ غيّر الرقم عند كل تحديث جديد
-const CACHE = 'nour-v21';
+const CACHE = 'nour-v22';
 // ★ المسار الأساسي بيتحدد من مكان تسجيل الـ SW نفسه (يشتغل على /nourquran/ أو أي مسار تاني من غير تعديل)
 const BASE = (function () { try { return new URL(self.registration.scope).pathname; } catch (e) { return '/nourquran/'; } })();
 const PRECACHE = [BASE, BASE + 'index.html', BASE + 'notif-logic.js', BASE + 'push.js', BASE + 'wird.js', BASE + 'nour-stt.js?v=113', BASE + 'quran-local.js?v=113', BASE + 'widget.html', BASE + 'manifest-widget.json', BASE + 'leitner.js', BASE + 'report.js', BASE + 'a11y.js', BASE + 'ux.js', BASE + 'meaning.js', BASE + 'changelog.js', BASE + 'manifest.json', BASE + 'icon-192.png', BASE + 'icon-512.png'];
@@ -82,7 +82,8 @@ self.addEventListener('push', e => {
   e.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
       // التطبيق مفتوح قدّام المستخدم دلوقتي → مفيش داعي لإشعار
-      if (list.some(c => c.visibilityState === 'visible' && c.focused)) return;
+      // (الإشعار التجريبي من زرار الفحص بيظهر دايمًا حتى والتطبيق مفتوح)
+      if (d.tag !== 'nour_test' && list.some(c => c.visibilityState === 'visible' && c.focused)) return;
       return self.registration.showNotification(title, {
         body, tag: d.tag || 'nour', dir: 'rtl', lang: 'ar', renotify: false,
         icon: BASE + 'icon-192.png', badge: BASE + 'icon-192.png',
