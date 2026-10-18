@@ -13,6 +13,70 @@
   function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
   function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
 
+  // ───────── ★ v127: تطبيق أندرويد أصلي (Capacitor) — إشعارات FCM الأصلية بدل Web Push ─────────
+  //   جوه APK بيتحمّل نفس الموقع، وبيوفّر Capacitor.Plugins.PushNotifications. هنا بنعمل Notification «بديل» (polyfill)
+  //   عشان wird.js يفضل شغّال زي ما هو (permission / requestPermission)، والتوكن بيتسجّل في نفس pushDevices.
+  var nat = { perm: 'default', inited: false, regResolve: null };
+  function native() { try { return !!(window.Capacitor && typeof Capacitor.isNativePlatform === 'function' && Capacitor.isNativePlatform()); } catch (e) { return false; } }
+  function PN() { try { return (window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.PushNotifications) || null; } catch (e) { return null; } }
+  function mapPerm(v) { return v === 'granted' ? 'granted' : (v === 'denied' ? 'denied' : 'default'); }
+  function errTxt(e) { return (e && (e.message || e.error || e.code)) || (typeof e === 'string' ? e : JSON.stringify(e || {})); }
+
+  function nativeInit() {
+    if (nat.inited) return; nat.inited = true;
+    var P = PN(); if (!P) return;
+    try { P.createChannel({ id: 'nour', name: 'تذكير الورد', description: 'تذكير يومي بوردك وسلسلتك', importance: 4, visibility: 1, vibration: true }); } catch (e) {}
+    P.addListener('registration', function (t) {
+      var v = t && t.value; if (!v) return;
+      state.token = v;
+      if (nat.regResolve) { nat.regResolve(v); nat.regResolve = null; return; }
+      // تجديد توكن من النظام → نسجّله تاني
+      try { NourNotif.idbGet('ctx').then(function (c) { if (c) sync(c, true); }); } catch (e) {}
+    });
+    P.addListener('registrationError', function (e) { state.lastErr = errTxt(e); if (nat.regResolve) { nat.regResolve(null); nat.regResolve = null; } });
+    // الضغط على الإشعار → افتح المكان المناسب
+    P.addListener('pushNotificationActionPerformed', function (a) {
+      var d = (a && a.notification && a.notification.data) || {};
+      setTimeout(function () { try { if (window.NourWird && NourWird.deeplink) NourWird.deeplink(d); } catch (e) {} }, 800);
+    });
+    // والتطبيق مفتوح قدامك مفيش داعي لإشعار (pushNotificationReceived بيتجاهل)
+    P.checkPermissions().then(function (r) {
+      nat.perm = mapPerm(r && r.receive);
+      try { if (window.NourWird) NourWird.render(); } catch (e) {}
+      if (nat.perm === 'granted') { try { P.register(); } catch (e) {} }   // بيجدّد التوكن كل تشغيل
+    }).catch(function () {});
+  }
+
+  if (native()) {
+    // بديل Notification: الـ WebView ما بيدعمهاش، فبنوصّل wird.js بإذن النظام الأصلي
+    var NotifPoly = function () {};
+    Object.defineProperty(NotifPoly, 'permission', { get: function () { return nat.perm; } });
+    NotifPoly.requestPermission = function (cb) {
+      var P = PN();
+      var p = P ? P.requestPermissions().then(function (r) { nat.perm = mapPerm(r && r.receive); return nat.perm; }) : Promise.resolve('denied');
+      if (typeof cb === 'function') p.then(cb);
+      return p;
+    };
+    try { window.Notification = NotifPoly; } catch (e) {}
+    nativeInit();
+  }
+
+  function getNativeToken() {
+    var P = PN();
+    if (!P) { state.lastErr = 'مفيش PushNotifications plugin (تأكد إنك فاتح من APK نور)'; return Promise.resolve(null); }
+    nativeInit();
+    return P.checkPermissions().then(function (r) { return (r && r.receive === 'granted') ? r : P.requestPermissions(); }).then(function (r) {
+      nat.perm = mapPerm(r && r.receive);
+      if (nat.perm !== 'granted') { state.lastErr = 'الإذن: ' + (r && r.receive); return null; }
+      return new Promise(function (resolve) {
+        var t = setTimeout(function () { nat.regResolve = null; resolve(null); }, 12000);
+        nat.regResolve = function (v) { clearTimeout(t); resolve(v); };
+        P.register().catch(function (e) { clearTimeout(t); nat.regResolve = null; state.lastErr = errTxt(e); resolve(null); });
+      });
+    }).then(function (t) { state.token = t || state.token; if (!t && !state.lastErr) state.lastErr = 'التوكن ما رجعش في ١٢ ثانية (تأكد من google-services.json)'; return state.token; })
+      .catch(function (e) { state.lastErr = errTxt(e); return null; });
+  }
+
   // معرّف ثابت للجهاز/المتصفح ده (مش بيتغيّر لو المستخدم بدّل الحساب — السياق هو اللي بيتحدّث)
   function deviceId() {
     var id = lsGet('nour_push_dev');
@@ -25,6 +89,7 @@
   }
 
   function supported() {
+    if (native()) return !!PN() && typeof window.fbSavePush === 'function' && !!window._fbApp;
     return ('Notification' in window) && ('serviceWorker' in navigator) && ('PushManager' in window) &&
            !!window.NOUR_VAPID_KEY && typeof window.fbSavePush === 'function' && !!window._fbApp;
   }
@@ -33,6 +98,7 @@
 
   // بيجيب توكن FCM (بيطلب الإذن لو لسه، لكن enableReminders بيكون طلبه بالفعل)
   function getToken() {
+    if (native()) return state.token ? Promise.resolve(state.token) : getNativeToken();
     if (state.token) return Promise.resolve(state.token);
     if (!supported() || Notification.permission !== 'granted') return Promise.resolve(null);
     var base = 'https://www.gstatic.com/firebasejs/' + FCM_VER + '/firebase-messaging.js';
@@ -66,7 +132,7 @@
       // مفعّل → لازم توكن. مقفول → بنكتب السياق (enabled:false) من غير توكن عشان السيرفر يبطّل يبعت.
       (on ? getToken() : Promise.resolve(null)).then(function (token) {
         if (on && !token) { state.busy = false; return; }
-        var rec = { ctx: slim(ctx), tz: tz(), openAt: now, updated: now };
+        var rec = { ctx: slim(ctx), tz: tz(), openAt: now, updated: now, platform: native() ? 'android' : 'web' };
         if (token) rec.token = token;
         return Promise.resolve(window.fbSavePush(deviceId(), rec)).then(function (ok) {
           state.busy = false;
@@ -95,18 +161,20 @@
   function diagnose(say) {
     var steps = Promise.resolve();
     function step(fn) { steps = steps.then(fn).catch(function (e) { say(false, 'خطأ غير متوقع: ' + ((e && (e.code || e.message)) || e)); }); }
-    step(function () { say(null, 'نسخة التطبيق: ' + (window.NOUR_VERSION || '؟')); });
+    var NAT = native();
+    step(function () { say(null, 'نسخة التطبيق: ' + (window.NOUR_VERSION || '؟') + (NAT ? ' — تطبيق أندرويد أصلي' : ' — متصفح')); });
     step(function () {
       say('Notification' in window, 'المتصفح بيدعم الإشعارات');
-      say('serviceWorker' in navigator, 'Service Worker مدعوم');
-      say('PushManager' in window, 'Push مدعوم' + (('PushManager' in window) ? '' : ' (على الآيفون لازم التطبيق يكون مثبّت على الشاشة الرئيسية)'));
-      say(!!window.NOUR_VAPID_KEY, 'مفتاح VAPID موجود');
+      say(NAT || ('serviceWorker' in navigator), 'Service Worker مدعوم');
+      say(NAT || ('PushManager' in window), 'Push مدعوم' + ((NAT || ('PushManager' in window)) ? '' : ' (على الآيفون لازم التطبيق يكون مثبّت على الشاشة الرئيسية)'));
+      say(NAT || !!window.NOUR_VAPID_KEY, NAT ? 'FCM الأصلي (مش محتاج VAPID)' : 'مفتاح VAPID موجود');
       say(!!window._fbApp && typeof window.fbSavePush === 'function', 'Firebase جاهز');
       var u = window._firebaseAuth && window._firebaseAuth.currentUser;
       say(!!u, 'تسجيل الدخول في Firebase' + (u ? (u.isAnonymous ? ' (مجهول)' : '') : ' — لسه ما اتسجّلش، استنى ثواني وجرّب تاني'));
       say(window.Notification && Notification.permission === 'granted', 'إذن الإشعارات: ' + (window.Notification ? Notification.permission : '؟') + (window.Notification && Notification.permission !== 'granted' ? ' — فعّله من إعدادات الجهاز/المتصفح' : ''));
     });
     step(function () {
+      if (NAT) { say(null, 'Service Worker مش مطلوب في تطبيق الأندرويد'); return; }
       return Promise.race([navigator.serviceWorker.ready, new Promise(function (r) { setTimeout(function () { r(null); }, 6000); })]).then(function (reg) {
         say(!!reg, 'Service Worker شغّال' + (reg ? ' (' + (reg.scope || '') + ')' : ' — ما جهّزش في ٦ ثواني'));
       });
@@ -124,7 +192,7 @@
         if (!state.token) { say(false, 'مفيش توكن فمش هنكتب في Firebase'); return; }
         window._fbPushErr = '';
         var now = Date.now();
-        return Promise.resolve(window.fbSavePush(deviceId(), { token: state.token, ctx: slim(c), tz: tz(), openAt: now, updated: now })).then(function (ok) {
+        return Promise.resolve(window.fbSavePush(deviceId(), { token: state.token, ctx: slim(c), tz: tz(), openAt: now, updated: now, platform: native() ? 'android' : 'web' })).then(function (ok) {
           say(ok !== false, ok !== false ? 'الجهاز اتسجّل في Firebase (pushDevices) ✅' : 'التسجيل في Firebase فشل: ' + (window._fbPushErr || 'غير معروف') + (/PERMISSION/i.test(window._fbPushErr || '') ? ' — القواعد (Rules) مش منشورة بـ Publish' : ''));
         });
       });

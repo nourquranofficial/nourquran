@@ -1,5 +1,5 @@
 // ★ غيّر الرقم عند كل تحديث جديد
-const CACHE = 'nour-v22';
+const CACHE = 'nour-v23';
 // ★ المسار الأساسي بيتحدد من مكان تسجيل الـ SW نفسه (يشتغل على /nourquran/ أو أي مسار تاني من غير تعديل)
 const BASE = (function () { try { return new URL(self.registration.scope).pathname; } catch (e) { return '/nourquran/'; } })();
 const PRECACHE = [BASE, BASE + 'index.html', BASE + 'notif-logic.js', BASE + 'push.js', BASE + 'wird.js', BASE + 'nour-stt.js?v=113', BASE + 'quran-local.js?v=113', BASE + 'widget.html', BASE + 'manifest-widget.json', BASE + 'leitner.js', BASE + 'report.js', BASE + 'a11y.js', BASE + 'ux.js', BASE + 'meaning.js', BASE + 'changelog.js', BASE + 'manifest.json', BASE + 'icon-192.png', BASE + 'icon-512.png'];

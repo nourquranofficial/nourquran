@@ -394,17 +394,25 @@ async function dbMultiUpdate(env, token, updates) {
   if (!res.ok) throw new Error('DB write ' + res.status);
 }
 
-async function sendFcm(sa, token, deviceToken, n, base) {
+async function sendFcm(sa, token, deviceToken, n, base, platform) {
   const data = { title: n.title, body: n.body, tag: n.tag || 'nour' };
   if (n.data) { if (n.data.deeplink) data.deeplink = n.data.deeplink; if (n.data.surah) data.surah = n.data.surah; }
   const res = await fetch('https://fcm.googleapis.com/v1/projects/' + sa.project_id + '/messages:send', {
     method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      message: {
-        token: deviceToken,
-        data,   // data-only: الـ SW (sw.js → push) هو اللي بيعرض الإشعار بنفس شكل الإشعار المحلي
-        webpush: { headers: { Urgency: 'normal', TTL: '21600' }, fcm_options: { link: base } },
-      },
+      message: platform === 'android'
+        ? {
+            // تطبيق أندرويد أصلي: لازم notification block عشان النظام يعرضه والتطبيق مقفول (رسائل data بس ما بتظهرش لوحدها)
+            token: deviceToken,
+            notification: { title: n.title, body: n.body },
+            data,
+            android: { priority: 'HIGH', ttl: '21600s', notification: { channel_id: 'nour', icon: 'ic_stat_nour', color: '#C9973A', tag: n.tag || 'nour' } },
+          }
+        : {
+            token: deviceToken,
+            data,   // ويب: الـ SW (sw.js → push) هو اللي بيعرض الإشعار بنفس شكل الإشعار المحلي
+            webpush: { headers: { Urgency: 'normal', TTL: '21600' }, fcm_options: { link: base } },
+          },
     }),
   });
   if (res.ok) return { ok: true };
@@ -443,7 +451,7 @@ async function run(env, opts) {
     if (stats.sent >= MAX_SENDS) { stats.deferred++; continue; }
     if (opts.dry) { stats.sent++; continue; }
 
-    const r = await sendFcm(sa, token, d.token, ev.n, base);
+    const r = await sendFcm(sa, token, d.token, ev.n, base, d.platform);
     if (r.ok) {
       stats.sent++;
       const keep = (Array.isArray(srv.sentLog) ? srv.sentLog : []).filter((t) => nowMs - t < 7 * 86400000); keep.push(nowMs);
@@ -465,7 +473,7 @@ async function testPush(env, deviceId) {
   const out = [];
   for (const id of Object.keys(devices).filter((k) => !deviceId || k === deviceId).slice(0, 20)) {
     const d = devices[id]; if (!d || !d.token) continue;
-    const r = await sendFcm(sa, token, d.token, { tag: 'nour_test', title: '🔔 اختبار إشعارات نور', body: 'لو شايف الرسالة دي يبقى الإشعار من السيرفر شغّال ✅', data: { deeplink: 'home' } }, env.SITE_BASE || '/nourquran/');
+    const r = await sendFcm(sa, token, d.token, { tag: 'nour_test', title: '🔔 اختبار إشعارات نور', body: 'لو شايف الرسالة دي يبقى الإشعار من السيرفر شغّال ✅', data: { deeplink: 'home' } }, env.SITE_BASE || '/nourquran/', d.platform);
     out.push({ id, ok: r.ok, status: r.status, msg: r.msg });
     if (r.dead) await dbMultiUpdate(env, token, { ['pushDevices/' + id]: null });
   }
@@ -488,7 +496,7 @@ async function selfTest(env, req) {
   if (!d || !d.token) return out({ error: 'الجهاز مش مسجّل في pushDevices (التسجيل لسه ما تمّش)' }, 404);
   const now = Date.now();
   if (d.srv && d.srv.lastTestAt && now - d.srv.lastTestAt < 20000) return out({ error: 'استنى ٢٠ ثانية بين كل تجربة' }, 429);
-  const r = await sendFcm(sa, token, d.token, { tag: 'nour_test', title: '🔔 اختبار إشعارات نور', body: 'لو شايف الرسالة دي يبقى الإشعار من السيرفر شغّال ✅', data: { deeplink: 'home' } }, env.SITE_BASE || '/nourquran/');
+  const r = await sendFcm(sa, token, d.token, { tag: 'nour_test', title: '🔔 اختبار إشعارات نور', body: 'لو شايف الرسالة دي يبقى الإشعار من السيرفر شغّال ✅', data: { deeplink: 'home' } }, env.SITE_BASE || '/nourquran/', d.platform);
   await dbMultiUpdate(env, token, r.dead ? { ['pushDevices/' + id]: null } : { ['pushDevices/' + id + '/srv/lastTestAt']: now });
   return out(r.ok ? { ok: true } : { ok: false, error: 'FCM ' + r.status + ' ' + (r.msg || ''), dead: !!r.dead }, r.ok ? 200 : 502);
 }

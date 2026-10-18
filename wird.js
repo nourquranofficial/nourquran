@@ -584,7 +584,7 @@
   }
 
   // ---------- تشغيل ----------
-  window.NourWird = { onAnswer: onAnswer, render: function () { renderCard(); syncCtx(); ensurePulled(); }, share: share, sync: sync };
+  window.NourWird = { deeplink: handleDeeplink, onAnswer: onAnswer, render: function () { renderCard(); syncCtx(); ensurePulled(); }, share: share, sync: sync };
 
   function init() {
     renderCard(); syncCtx(); ensurePulled(); coldStartDeeplink();

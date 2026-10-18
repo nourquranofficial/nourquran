@@ -1,0 +1,23 @@
+{
+  "appId": "com.nourquran.app",
+  "appName": "نور",
+  "webDir": "www",
+  "backgroundColor": "#1A1208",
+  "server": {
+    "url": "https://nourquranofficial.github.io/nourquran/",
+    "androidScheme": "https",
+    "allowNavigation": [
+      "nourquranofficial.github.io",
+      "*.firebaseapp.com",
+      "*.googleapis.com",
+      "*.gstatic.com",
+      "accounts.google.com",
+      "*.everyayah.com"
+    ]
+  },
+  "plugins": {
+    "PushNotifications": {
+      "presentationOptions": ["badge", "sound", "alert"]
+    }
+  }
+}

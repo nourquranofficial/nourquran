@@ -1,0 +1,12 @@
+{
+  "name": "nour-android",
+  "version": "1.0.0",
+  "private": true,
+  "description": "غلاف Capacitor لتطبيق نور — بيفتح الموقع الحي ويضيف إشعارات أندرويد أصلية",
+  "dependencies": {
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/cli": "^8.5.0",
+    "@capacitor/core": "^8.5.0",
+    "@capacitor/push-notifications": "^8.1.0"
+  }
+}
