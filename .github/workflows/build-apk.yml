@@ -1,3 +1,4 @@
+
 name: Build Android APK
  
 on:
@@ -10,6 +11,10 @@ on:
  
 permissions:
   contents: write
+ 
+env:
+  PLAY_APP_ID: io.github.nourquranofficial.twa
+  KS_ALIAS_REAL: nour-key
  
 jobs:
   build:
@@ -40,26 +45,43 @@ jobs:
           pip install pillow
           python3 scripts/prepare.py
  
+      - name: Apply Play Store identity (package name + version)
+        run: |
+          set -e
+          VC=$((100 + GITHUB_RUN_NUMBER))
+          echo "VERSION_CODE=$VC" >> "$GITHUB_ENV"
+          GRADLE=android/app/build.gradle
+          sed -i -E "s/applicationId +\"[^\"]*\"/applicationId \"$PLAY_APP_ID\"/" "$GRADLE"
+          sed -i -E "s/versionCode +[0-9]+/versionCode $VC/" "$GRADLE"
+          sed -i -E "s/versionName +\"[^\"]*\"/versionName \"2.0.$VC\"/" "$GRADLE"
+          if [ -f android/app/google-services.json ]; then
+            sed -i -E "s/\"package_name\": *\"[^\"]*\"/\"package_name\": \"$PLAY_APP_ID\"/" android/app/google-services.json
+          fi
+          echo "---- build.gradle identity ----"
+          grep -n -E "applicationId|versionCode|versionName|namespace" "$GRADLE"
+ 
       - name: Sync Capacitor
         run: npx cap sync android
  
-      - name: Build release APK
+      - name: Build release APK and AAB
         working-directory: android-app/android
         run: |
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon --stacktrace
+          ./gradlew assembleRelease bundleRelease --no-daemon --stacktrace
  
-      - name: Sign APK
+      - name: Sign APK and AAB
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
           KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: |
           set -e
           UNSIGNED=$(find android/app/build/outputs/apk/release -name '*.apk' | head -1)
-          echo "built: $UNSIGNED"
+          AAB=$(find android/app/build/outputs/bundle/release -name '*.aab' | head -1)
+          echo "built apk: $UNSIGNED"
+          echo "built aab: $AAB"
           if [ -n "$KEYSTORE_B64" ] && [ -n "$KS_PASS" ]; then
             echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/nour.p12"
-            KS_ALIAS="nour-key"
+            KS_ALIAS="$KS_ALIAS_REAL"
           else
             echo "::warning::مفيش ANDROID_KEYSTORE_B64 / ANDROID_KEYSTORE_PASSWORD في Secrets — هنوقّع بمفتاح مؤقت. الـ APK هيشتغل بس مش هينفع تحدّث فوق نسخة سابقة (لازم تمسح القديمة)."
             KS_PASS="temp-$(date +%s)"
@@ -70,20 +92,26 @@ jobs:
           BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           "$BT/zipalign" -p -f 4 "$UNSIGNED" "$RUNNER_TEMP/aligned.apk"
           "$BT/apksigner" sign --ks "$RUNNER_TEMP/nour.p12" --ks-key-alias "$KS_ALIAS" --ks-pass env:KS_PASS --key-pass env:KS_PASS --out nour.apk "$RUNNER_TEMP/aligned.apk"
+          jarsigner -keystore "$RUNNER_TEMP/nour.p12" -storepass:env KS_PASS -keypass:env KS_PASS -signedjar nour.aab "$AAB" "$KS_ALIAS"
+          echo "---- APK signer ----"
           "$BT/apksigner" verify --print-certs nour.apk | head -3
-          ls -la nour.apk
+          echo "---- APK identity ----"
+          "$BT/aapt2" dump badging nour.apk | head -1
+          ls -la nour.apk nour.aab
  
       - uses: actions/upload-artifact@v4
         with:
-          name: nour-apk
-          path: android-app/nour.apk
+          name: nour-android
+          path: |
+            android-app/nour.apk
+            android-app/nour.aab
  
       - name: Publish to Releases
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete android-latest --yes --cleanup-tag || true
-          gh release create android-latest nour.apk \
+          gh release create android-latest nour.apk nour.aab \
             --title "نور — تطبيق أندرويد" \
-            --notes "آخر نسخة من تطبيق نور للأندرويد. نزّل nour.apk وثبّته (اسمح بالتثبيت من مصادر غير معروفة لو طلب). التطبيق بيفتح الموقع الحي فبيتحدّث لوحده مع كل رفع."
+            --notes "آخر نسخة من تطبيق نور للأندرويد. nour.apk للتثبيت المباشر على التليفون، و nour.aab للرفع على Google Play Console. التطبيق بيفتح الموقع الحي فبيتحدّث لوحده مع كل رفع."
  
